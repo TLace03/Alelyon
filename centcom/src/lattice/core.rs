@@ -97,6 +97,8 @@ pub struct Services {
     pub runs: Arc<dyn RunService>,
     pub attention: Arc<Attention>,
     pub state: StateRoot,
+    /// The editor's Tab completions.
+    pub complete: Arc<lattice_core::complete::Completer>,
     /// The dialogs the core asks for, read by the page's subscription (shared, so a subscription made again reads on
     /// from where the last one stopped).
     asks: Arc<AsyncMutex<mpsc::UnboundedReceiver<Ask>>>,
@@ -124,6 +126,9 @@ impl Services {
         let config = RuntimeConfig::new(env.clone(), &state)
             .map_err(|e| format!("the local model server's client could not be made: {e:?}"))?;
         let local: Arc<dyn ManagedRuntime> = Arc::new(LlamaRuntime::new(config, runtime.handle().clone()));
+        let wire = lattice_core::complete::Net::new().map_err(|e| format!("Tab completions could not start: {e}"))?;
+        let complete =
+            Arc::new(lattice_core::complete::Completer::new(env.clone(), state.clone(), local.clone(), Arc::new(wire)));
         let (tx, rx) = mpsc::unbounded();
         let attention = Arc::new(Attention::default());
         let chat_config =
@@ -133,7 +138,7 @@ impl Services {
             let _entered = runtime.enter();
             Arc::new(CoreService::new(CoreConfig::from_process(false)))
         };
-        Ok(Services { chat, runs, attention, state, asks: Arc::new(AsyncMutex::new(rx)), runtime: Some(runtime) })
+        Ok(Services { chat, runs, attention, state, complete, asks: Arc::new(AsyncMutex::new(rx)), runtime: Some(runtime) })
     }
 
     /// The services' own runtime: every chat call runs on it.

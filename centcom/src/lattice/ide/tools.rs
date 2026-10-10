@@ -49,7 +49,7 @@ pub const BUILT_IN: [(&str, &str, &str); 6] = [
 ];
 
 /// What the Plugins section says.
-pub const PLUGINS_ABOUT: &str = "A plugin is a folder in Claude Code's plugin layout (a .claude-plugin/plugin.json beside its commands, skills, agents, hooks and MCP servers). Add one from its folder: while it is on, its commands (/plugin:name) and skills join yours in every chat. Its MCP servers are only listed until you copy them into your settings, where each asks before it first starts. Its agents are not used, and its hooks never run.";
+pub const PLUGINS_ABOUT: &str = "A plugin is a folder in Claude Code's plugin layout (a .claude-plugin/plugin.json beside its commands, skills, agents, hooks and MCP servers). Add one from its folder: while it is on, its commands (/plugin:name) and skills join yours in every chat. Its MCP servers are only listed until you copy them into your settings, where each asks before it first starts. Its agents are not used. Its hooks run as yours do (see Hooks), each asking once.";
 
 /// What a plugin brings, in a line.
 pub fn plugin_parts(view: &lattice_core::plugins::PluginView) -> String {
@@ -65,7 +65,7 @@ pub fn plugin_parts(view: &lattice_core::plugins::PluginView) -> String {
         parts.push(format!("{} (not used)", count(view.agents.len(), "agent", "agents")));
     }
     if view.hooks {
-        parts.push("hooks (never run)".to_string());
+        parts.push("hooks".to_string());
     }
     parts.join(" \u{00B7} ")
 }
@@ -147,6 +147,38 @@ pub struct Tools {
     pub checking: Option<lattice_core::acp::Agent>,
     /// The open folder (its id) and the agent's notes about it; `None` before they are read.
     pub memory: Option<(Option<String>, Vec<lattice_core::convo::memory::Note>)>,
+    /// The reader's hooks, each with its allowance, and what could not be used; `None` before they are read.
+    pub hooks: Option<(Vec<HookRow>, Vec<String>)>,
+}
+
+/// A hook as the Hooks card shows it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HookRow {
+    pub source: String,
+    pub event: String,
+    pub matcher: String,
+    pub command: String,
+    pub digest: String,
+    pub allowed: bool,
+}
+
+/// The rows and problems of what the core found.
+pub fn hook_rows(found: &lattice_core::hooks::Found, allowed: &[bool]) -> (Vec<HookRow>, Vec<String>) {
+    let rows = found
+        .hooks
+        .iter()
+        .zip(allowed.iter().copied().chain(std::iter::repeat(false)))
+        .map(|(hook, allowed)| HookRow {
+            source: hook.source.label(),
+            event: format!("{} ({})", hook.native, hook.event.label()),
+            matcher: hook.matcher.text(),
+            command: hook.command.clone(),
+            digest: hook.digest(),
+            allowed,
+        })
+        .collect();
+    let problems = found.problems.iter().map(|p| format!("{}: {}", p.file.display(), p.sentence)).collect();
+    (rows, problems)
 }
 
 /// What the page asks.
@@ -210,6 +242,11 @@ pub enum ToolsMsg {
     CloseModels,
     // What the agent remembers about the open folder.
     MemoryRead(Option<String>, Vec<lattice_core::convo::memory::Note>),
+    // The reader's hooks.
+    HooksRead(Vec<HookRow>, Vec<String>),
+    /// Take back a hook's allowance (by its digest).
+    RevokeHook(String),
+    HookRevoked(Result<bool, String>),
     Forget(String, String),
     Forgot(Result<bool, String>),
     AgentInstall(lattice_core::acp::Agent),
@@ -518,6 +555,21 @@ impl State {
             }
             ToolsMsg::CloseModels => self.ide.tools.choosing = None,
             ToolsMsg::MemoryRead(workspace, notes) => self.ide.tools.memory = Some((workspace, notes)),
+            ToolsMsg::HooksRead(rows, problems) => self.ide.tools.hooks = Some((rows, problems)),
+            ToolsMsg::RevokeHook(digest) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                return Task::perform(on(&services, async move { chat.revoke_hook(&digest) }), |r| {
+                    go(ToolsMsg::HookRevoked(r.unwrap_or_else(|| Err(STOPPED.to_string()))))
+                });
+            }
+            ToolsMsg::HookRevoked(result) => {
+                match result {
+                    Ok(_) => self.ide.tools.said = Some(("Taken back: that hook asks again before it next runs.".to_string(), false)),
+                    Err(why) => self.ide.tools.said = Some((why, true)),
+                }
+                return self.read_browser();
+            }
             ToolsMsg::Forget(workspace, id) => {
                 let Some(services) = self.services.clone() else { return Task::none() };
                 let chat = services.chat.clone();
@@ -776,7 +828,21 @@ impl State {
                 go(ToolsMsg::MemoryRead(workspace, notes))
             },
         );
-        Task::batch([browser, auto, agents, models, memory])
+        let chat = services.chat.clone();
+        let folder = self.chat_workspace();
+        let hooks = Task::perform(
+            on(&services, async move {
+                tokio::task::spawn_blocking(move || chat.hooks(folder.as_deref())).await.ok()
+            }),
+            |read| {
+                let (rows, problems) = match read.flatten() {
+                    Some((found, allowed)) => hook_rows(&found, &allowed),
+                    None => (Vec::new(), vec![STOPPED.to_string()]),
+                };
+                go(ToolsMsg::HooksRead(rows, problems))
+            },
+        );
+        Task::batch([browser, auto, agents, models, memory, hooks])
     }
 
     /// Run one action on the plugins, the section busy until it ends.
@@ -821,9 +887,13 @@ impl State {
         let Some(services) = self.services.clone() else { return Task::none() };
         self.ide.side = super::Side::Tools;
         self.ide.side_open = true;
-        // `CENTCOM_LATTICE_TOOLS=connections` photographs the Connections page.
+        // `CENTCOM_LATTICE_TOOLS=connections` photographs the Connections page; `=completions`, the Tools page with
+        // the completion models listed.
         let open = if std::env::var("CENTCOM_LATTICE_TOOLS").is_ok_and(|v| v == "connections") {
             self.tools(ToolsMsg::OpenConnections)
+        } else if std::env::var("CENTCOM_LATTICE_TOOLS").is_ok_and(|v| v == "completions") {
+            let open = self.tools(ToolsMsg::Open(None));
+            Task::batch([open, self.complete(super::complete::CompleteMsg::ShowModels)])
         } else {
             self.tools(ToolsMsg::Open(None))
         };
@@ -1059,8 +1129,10 @@ pub fn page<'a>(state: &'a State, phase: f32) -> El<'a> {
         ))
         .padding([2.0, 0.0]),
     );
+    col = col.push(super::complete::card(state));
     col = col.push(agents_card(t));
     col = col.push(memory_card(t));
+    col = col.push(hooks_card(state));
     col = col.push(browser_card(t));
     col = col.push(auto_card(t));
     // The servers.
@@ -1255,6 +1327,53 @@ fn memory_card<'a>(t: &'a Tools) -> El<'a> {
                         .push(container(label(kept.text.as_str(), 12.5, theme::TEXT)).width(Length::Fill))
                         .push(small("Forget", Some(go(ToolsMsg::Forget(workspace.clone(), kept.id.clone()))))),
                 );
+            }
+        }
+    }
+    container(col).padding([12.0, 14.0]).width(Length::Fill).style(theme::card).into()
+}
+
+/// What the Hooks card says under its title.
+const HOOKS_ABOUT: &str = "Commands you set to run when Lattice's agent does something: before a tool runs (they can stop it or change its arguments), after it ran, when you send a message, when it stops, and when a chat starts. Lattice reads yours (below), your plugins', Claude Code's, Cursor's, Gemini CLI's and Antigravity's, and a trusted folder's own. Each asks you once, showing its exact command; any change asks again.";
+
+/// The reader's hooks: each with where it is from, its event, which tools, its command, and its allowance.
+fn hooks_card<'a>(state: &'a State) -> El<'a> {
+    let t = &state.ide.tools;
+    let mut col = Column::new().spacing(8).push(strong("Hooks", 14.0, theme::TEXT)).push(label(HOOKS_ABOUT, 12.0, theme::TEXT_DIM));
+    if let Some(services) = &state.services {
+        let yours = lattice_core::hooks::sources::lattice_file(&services.state);
+        col = col.push(label(format!("Yours: {} (Claude Code's format)", yours.display()), 11.5, theme::TEXT_FAINT));
+    }
+    match &t.hooks {
+        None => col = col.push(note("Not read yet.")),
+        Some((rows, problems)) => {
+            if rows.is_empty() {
+                col = col.push(note("None found."));
+            }
+            for row in rows {
+                let mut words = Column::new()
+                    .spacing(1)
+                    .push(label(format!("{} \u{00B7} {}", row.source, row.event), 12.0, theme::TEXT))
+                    .push(mono(row.command.as_str(), 11.5, theme::GOLD));
+                if row.matcher != "*" {
+                    words = words.push(label(format!("For tools: {}", row.matcher), 11.0, theme::TEXT_FAINT));
+                }
+                let action: El<'a> = if row.allowed {
+                    small("Take back", Some(go(ToolsMsg::RevokeHook(row.digest.clone()))))
+                } else {
+                    label("asks before it first runs", 11.5, theme::TEXT_FAINT).into()
+                };
+                col = col.push(
+                    Row::new()
+                        .spacing(10)
+                        .align_y(Alignment::Center)
+                        .push(ui::dot(if row.allowed { theme::POSITIVE } else { theme::TEXT_FAINT }))
+                        .push(container(words).width(Length::Fill))
+                        .push(action),
+                );
+            }
+            for problem in problems {
+                col = col.push(label(problem.as_str(), 11.5, theme::CAUTION));
             }
         }
     }
@@ -1673,8 +1792,8 @@ mod tests {
         assert_eq!(mcp_config::pasted(&filled, "x").unwrap()[0].0, "x");
     }
 
-    /// A plugin's line counts its commands and skills, names its MCP servers, and says its agents are not used and
-    /// its hooks never run.
+    /// A plugin's line counts its commands and skills, names its MCP servers, says its agents are not used, and
+    /// that it has hooks.
     #[test]
     fn a_plugins_line_counts_what_it_brings_and_names_what_is_not_used() {
         use lattice_core::plugins::PluginView;
@@ -1688,8 +1807,43 @@ mod tests {
         let full = PluginView { agents: vec!["reviewer".into()], hooks: true, mcp_servers: vec!["evidence".into()], ..view };
         assert_eq!(
             plugin_parts(&full),
-            "1 command \u{00B7} 2 skills \u{00B7} MCP: evidence \u{00B7} 1 agent (not used) \u{00B7} hooks (never run)"
+            "1 command \u{00B7} 2 skills \u{00B7} MCP: evidence \u{00B7} 1 agent (not used) \u{00B7} hooks"
         );
+    }
+
+    /// The Hooks card's rows: where each hook is from, its event, its tools and command, and its allowance; what
+    /// could not be used is listed; taking one back is said.
+    #[test]
+    fn the_hooks_card_shows_each_hook_and_its_allowance() {
+        use lattice_core::hooks::{Event, Family, Found, Hook, Matcher, Problem, Source};
+        let hook = |command: &str, matcher: Matcher| Hook {
+            source: Source::ClaudeCode,
+            family: Family::Claude,
+            event: Event::PreToolUse,
+            native: "PreToolUse".into(),
+            matcher,
+            command: command.into(),
+            timeout: std::time::Duration::from_secs(60),
+            file: "C:/home/.claude/settings.json".into(),
+            plugin_root: None,
+        };
+        let found = Found {
+            hooks: vec![hook("check.sh", Matcher::pattern("Bash").unwrap()), hook("log.sh", Matcher::All)],
+            problems: vec![Problem { file: "C:/home/.cursor/hooks.json".into(), sentence: "It is not JSON Lattice can read.".into() }],
+        };
+        let (rows, problems) = hook_rows(&found, &[true]);
+        assert_eq!(rows[0].source, "Claude Code's settings");
+        assert_eq!(rows[0].event, "PreToolUse (before a tool runs)");
+        assert_eq!((rows[0].matcher.as_str(), rows[0].allowed), ("Bash", true));
+        assert!(!rows[1].allowed, "a hook with no allowance read asks");
+        assert_eq!(rows[0].digest, found.hooks[0].digest());
+        assert!(problems[0].ends_with("It is not JSON Lattice can read."));
+
+        let mut state = State::new();
+        let _ = state.tools(ToolsMsg::HooksRead(rows, problems));
+        assert_eq!(state.ide.tools.hooks.as_ref().map(|(r, _)| r.len()), Some(2));
+        let _ = state.tools(ToolsMsg::HookRevoked(Ok(true)));
+        assert_eq!(state.ide.tools.said, Some(("Taken back: that hook asks again before it next runs.".to_string(), false)));
     }
 
     /// A pick given up in Windows' picker, and an action the core refused, leave the section ready, the refusal said.

@@ -404,12 +404,6 @@ pub fn picker<'a>(state: &'a State) -> El<'a> {
     container(col).padding([0.0, 10.0]).into()
 }
 
-/// The name of the project a chat is in, if any.
-pub fn project_of<'a>(state: &'a State, conversation: &str) -> Option<&'a str> {
-    let list = state.ide.projects.list.as_ref()?;
-    list.iter().find(|project| project.chats.iter().any(|chat| chat == conversation)).map(|project| project.name.as_str())
-}
-
 /// Whether a chat is shown under the picked project.
 pub fn shows(state: &State, conversation: &str) -> bool {
     match state.ide.project.as_deref() {
@@ -594,7 +588,6 @@ mod tests {
         launch.chats = vec!["c1".into()];
         listed(&mut state, vec![launch]);
         assert!(shows(&state, "c1") && shows(&state, "c2"), "every chat");
-        assert_eq!((project_of(&state, "c1"), project_of(&state, "c2")), (Some("Launch"), None));
         let _ = state.projects(ProjectsMsg::Pick(Some("p_a".into())));
         assert!(shows(&state, "c1") && !shows(&state, "c2"));
         let _ = state.projects(ProjectsMsg::Pick(Some("p_nothere".into())));

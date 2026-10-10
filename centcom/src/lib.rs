@@ -62,6 +62,7 @@ mod memory_map;
 // Models: the GGUF files and endpoints this PC can use, which one Sinai's page and Lattice's chat each talk to, and
 // Sinai's page talking to the person's own model (Windows' file picker is unsafe code, allowed in its own file).
 mod models;
+mod pages;
 // Alelyon's own preferences on this PC (preferences.json): today, whether the sign-in backdrop moves.
 mod prefs;
 mod probe;

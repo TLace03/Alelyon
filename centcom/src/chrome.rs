@@ -1,8 +1,9 @@
-//! The window's own title bar and edges (the title bar's features are embedded into the background).
-//! The window has no Windows frame (`decorations: false`); this module draws what the frame did: a bar across the top
-//! that drags the window (double-click maximises or restores; Windows' snapping works, since a drag is Windows' own
-//! move), the minimise, maximise and close buttons, and thin edges that resize it. On the sign-in screen the bar is
-//! transparent over the backdrop; over the main window it is the canvas's black.
+//! The window's own title bar and edges. The window has no Windows frame (`decorations: false`); this module draws
+//! what the frame did: the minimise, maximise and close buttons, an area that drags the window (double-click
+//! maximises or restores; Windows' snapping works, since a drag is Windows' own move), and thin edges that resize
+//! it. On the sign-in screen these are a bar, transparent over the backdrop. In the main window they take no row of
+//! their own: the buttons sit at the top of the rail ([`compact`]), and the rail's mark and empty space drag it
+//! ([`drag`]).
 
 use std::time::{Duration, Instant};
 
@@ -74,6 +75,38 @@ pub fn bar<'a, M: Clone + 'a>(solid: bool, maximised: bool, act: impl Fn(Act) ->
         .width(Length::Fill)
         .style(move |_| container::Style { background: solid.then_some(Background::Color(theme::CANVAS)), ..container::Style::default() })
         .into()
+}
+
+/// The three buttons, small, for the top of the rail: minimise, maximise (restore when maximised) and close.
+pub fn compact<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+    let small = |s: &'a str, msg: M, danger: bool| -> Element<'a, M> {
+        button(container(text(s).size(11).font(fonts().ui).color(theme::TEXT_DIM)).center_x(24).center_y(22))
+            .padding(0)
+            .on_press(msg)
+            .style(move |_, status| button::Style {
+                background: match status {
+                    button::Status::Hovered | button::Status::Pressed if danger => Some(Background::Color(Color::from_rgb8(0xc4, 0x2b, 0x1c))),
+                    button::Status::Hovered | button::Status::Pressed => Some(Background::Color(theme::with_alpha(theme::TEXT, 0.10))),
+                    _ => None,
+                },
+                text_color: theme::TEXT,
+                border: Border { radius: 4.0.into(), ..Border::default() },
+                ..button::Style::default()
+            })
+            .into()
+    };
+    row![
+        small("\u{2500}", act(Act::Minimise), false),
+        small(if maximised { "\u{2750}" } else { "\u{2610}" }, act(Act::ToggleMaximise), false),
+        small("\u{2715}", act(Act::Close), true),
+    ]
+    .spacing(2)
+    .into()
+}
+
+/// `inside`, as an area that drags the window (a press drags, a quick second one maximises or restores).
+pub fn drag<'a, M: Clone + 'a>(inside: impl Into<Element<'a, M>>, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+    mouse_area(inside).on_press(act(Act::Press)).into()
 }
 
 /// Thin invisible edges and corners that resize the window, over everything else. None while maximised.

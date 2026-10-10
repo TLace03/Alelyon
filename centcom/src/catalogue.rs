@@ -20,11 +20,12 @@ pub enum Section {
     Research,
     Trust,
     Compute,
+    Pages,
     Account,
 }
 
 impl Section {
-    pub const ALL: [Section; 10] = [
+    pub const ALL: [Section; 11] = [
         Section::Overview,
         Section::Sinai,
         Section::Transcription,
@@ -34,6 +35,7 @@ impl Section {
         Section::Research,
         Section::Trust,
         Section::Compute,
+        Section::Pages,
         Section::Account,
     ];
 
@@ -48,6 +50,7 @@ impl Section {
             Section::Research => "Research",
             Section::Trust => "Trust",
             Section::Compute => "Compute and simulation",
+            Section::Pages => "Pages",
             Section::Account => "Account and platform",
         }
     }
@@ -64,6 +67,7 @@ impl Section {
             Section::Research => "Research",
             Section::Trust => "Trust",
             Section::Compute => "Compute",
+            Section::Pages => "Pages",
             Section::Account => "Account",
         }
     }
@@ -79,6 +83,7 @@ impl Section {
             Section::Research => "\u{2315}",
             Section::Trust => "\u{2713}",
             Section::Compute => "\u{2699}",
+            Section::Pages => "\u{25CE}",
             Section::Account => "\u{25D0}",
         }
     }
@@ -96,6 +101,7 @@ impl Section {
             Section::Research => "Every paper on a subject: searched, then followed through citations until nothing new turns up.",
             Section::Trust => "Check certified receipts, and the integrity of the data behind them.",
             Section::Compute => "The simulator Sinai will train in, and training runs.",
+            Section::Pages => "Your public page, organizations with their tickers, titles they confirm, and posts.",
             Section::Account => "Sign-in, teams, updates, keys and billing.",
         }
     }
@@ -112,6 +118,7 @@ impl Section {
             Section::Research => "research",
             Section::Trust => "trust",
             Section::Compute => "compute",
+            Section::Pages => "pages",
             Section::Account => "account",
         }
     }
@@ -249,6 +256,11 @@ impl Feature {
             // Models: the chat's choices, the local server with the GGUF model it runs (chosen here as the Python model
             // bar chooses it), and the endpoint registry, edited here with keys kept in Credential Manager.
             "lattice-models" => Here::Now,
+            // Pages: a person's public page with a title and the tickers they choose, organizations (members, roles,
+            // confirmed titles), posts, articles, replies, reposts, likes, follows, blocks and reports, over the
+            // identity service's pages routes. In part: that service does not offer them yet, and the website's pages
+            // are to come.
+            "pages-profile" | "pages-orgs" | "pages-posts" => Here::InPart,
             _ => Here::Later,
         }
     }
@@ -304,6 +316,9 @@ pub const FEATURES: &[Feature] = &[
     f("trust-recon", "trust", "Reconciliation", "The insurance reconciliation product.", "No screen (catalogued as building)", true, "New", "Later"),
     f("compute-sim", "compute", "Simulator and renderer", "Watch the physics simulator and renderer Sinai will train in.", "No screen", true, "New", "Later"),
     f("compute-train", "compute", "Model training metrics", "Training runs' curves and checkpoints.", "Training Studio metrics", false, "Port", "5"),
+    f("pages-profile", "pages", "Your page and title", "A public page with your title, a few words about you, and the organizations you choose to show after your name.", "No screen", true, "New (2026-10-09)", "5"),
+    f("pages-orgs", "pages", "Organizations", "Organizations with unique tickers: members, roles, invitations, and titles they confirm.", "No screen", true, "New (2026-10-09)", "5"),
+    f("pages-posts", "pages", "Posts and articles", "Post, write articles, reply, repost, quote and like; follow people and organizations; block and report.", "No screen", true, "New (2026-10-09)", "5"),
     f("account-signin", "account", "Sign-in and account", "Sign in, your profile, and hosted-key redemption.", "Python desktop; the website", false, "Port", "4"),
     f("account-teams", "account", "Teams", "Profile, people and friends.", "Python desktop", false, "Port", "4"),
     f("account-tour", "account", "First-run tour", "A short guided start for someone new.", "No screen", true, "New", "4"),
@@ -318,17 +333,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_plan_has_43_features_in_nine_sections_and_no_markets() {
-        assert_eq!(FEATURES.len(), 43);
+    fn the_plan_has_46_features_in_ten_sections_and_no_markets() {
+        assert_eq!(FEATURES.len(), 46);
         let counted: usize = Section::ALL.iter().map(|s| s.features().count()).sum();
-        assert_eq!(counted, 43, "every feature belongs to one section");
-        assert_eq!(Section::ALL.iter().filter(|s| s.features().count() > 0).count(), 9);
+        assert_eq!(counted, 46, "every feature belongs to one section");
+        assert_eq!(Section::ALL.iter().filter(|s| s.features().count() > 0).count(), 10);
         assert_eq!(Section::Overview.features().count(), 0);
         assert!(FEATURES.iter().all(|f| !f.name.to_lowercase().contains("market")), "Markets stay out");
         let mut ids: Vec<&str> = FEATURES.iter().map(|f| f.id).collect();
         ids.sort_unstable();
         ids.dedup();
-        assert_eq!(ids.len(), 43, "ids are unique");
+        assert_eq!(ids.len(), 46, "ids are unique");
     }
 
     #[test]
@@ -374,6 +389,9 @@ mod tests {
                 "lattice-morpho",
                 "lattice-gate",
                 "research-archive",
+                "pages-profile",
+                "pages-orgs",
+                "pages-posts",
                 "account-signin"
             ]
         );

@@ -31,6 +31,8 @@ pub enum IdeMsg {
     Tools(super::tools::ToolsMsg),
     /// The projects' messages.
     Projects(super::projects::ProjectsMsg),
+    Notes(super::notes::NotesMsg),
+    Grid(super::grid::GridMsg),
     /// The composer's commands list.
     Slash(super::slash::SlashMsg),
     TogglePanel,
@@ -62,6 +64,8 @@ pub enum IdeMsg {
     Activate(u64),
     Close(u64),
     Edit(u64, text_editor::Action),
+    /// The editor's Tab completions.
+    Complete(super::complete::CompleteMsg),
     Scrolled(u64, scrollable::Viewport),
     Undo,
     Redo,
@@ -104,6 +108,14 @@ pub enum IdeMsg {
     Key(Key),
     // The agent panel.
     ChatFilter(ChatFilter),
+    /// Follow the agent's changes in the editor (on), or not.
+    Follow(bool),
+    ChatSearch(String),
+    /// Show every chat of this folder (`true`), or its newest only.
+    ChatMore(String, bool),
+    ProjectsOpen(bool),
+    /// A new chat in this folder: the folder opens, then the chat starts empty.
+    NewIn(String),
     Expand(String),
     Suggest(String),
     Mention,
@@ -289,7 +301,7 @@ fn longest_line(text: &str) -> usize {
 }
 
 impl Editing {
-    fn new(opened_sha: String, authority: bool, decoded: buffer::Decoded, lang: Lang) -> Editing {
+    pub(in crate::lattice) fn new(opened_sha: String, authority: bool, decoded: buffer::Decoded, lang: Lang) -> Editing {
         Editing {
             unit: editing::unit(decoded.text.lines(), lang),
             content: text_editor::Content::with_text(&decoded.text),
@@ -371,7 +383,10 @@ impl State {
             }
             IdeMsg::Tools(msg) => return self.tools(msg),
             IdeMsg::Projects(msg) => return self.projects(msg),
+            IdeMsg::Notes(msg) => return self.notes(msg),
+            IdeMsg::Grid(msg) => return self.grid(msg),
             IdeMsg::Slash(msg) => return self.slash(msg),
+            IdeMsg::Complete(msg) => return self.complete(msg),
             IdeMsg::MentionList(msg) => return self.mention(msg),
             IdeMsg::TogglePanel => return self.toggle_panel(),
             IdeMsg::Panel(PanelTab::Terminal) => return self.show_terminals(),
@@ -573,6 +588,7 @@ impl State {
                 }
             }
             IdeMsg::Saved(id, result) => {
+                let mut notes_of = None;
                 let Some(tab) = self.ide.tab_mut(id) else { return Task::none() };
                 let TabKind::File { body: Body::Editing(e), note, path, .. } = &mut tab.kind else { return Task::none() };
                 e.saving = false;
@@ -587,6 +603,7 @@ impl State {
                         }
                         e.refresh();
                         e.history.break_step();
+                        notes_of = Some(path.clone());
                         *note = Some(if saved.changed_after {
                             ("Saved, then changed by another program: what is on disk is not what was written.".into(), true)
                         } else {
@@ -599,6 +616,10 @@ impl State {
                         *note = Some((words.clone(), true));
                         self.problem = Some(format!("{path}: {words}"));
                     }
+                }
+                // Its notes, placed again on the text saved.
+                if let Some(path) = notes_of {
+                    return self.read_notes(path);
                 }
             }
             IdeMsg::Reload(id) => {
@@ -730,6 +751,20 @@ impl State {
             IdeMsg::Key(key) => return self.key(key),
 
             IdeMsg::ChatFilter(filter) => self.ide.chat_filter = filter,
+            IdeMsg::Follow(on) => self.ide.follow = on,
+            IdeMsg::ChatSearch(text) => self.ide.chat_search = text,
+            IdeMsg::ChatMore(folder, on) => {
+                if on {
+                    self.ide.chat_more.insert(folder);
+                } else {
+                    self.ide.chat_more.remove(&folder);
+                }
+            }
+            IdeMsg::ProjectsOpen(on) => self.ide.projects_open = on,
+            IdeMsg::NewIn(path) => {
+                let start = self.update(Msg::New);
+                return Task::batch([start, self.ide_update(IdeMsg::OpenRecent(path))]);
+            }
             IdeMsg::Expand(call) => {
                 if !self.ide.expanded_calls.remove(&call) {
                     self.ide.expanded_calls.insert(call);
@@ -1360,7 +1395,7 @@ impl State {
 
     /// A search result's match selected in tab `id` (line from 1, a byte range); the file may have changed since it
     /// was searched, so the range is held to the line as it is now.
-    fn reveal_in(&mut self, id: u64, line: u32, start: usize, end: usize) -> Task<Msg> {
+    pub(super) fn reveal_in(&mut self, id: u64, line: u32, start: usize, end: usize) -> Task<Msg> {
         let line = (line as usize).saturating_sub(1);
         let Some(text) = self.editing_mut(id).and_then(|e| e.content.line(line).map(|l| l.text.into_owned())) else {
             return Task::none();
@@ -1774,7 +1809,7 @@ impl State {
     }
 
     /// The editor of tab `id`, when it is one.
-    fn editing_mut(&mut self, id: u64) -> Option<&mut Editing> {
+    pub(in crate::lattice) fn editing_mut(&mut self, id: u64) -> Option<&mut Editing> {
         match self.ide.tab_mut(id).map(|t| &mut t.kind) {
             Some(TabKind::File { body: Body::Editing(e), .. }) => Some(e),
             _ => None,
@@ -1932,6 +1967,7 @@ impl State {
     }
 
     fn opened(&mut self, id: u64, result: Result<files::Opened, String>) -> Task<Msg> {
+        let mut notes = false;
         let Some(tab) = self.ide.tab_mut(id) else { return Task::none() };
         let TabKind::File { path, lang, body, note } = &mut tab.kind else { return Task::none() };
         match result {
@@ -1942,6 +1978,7 @@ impl State {
                 match opened.text {
                     Ok(decoded) => {
                         *body = Body::Editing(Box::new(Editing::new(opened.sha256, opened.authority, decoded, *lang)));
+                        notes = true;
                     }
                     Err(why) => {
                         *body = Body::Paged { why: why.sentence().to_string(), lines: None, reading: false, colours: Vec::new() };
@@ -1961,18 +1998,31 @@ impl State {
                 Task::none()
             }
         };
+        // Its notes, placed on the text as read.
+        let revealed = if notes { Task::batch([revealed, self.read_notes(path.clone())]) } else { revealed };
         #[cfg(debug_assertions)]
-        let revealed = Task::batch([revealed, self.photograph(id)]);
+        let revealed = Task::batch([revealed, self.photograph(id), if notes { self.photograph_notes(path) } else { Task::none() }]);
         revealed
     }
 
     /// A debug build's photographs of the find bar, the Search view and the inline edit, on the first file opened:
     /// `CENTCOM_LATTICE_FIND=<text>` finds and searches for it, `CENTCOM_LATTICE_INLINE=<prompt>` opens an inline edit
-    /// of lines 10 to 14 with that prompt typed (never sent). A release build never reads them.
+    /// of lines 10 to 14 with that prompt typed (never sent), `CENTCOM_LATTICE_COMPLETE=<line>:<column>` (from 0) puts
+    /// the cursor there and asks for a completion as typing does. A release build never reads them.
     #[cfg(debug_assertions)]
     fn photograph(&mut self, id: u64) -> Task<Msg> {
         if self.ide.find.is_some() || self.ide.inline.is_some() || self.ide.search.asked.is_some() {
             return Task::none();
+        }
+        let complete_at = std::env::var("CENTCOM_LATTICE_COMPLETE").ok().and_then(|at| {
+            let (line, column) = at.split_once(':')?;
+            Some((line.trim().parse::<usize>().ok()?, column.trim().parse::<usize>().ok()?))
+        });
+        if let Some((line, column)) = complete_at {
+            if let Some(e) = self.editing_mut(id) {
+                e.content.move_to(text_editor::Cursor { position: text_editor::Position { line, column }, selection: None });
+            }
+            return self.typed(id);
         }
         if let Some(text) = std::env::var_os("CENTCOM_LATTICE_FIND").map(|t| t.to_string_lossy().into_owned()) {
             self.ide.search.query.text = text.clone();
@@ -2049,6 +2099,15 @@ impl State {
     /// own scrollable (the editor is as tall as its text, so its line numbers scroll with it).
     fn edit(&mut self, id: u64, action: text_editor::Action) -> Task<Msg> {
         let edited = matches!(action, text_editor::Action::Edit(_));
+        // Typing asks for a completion once it pauses; moving the cursor puts the suggestion away.
+        let asked = match &action {
+            text_editor::Action::Scroll { .. } => Task::none(),
+            text_editor::Action::Edit(_) => self.typed(id),
+            _ => {
+                self.moved();
+                Task::none()
+            }
+        };
         let Some(e) = self.editing_mut(id) else { return Task::none() };
         match &action {
             text_editor::Action::Scroll { lines } => {
@@ -2078,7 +2137,12 @@ impl State {
         if edited {
             let _ = self.refind(id, None, false);
         }
-        self.follow(id)
+        Task::batch([asked, self.follow(id)])
+    }
+
+    /// Type `text` at the cursor of tab `id`, as one edit.
+    pub(in crate::lattice) fn type_text(&mut self, id: u64, text: String) -> Task<Msg> {
+        self.edit(id, text_editor::Action::Edit(text_editor::Edit::Paste(Arc::new(text))))
     }
 
     /// Keep the cursor of tab `id`'s editor in view.

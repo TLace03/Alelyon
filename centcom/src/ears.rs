@@ -1,5 +1,9 @@
-//! The ears from the window: a live link to the speech engine's `serve`, what it says, and starting it (where the build
-//! says where the engine is: `installed.rs`).
+//! The ears from the window: a live link to the speech engine's `serve`, what it says, and starting it.
+//!
+//! Every build can start the engine: its program is `angel-ears.exe` beside this window's program, or the one
+//! `CENTCOM_EARS` names (a build may register its own rule instead, `installed.rs`). Before it is started, the
+//! engine's own rule (`alelyon_ears::setup`) says whether its recogniser program and speech model are in place;
+//! what is missing is shown as a step to take, never downloaded.
 //!
 //! The service writes its address and a fresh token to `~/.alelyon/angel/ears.json` each time it starts. The
 //! link reads them, connects (loopback, no TLS, no `Origin` header, which the ears refuse), hands the window a
@@ -10,7 +14,7 @@
 
 use std::io::ErrorKind;
 use std::net::TcpStream;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -300,11 +304,77 @@ pub fn cancel(job: &str) -> Value {
 
 // ------------------------------------------------------------------- starting the engine
 
-/// The speech engine's program, as the build finds it (`installed.rs`, the `ears` plug-in): None when this build
-/// cannot start the engine, else the program or why it was not found.
-pub fn engine_exe() -> Option<Result<PathBuf, String>> {
-    crate::installed::ears()
+/// The engine's program name beside the window's.
+#[cfg(windows)]
+pub const PROGRAM: &str = "angel-ears.exe";
+#[cfg(not(windows))]
+pub const PROGRAM: &str = "angel-ears";
+
+/// The engine: `named` (`CENTCOM_EARS`) when given, which must be a file; else [`PROGRAM`] beside `exe`.
+pub fn find(named: Option<PathBuf>, exe: Option<&Path>) -> Result<PathBuf, String> {
+    if let Some(path) = named {
+        return if path.is_file() { Ok(path) } else { Err(format!("CENTCOM_EARS names {}, which is not a file.", path.display())) };
+    }
+    let beside = exe.map(|e| e.with_file_name(PROGRAM));
+    match beside {
+        Some(path) if path.is_file() => Ok(path),
+        _ => Err(format!("To start it from here, put {PROGRAM} beside Alelyon's program, or set CENTCOM_EARS to its path.")),
+    }
 }
+
+/// The built-in rule, for this process: `CENTCOM_EARS`, else beside the running program.
+pub fn locate() -> Result<PathBuf, String> {
+    let exe = std::env::current_exe().ok();
+    find(std::env::var_os("CENTCOM_EARS").map(PathBuf::from), exe.as_deref())
+}
+
+/// The speech engine's program: as the build's own rule finds it when it registers one (`installed.rs`, the `ears`
+/// plug-in), else by the built-in rule ([`locate`]). The program, or why it was not found.
+pub fn engine_exe() -> Result<PathBuf, String> {
+    crate::installed::ears().unwrap_or_else(locate)
+}
+
+/// The options the window adds to `serve`: `CENTCOM_EARS_ARGS`, split at spaces.
+fn extra_args() -> Vec<String> {
+    std::env::var("CENTCOM_EARS_ARGS").map(|a| a.split_whitespace().map(str::to_string).collect()).unwrap_or_default()
+}
+
+/// Whether the window can start the engine now.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Start {
+    /// The engine and what it runs are in place.
+    Ready,
+    /// The engine's program was not found: why, and what to do.
+    NoEngine(String),
+    /// The engine is here, but something it runs is not: each, in the engine's own words. An empty state with the
+    /// place to put it, not an error.
+    Missing(Vec<String>),
+}
+
+/// [`Start`] from what was found: the engine's program, and what the engine's own rule says is missing beside it.
+pub fn start_state(engine: Result<PathBuf, String>, missing: impl FnOnce(&Path) -> Vec<alelyon_ears::setup::Missing>) -> Start {
+    match engine {
+        Err(why) => Start::NoEngine(why),
+        Ok(exe) => {
+            let missing = missing(&exe);
+            if missing.is_empty() { Start::Ready } else { Start::Missing(missing.iter().map(alelyon_ears::setup::Missing::explain).collect()) }
+        }
+    }
+}
+
+/// Whether the window can start the engine now, on this PC: the engine's program, and its recogniser and model by
+/// the engine's own rule, read with `CENTCOM_EARS_ARGS` as `serve` will read it.
+pub fn can_start() -> Start {
+    start_state(engine_exe(), |exe| {
+        alelyon_ears::setup::Given::from_env(Some(exe)).with_args(&extra_args()).missing(|p| p.is_file())
+    })
+}
+
+/// What the Words page says above the steps when the engine cannot start yet: a model is a file a person chooses and
+/// puts in place, as Lattice's GGUF models are, and nothing is fetched for it.
+pub const MISSING_TITLE: &str = "Before the speech engine can start";
+pub const MISSING_NOTE: &str =
+    "Alelyon does not download speech models or programs: put the files in place, then start the engine here.";
 
 /// The engine CENTCOM started: it ends with the window (a job object closes it, a crash included).
 pub struct Engine {
@@ -319,9 +389,12 @@ impl Engine {
     /// recogniser that is already running), its output in `~/.alelyon/angel/centcom-ears.log`.
     pub fn start() -> Result<Engine, String> {
         use std::process::{Command, Stdio};
-        let exe = engine_exe().unwrap_or_else(|| Err(crate::installed::EARS_NOT_IN_BUILD.to_string()))?;
-        let extra: Vec<String> =
-            std::env::var("CENTCOM_EARS_ARGS").map(|a| a.split_whitespace().map(str::to_string).collect()).unwrap_or_default();
+        let exe = match can_start() {
+            Start::Ready => engine_exe()?,
+            Start::NoEngine(why) => return Err(why),
+            Start::Missing(steps) => return Err(steps.join(" ")),
+        };
+        let extra = extra_args();
         let log_path = connection_file().map(|p| p.with_file_name("centcom-ears.log"));
         let (out, err) = match log_path.as_ref().and_then(|p| std::fs::File::create(p).ok()) {
             Some(log) => match log.try_clone() {
@@ -445,6 +518,58 @@ mod tests {
         assert!(!job.running());
         assert_eq!(job.outputs, ["C:/talks/a talk.txt"]);
         assert_eq!((job.lines, job.seconds), (Some(12), Some(61.5)));
+    }
+
+    #[test]
+    fn the_named_engine_or_the_one_beside_the_window_and_otherwise_what_to_do() {
+        let dir = std::env::temp_dir().join(format!("centcom-ears-find-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let window = dir.join("centcom.exe");
+        let err = find(None, Some(&window)).unwrap_err();
+        assert!(err.contains(PROGRAM) && err.contains("CENTCOM_EARS"), "{err}");
+        std::fs::write(dir.join(PROGRAM), b"").unwrap();
+        assert_eq!(find(None, Some(&window)), Ok(dir.join(PROGRAM)));
+        let named = dir.join("elsewhere.exe");
+        assert!(find(Some(named.clone()), Some(&window)).unwrap_err().contains("not a file"), "a named engine must exist");
+        std::fs::write(&named, b"").unwrap();
+        assert_eq!(find(Some(named.clone()), Some(&window)), Ok(named));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_public_build_starts_the_engine_by_the_built_in_rule() {
+        // no centcom test installs a registry, so this is the public build: it has a rule, not "not in this build"
+        assert!(crate::installed::ears().is_none());
+        let built_in = locate();
+        assert_eq!(engine_exe(), built_in);
+    }
+
+    #[test]
+    fn a_missing_model_is_a_step_with_its_place_and_an_engine_with_everything_starts() {
+        use alelyon_ears::setup::{Given, MODEL_ENV, MODEL_FILE, Missing};
+        let home = PathBuf::from("H");
+        let given = |exe: &Path| Given { home: Some(home.clone()), engine_dir: exe.parent().map(Path::to_path_buf), ..Given::default() };
+        let exe = PathBuf::from("E").join(PROGRAM);
+        // nothing in place: two steps, the model's naming its file, its folder and the variable
+        match start_state(Ok(exe.clone()), |e| given(e).missing(|_| false)) {
+            Start::Missing(steps) => {
+                assert_eq!(steps.len(), 2, "{steps:?}");
+                let folder = alelyon_ears::setup::models_dir(&home).display().to_string();
+                assert!(steps[0].contains(MODEL_FILE) && steps[0].contains(&folder) && steps[0].contains(MODEL_ENV), "{}", steps[0]);
+                for step in &steps {
+                    assert!(!step.to_lowercase().contains("error") && !step.to_lowercase().contains("failed"), "{step}");
+                }
+            }
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(start_state(Ok(exe.clone()), |e| given(e).missing(|_| true)), Start::Ready);
+        // `--attach` (through CENTCOM_EARS_ARGS) needs neither
+        assert_eq!(start_state(Ok(exe.clone()), |e| given(e).with_args(&["--attach", "127.0.0.1:18178"]).missing(|_| false)), Start::Ready);
+        assert_eq!(start_state(Err("not here".into()), |_| vec![Missing::NoHome]), Start::NoEngine("not here".into()));
+        for words in [MISSING_TITLE, MISSING_NOTE] {
+            assert!(!words.to_lowercase().contains("error"), "{words}");
+        }
     }
 
     #[test]

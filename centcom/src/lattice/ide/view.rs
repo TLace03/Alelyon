@@ -163,8 +163,39 @@ fn frame<'a>(state: &'a State, phase: f32, width: f32) -> El<'a> {
     }
     line = line.push(center_column(state, phase));
     line = line.push(grip(Splitter::Agent, dragging == Some(Splitter::Agent)));
-    line = line.push(container(super::agent::panel(state, phase)).width(agent_w).height(Length::Fill).style(|_| solid(theme::SURFACE)));
+    // With the grid on show, the right column holds what the reader picked: the editor and its tabs, or the chat.
+    let right: El<'a> = if ide.grid.shown { beside_grid(state, phase) } else { super::agent::panel(state, phase) };
+    line = line.push(container(right).width(agent_w).height(Length::Fill).style(|_| solid(theme::SURFACE)));
     line.into()
+}
+
+/// The right column beside the grid: a bar to pick what it holds (and to leave the grid), then that.
+fn beside_grid<'a>(state: &'a State, phase: f32) -> El<'a> {
+    use super::grid::{Beside, GridMsg, go as grid_go};
+    let beside = state.ide.grid.beside;
+    let mut line = Row::new().spacing(6).align_y(Alignment::Center).padding([0.0, 10.0]);
+    for (b, words) in [(Beside::Editor, "Editor"), (Beside::Chat, "Chat")] {
+        let on = beside == b;
+        line = line.push(
+            button(label(words, 12.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
+                .padding([3.0, 9.0])
+                .style(theme::segment_button(on))
+                .on_press(grid_go(GridMsg::Beside(b))),
+        );
+    }
+    line = line.push(space().width(Length::Fill));
+    line = line.push(icon("\u{25A6}", "Back to the editor", Some(grid_go(GridMsg::Show(false)))));
+    let bar = column![container(line).height(36).width(Length::Fill).center_y(36).style(bar_style), rule()];
+    let body: El<'a> = match beside {
+        Beside::Chat => super::agent::panel(state, phase),
+        Beside::Editor => column![
+            tabs_bar(state),
+            container(editor_area(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas)
+        ]
+        .height(Length::Fill)
+        .into(),
+    };
+    column![bar, container(body).height(Length::Fill)].height(Length::Fill).into()
 }
 
 fn activity_bar<'a>(state: &'a State) -> El<'a> {
@@ -551,8 +582,13 @@ pub fn change_state_words(state: &ChangeState) -> (&'static str, Color) {
 fn center_column<'a>(state: &'a State, phase: f32) -> El<'a> {
     let ide = &state.ide;
     let mut col = Column::new().width(Length::Fill).height(Length::Fill);
-    col = col.push(tabs_bar(state));
-    col = col.push(container(editor_area(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
+    if ide.grid.shown {
+        // The chats side by side take the editor's place; the tabs come back with it.
+        col = col.push(container(super::grid::view(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
+    } else {
+        col = col.push(tabs_bar(state));
+        col = col.push(container(editor_area(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
+    }
     if ide.panel_open {
         col = col.push(grip(Splitter::Panel, ide.drag.map(|(w, _)| w) == Some(Splitter::Panel)));
         col = col.push(container(bottom_panel(state, phase)).height(ide.panel_height).width(Length::Fill).style(bar_style));
@@ -608,6 +644,18 @@ fn tabs_bar<'a>(state: &'a State) -> El<'a> {
     }
     let strip = scrollable(tabs).direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(3).scroller_width(3))).style(theme::scrollbars);
     let mut line = Row::new().align_y(Alignment::Center).push(container(strip).width(Length::Fill));
+    // Follow the agent: each change it stages opens here as its diff.
+    let follow_tip = if ide.follow { "Following the agent: each change it makes opens here (stop following)" } else { "Follow the agent: open each change it makes here" };
+    line = line.push(
+        tooltip(
+            button(label(if ide.follow { "\u{25C9} Following" } else { "\u{25CB} Follow" }, 11.5, if ide.follow { theme::GOLD } else { theme::TEXT_DIM }))
+                .padding([3.0, 8.0])
+                .style(theme::segment_button(ide.follow))
+                .on_press(go(IdeMsg::Follow(!ide.follow))),
+            container(label(follow_tip, 11.5, theme::TEXT)).padding([4.0, 8.0]).style(theme::card),
+            tooltip::Position::Bottom,
+        ),
+    );
     if let Some(t) = ide.active_tab()
         && let TabKind::File { body: Body::Editing(e), .. } = &t.kind
     {
@@ -636,7 +684,9 @@ fn editor_area<'a>(state: &'a State, phase: f32) -> El<'a> {
                 Body::Editing(e) => {
                     let find = ide.find.as_ref().filter(|f| f.tab == tab.id);
                     let band = ide.inline.as_ref().filter(|i| i.tab == tab.id).map(|i| (i.from, i.to));
-                    let editor = code_editor(tab, *lang, e, find, band);
+                    let marks = super::notes::marks(state, path, e.lines);
+                    let suggestion = super::complete::live(&ide.completion, tab.id, e);
+                    let editor = code_editor(tab, *lang, e, find, band, suggestion, marks);
                     let mut layers: Vec<El<'a>> = vec![editor];
                     if let Some(f) = find {
                         layers.push(container(find_bar(f)).align_right(Length::Fill).padding(Padding { top: 6.0, right: 18.0, bottom: 0.0, left: 0.0 }).into());
@@ -647,6 +697,12 @@ fn editor_area<'a>(state: &'a State, phase: f32) -> El<'a> {
                     if layers.len() == 1 { layers.pop().expect("the editor") } else { stack(layers).into() }
                 }
             });
+            // The file's notes, under the editor.
+            if matches!(body, Body::Editing(_))
+                && let Some(strip) = super::notes::strip(state, path)
+            {
+                col = col.push(strip);
+            }
             col.into()
         }
         TabKind::Diff { path, .. } => diff_view(state, path, phase),
@@ -737,6 +793,27 @@ fn breadcrumb<'a>(path: &'a str, note: Option<&'a (String, bool)>, tab: &'a Edit
     if let Some((words, warn)) = note {
         line = line.push(label(words.as_str(), 11.5, if *warn { theme::CAUTION } else { theme::TEXT_FAINT }));
     }
+    // Notes: shown or not, and a new one on the selected lines.
+    if let TabKind::File { body: Body::Editing(_), .. } = &tab.kind {
+        use super::notes::{NotesMsg, go as note};
+        let shown = state.ide.line_notes.shown;
+        if shown {
+            line = line.push(ghost("Add a note", Some(note(NotesMsg::Add))));
+        }
+        let tip = if shown {
+            "Hide the notes beside the lines"
+        } else {
+            "Show the notes beside the lines: yours and the agent's, never written into the file"
+        };
+        line = line.push(tooltip(
+            button(label("\u{25C6} Notes", 11.5, if shown { theme::GOLD } else { theme::TEXT_DIM }))
+                .padding([2.0, 8.0])
+                .style(theme::segment_button(shown))
+                .on_press(note(NotesMsg::Show(!shown))),
+            container(label(tip, 11.5, theme::TEXT)).padding([4.0, 8.0]).style(theme::card),
+            tooltip::Position::Bottom,
+        ));
+    }
     if matches!(&tab.kind, TabKind::File { .. }) {
         line = line.push(ghost("Reload", Some(go(IdeMsg::Reload(tab.id)))));
     }
@@ -751,8 +828,11 @@ fn code_editor<'a>(
     e: &'a super::Editing,
     find: Option<&'a super::find::Find>,
     band: Option<(usize, usize)>,
+    suggestion: Option<&'a super::complete::Suggestion>,
+    marks: Option<El<'a>>,
 ) -> El<'a> {
     let id = tab.id;
+    let suggesting = suggestion.is_some();
     // The numbers before the cursor's line, its own in gold, and those after, cut from the cached gutter text.
     let (numbers, starts) = &e.gutter;
     let n = starts.len().saturating_sub(1).max(1);
@@ -778,7 +858,7 @@ fn code_editor<'a>(
         .wrapping(text::Wrapping::None)
         .padding(CODE_PAD)
         .width(width)
-        .key_binding(move |press| code_keys(press))
+        .key_binding(move |press| code_keys(press, suggesting))
         // Clear, so the find bar's matches drawn beneath show through (the editor area is the canvas).
         .style(|_, status| text_editor::Style {
             background: Background::Color(Color::TRANSPARENT),
@@ -788,10 +868,17 @@ fn code_editor<'a>(
             selection: theme::with_alpha(theme::GOLD, if matches!(status, text_editor::Status::Focused { .. }) { 0.28 } else { 0.16 }),
         });
     let hits = find.map_or(&[][..], |f| &f.hits[..]);
-    let content: El<'a> = if hits.is_empty() && band.is_none() {
-        row![gutter, editor].into()
-    } else {
-        row![gutter, stack![editor].push_under(super::find::marks(hits, find.and_then(|f| f.current), band))].into()
+    let mut text = stack![editor];
+    if !hits.is_empty() || band.is_some() {
+        text = text.push_under(super::find::marks(hits, find.and_then(|f| f.current), band));
+    }
+    if let Some(s) = suggestion {
+        text = text.push(super::complete::ghost(s));
+    }
+    // The notes' marks, when the file has any, between the numbers and the text.
+    let content: El<'a> = match marks {
+        Some(marks) => row![gutter, marks, text].into(),
+        None => row![gutter, text].into(),
     };
     scrollable(content)
         .id(tab.scroll_id())
@@ -808,7 +895,8 @@ fn code_editor<'a>(
 /// Ctrl+Shift+F searches the folder, F3 and Shift+F3 step through the matches, and Esc closes what is open over it;
 /// Enter keeps the indentation, Ctrl+/ comments lines out and in, Alt+Up and Alt+Down move them, Shift+Alt+Up and
 /// Shift+Alt+Down copy them, Ctrl+Shift+K deletes them, and Home goes to the first character that is not a space.
-fn code_keys(press: text_editor::KeyPress) -> Option<text_editor::Binding<Msg>> {
+/// While a completion is suggested, Tab takes it, Ctrl+Right takes its next word and Esc puts it away.
+fn code_keys(press: text_editor::KeyPress, suggesting: bool) -> Option<text_editor::Binding<Msg>> {
     use iced::keyboard::Key;
     use iced::keyboard::key::Named;
     use text_editor::Binding;
@@ -816,6 +904,19 @@ fn code_keys(press: text_editor::KeyPress) -> Option<text_editor::Binding<Msg>> 
         return None;
     }
     let m = press.modifiers;
+    if suggesting {
+        use super::complete::CompleteMsg;
+        match press.key.as_ref() {
+            Key::Named(Named::Tab) if !m.shift() && !m.command() && !m.alt() => {
+                return Some(Binding::Custom(go(IdeMsg::Complete(CompleteMsg::Accept))));
+            }
+            Key::Named(Named::ArrowRight) if m.command() && !m.shift() => {
+                return Some(Binding::Custom(go(IdeMsg::Complete(CompleteMsg::AcceptWord))));
+            }
+            Key::Named(Named::Escape) => return Some(Binding::Custom(go(IdeMsg::Complete(CompleteMsg::Dismiss)))),
+            _ => {}
+        }
+    }
     if m.command() {
         match press.key.to_latin(press.physical_key) {
             Some('s') => return Some(Binding::Custom(go(IdeMsg::Save))),

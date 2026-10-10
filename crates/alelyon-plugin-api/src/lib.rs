@@ -10,8 +10,8 @@
 //! loading: what a build carries is decided when it is linked.
 //!
 //! A build can also carry what is not a page: the receipt verifier's replay substrate ([`Registry::replay`]), and
-//! where the programs the public app does not ship are found ([`Processes`]: Sinai's mind, the speech engine, voice
-//! enrolment's tools). Each is a plug-in id the app's capability list names: [`Registry::ids`].
+//! where the programs the public app does not ship are found ([`Processes`]: Sinai's mind, voice enrolment's tools),
+//! or its own rule for one the app finds itself (the speech engine). Each is a plug-in id: [`Registry::ids`].
 
 use std::any::Any;
 use std::fmt;
@@ -248,13 +248,14 @@ pub struct VoiceTools {
     pub speaker_model: PathBuf,
 }
 
-/// Where the programs the public app does not ship are found. The app's clients for them (Sinai's page, the
-/// Transcription section, voice enrolment) are public; a build without a locator shows that client's empty state.
+/// Where the programs the public app does not ship are found. The app's clients for them (Sinai's page, voice
+/// enrolment) are public; a build without a locator shows that client's empty state. The speech engine is open and
+/// the app finds it itself (beside its own program); a locator here replaces that rule for one build.
 #[derive(Clone, Default)]
 pub struct Processes {
     /// Sinai's mind: the loop's WebSocket the window connects to.
     pub sinai_mind: Option<Locate<String>>,
-    /// The speech engine: the program the window starts with `serve`.
+    /// The speech engine: the program the window starts with `serve`, when a build finds it by a rule of its own.
     pub ears: Option<Locate<PathBuf>>,
     /// Voice enrolment's tools.
     pub voice: Option<Locate<VoiceTools>>,
@@ -330,7 +331,7 @@ impl Registry {
         self
     }
 
-    /// Where the speech engine's program is.
+    /// Where the speech engine's program is, by this build's own rule (the app has a built-in one).
     pub fn ears(mut self, locate: impl Fn() -> Result<PathBuf, String> + Send + Sync + 'static) -> Registry {
         self.processes.ears = Some(Arc::new(locate));
         self

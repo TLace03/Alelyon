@@ -47,6 +47,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "alelyon-ears"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tungstenite",
+ "windows 0.61.3",
+]
+
+[[package]]
 name = "alelyon-identity-client"
 version = "0.1.0"
 dependencies = [
@@ -368,6 +377,7 @@ dependencies = [
 name = "centcom"
 version = "0.1.0"
 dependencies = [
+ "alelyon-ears",
  "alelyon-identity-client",
  "alelyon-model-anatomy",
  "alelyon-plugin-api",

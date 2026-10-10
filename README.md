@@ -65,6 +65,7 @@ data and no account.
 | The app shell (`centcom/`) | The window and its title bar, sign-in, the gold-fog backdrop, Settings, and the Overview, Words, Data and Trust pages. |
 | Lattice (`lattice/`) | The chat and coding agent with its IDE: explorer, editor, search, a terminal, staged changes with a review, and a policy that allows, asks or refuses each tool call. |
 | Sinai (`crates/sinai-face/`) | Its face and its page, with a model of your own. |
+| The ears (`crates/alelyon-ears/`) | The speech engine the Words page starts: live captions, dictation, the PC's own audio and audio files, turned into words on this PC. |
 | The simulator (`sim/`) | A scene importer for MuJoCo's MJCF files, a CPU physics core ported from MuJoCo and held to it by golden files, and a CPU ray caster that draws it. |
 | Measurement and training (`crates/model-anatomy/`) | Lattice's measurement engine, in C++, and the Training Studio's view of a trainer's metrics. |
 | The research archive (`crates/research-archive/`) | Subjects, their papers, the citation map and the gaps worth pursuing, kept on this PC. |
@@ -88,12 +89,28 @@ The window opens on the sign-in screen; *Use Alelyon offline* opens everything t
 this PC. Run it from inside this checkout: the simulator reads its scenes from `sim/`.
 `centcom --help` lists the options (`--section`, `--tab`, `--screenshot`).
 
+For the Words page, build the speech engine too and put it beside the window (from the
+checkout's root):
+
+```bash
+(cd crates/alelyon-ears && cargo build --release --locked)
+cp crates/alelyon-ears/target/release/angel-ears.exe centcom/target/release/
+```
+
+The engine reads speech with whisper.cpp's `whisper-server.exe` (built from
+[whisper.cpp](https://github.com/ggml-org/whisper.cpp), MIT; put it beside
+`angel-ears.exe` or in a `whisper` folder there) and the model
+`ggml-large-v3-turbo-q5_0.bin` in `~/.alelyon/angel/models/`. Neither is in this
+repository and the app never downloads them: the Words page says which one is missing and
+where it goes, and starts the engine once both are in place.
+
 Each module also builds and tests on its own:
 
 ```bash
 (cd centcom && cargo test --locked)                     # the window
 (cd lattice && cargo test --locked --workspace)         # Lattice
 (cd sim && cargo test --locked --workspace)             # the simulator
+(cd crates/alelyon-ears && cargo test --locked)         # the speech engine
 (cd crates/alelyon-verify && cargo test --locked)       # the receipt verifier
 ```
 
@@ -114,7 +131,7 @@ what the part is, and how to get it, instead of showing an error.
 
 | Repository | What it holds |
 |---|---|
-| [Alelyon-Client](https://github.com/TLace03/Alelyon-Client) | The client's open modules: the identity client, Lattice, the simulator and Sinai's face. |
+| [Alelyon-Client](https://github.com/TLace03/Alelyon-Client) | The client's open modules: the identity client, Lattice, the simulator, Sinai's face and the ears. |
 | [Alelyon-OS](https://github.com/TLace03/Alelyon-OS) | The `alelyon-os` package and the Rust receipt verifier, with the receipts' specification. |
 | Alelyon (this one) | The app, with copies of those modules from the same revision, and this showcase. |
 
