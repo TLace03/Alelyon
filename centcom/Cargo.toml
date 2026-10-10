@@ -71,6 +71,10 @@ alelyon-verify = { path = "../crates/alelyon-verify" }
 # stack row.
 # Its packages (serde, serde_json, cc) are already in this lock; it compiles its own C++ with the platform compiler.
 alelyon-model-anatomy = { path = "../crates/model-anatomy" }
+# The speech engine's own rule for where its recogniser and model are (alelyon_ears::setup), so the Words page names
+# what is missing in the engine's own words before it starts it (../crates/alelyon-ears, Apache-2.0). Its packages
+# (serde_json, tungstenite, windows 0.61) are already in this lock: it adds an edge and one path package.
+alelyon-ears = { path = "../crates/alelyon-ears" }
 # The ears' socket, as the ears speak it: blocking, loopback, no TLS.
 tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
 # The project's SQLite stores, read only, for the Data page (and the research archive's own store). SQLite is

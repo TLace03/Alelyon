@@ -30,14 +30,15 @@ type El<'a> = Element<'a, Message>;
 /// The rail's width: an icon and a one-word label.
 const RAIL_W: f32 = 84.0;
 
-/// The window: its own title bar and resize edges (it has no Windows frame) around what it shows. Signed in, the bar
-/// is the canvas's black above the main window; on the sign-in screen it is transparent over the backdrop.
+/// The window, with its resize edges (it has no Windows frame) around what it shows. Signed in, the title bar's
+/// features are in the main window: the buttons at the top of the rail, the rail's mark and empty space to drag it;
+/// on the sign-in screen they are a bar, transparent over the backdrop.
 pub fn view(app: &App) -> El<'_> {
     crate::frame_stats::view();
-    let bar = crate::chrome::bar(app.signin.through(), app.maximised, Message::Chrome);
     let framed: El<'_> = if app.signin.through() {
-        column![bar, content(app)].into()
+        content(app)
     } else {
+        let bar = crate::chrome::bar(false, app.maximised, Message::Chrome);
         stack![content(app), column![bar]].into()
     };
     if app.maximised { framed } else { stack![framed, crate::chrome::edges(Message::Chrome)].into() }
@@ -57,12 +58,20 @@ fn content(app: &App) -> El<'_> {
         // a build without it, or a copy not run from a checkout, says so, calmly
         Section::Fleet => match &app.fleet {
             Some(fleet) if app.can(Capability::CheckoutTools) => fleet.view(app.phase).map(Message::Fleet),
-            _ => absent_page(Section::Fleet, "Fleet", Capability::CheckoutTools),
+            Some(_) => absent_page(Section::Fleet, "Fleet", Capability::CheckoutTools),
+            None => Column::new()
+                .spacing(18)
+                .push(heading("Fleet", Section::Fleet.purpose()))
+                .push(ui::absent(crate::capability::FLEET_ABSENT))
+                .into(),
         },
         Section::Data => crate::data::view(&app.data, app.phase).map(Message::Data),
         Section::Research => crate::research::view(&app.research, app.phase).map(Message::Research),
         Section::Compute => crate::compute::view(&app.compute, app.phase).map(Message::Compute),
         Section::Lattice => crate::lattice::view(&app.lattice, app.phase).map(Message::Lattice),
+        // a hosted feature: signed in, the page; signed out (or offline), what it is and how to have it
+        Section::Pages if app.can(Capability::Pages) && app.pages.active() => crate::pages::view(&app.pages, app.phase).map(Message::Pages),
+        Section::Pages => absent_page(Section::Pages, "Pages", Capability::Pages),
         Section::Account => account_page(app),
     };
     let mut body = Column::new().width(Length::Fill).height(Length::Fill);
@@ -189,7 +198,9 @@ fn rail(app: &App) -> El<'_> {
             .into(),
         None => ui::caps("Alelyon", 10.5, theme::GOLD),
     };
-    items = items.push(container(brand).padding([12.0, 0.0]));
+    // The window's buttons at the top of the rail; the mark under them drags the window.
+    items = items.push(container(crate::chrome::compact(app.maximised, Message::Chrome)).padding(iced::padding::top(6)));
+    items = items.push(crate::chrome::drag(container(brand).padding([8.0, 0.0]).width(Length::Fill).center_x(Length::Fill), Message::Chrome));
     for section in Section::ALL {
         let selected = app.section == section;
         let color = if selected { theme::GOLD } else { theme::TEXT_DIM };
@@ -210,7 +221,8 @@ fn rail(app: &App) -> El<'_> {
                 .style(theme::rail_button(selected)),
         );
     }
-    items = items.push(space().height(Length::Fill));
+    // The rail's empty space drags the window too.
+    items = items.push(crate::chrome::drag(space().width(Length::Fill).height(Length::Fill), Message::Chrome));
     // friends, while signed in: how many are online, and a gold count of unread messages
     if app.social.active() && app.can(Capability::Friends) {
         let (online, unread) = app.social.list.as_ref().map(|l| (l.online(), l.unread())).unwrap_or((0, 0));
@@ -444,10 +456,23 @@ fn engine_card(app: &App) -> El<'_> {
         Link::Lost(why) => column![working(app, "Reconnecting to the speech engine"), label(why.as_str(), 12.0, theme::TEXT_FAINT)].spacing(4).into(),
         Link::Unavailable(_) if app.starting => working(app, "Starting the speech engine and loading its model"),
         Link::Unavailable(why) => {
-            let start: El<'_> = match ears::engine_exe() {
-                Some(Ok(_)) => primary("Start the speech engine", Message::StartEngine),
-                Some(Err(why)) => label(why, 12.5, theme::CAUTION).into(),
-                None => label(crate::installed::EARS_NOT_IN_BUILD, 12.5, theme::TEXT_FAINT).into(),
+            let start: El<'_> = match ears::can_start() {
+                ears::Start::Ready => primary("Start the speech engine", Message::StartEngine),
+                ears::Start::NoEngine(why) => label(why, 12.5, theme::CAUTION).into(),
+                // what the engine runs is not in place: the steps, calmly, and the start for when they are done
+                ears::Start::Missing(steps) => {
+                    let mut empty = Column::new().spacing(6).push(strong(ears::MISSING_TITLE, 14.0, theme::TEXT));
+                    for step in steps {
+                        empty = empty.push(label(step, 13.0, theme::TEXT_DIM));
+                    }
+                    empty = empty.push(label(ears::MISSING_NOTE, 12.5, theme::TEXT_FAINT));
+                    column![
+                        container(empty).padding([12.0, 14.0]).width(Length::Fill).style(theme::panel),
+                        secondary("Start the speech engine", Some(Message::StartEngine))
+                    ]
+                    .spacing(10)
+                    .into()
+                }
             };
             column![row![dot(theme::TEXT_FAINT), label(why.as_str(), 13.5, theme::TEXT)].spacing(10).align_y(Alignment::Center), start]
                 .spacing(10)

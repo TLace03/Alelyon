@@ -14,6 +14,8 @@ pub enum Capability {
     VerifyReceipts,
     /// Friends, presence and chat (the rail's friends button and panel).
     Friends,
+    /// Pages: public profiles, organizations and posts (the Pages page).
+    Pages,
     /// The Compute page's emulator tab.
     ComputeEmulator,
     /// The Compute page's tab of recorded GPU jobs.
@@ -33,7 +35,8 @@ pub enum Capability {
     /// in the Models panel: Sinai's page talks to it when the build carries no mind, or when the person picks it over
     /// the mind; Lattice's chat can use it too. Every build has it: it needs no server and no closed part.
     OwnModel,
-    /// Starting the speech engine from the window. Without it one already running is still read.
+    /// Starting the speech engine from the window (its program beside the window's, or `CENTCOM_EARS`). Every build
+    /// has it: the engine is open source. Its model is a file the person puts in place.
     StartEars,
     /// Voice enrolment: showing, re-recording and erasing Sinai's voiceprint of its person.
     VoiceEnrolment,
@@ -53,9 +56,10 @@ pub enum Unlock {
 }
 
 /// Every capability, what it is, and what unlocks it.
-pub const CAPABILITIES: [(Capability, &str, Unlock); 13] = [
+pub const CAPABILITIES: [(Capability, &str, Unlock); 14] = [
     (Capability::VerifyReceipts, "Verify a receipt", Unlock::Always),
     (Capability::Friends, "Friends, presence and chat", Unlock::SignedIn),
+    (Capability::Pages, "Pages, organizations and posts", Unlock::SignedIn),
     (Capability::ComputeEmulator, "The emulator tab", Unlock::Plugin("emulator")),
     (Capability::ComputeKitJobs, "Kit jobs", Unlock::Plugin("kit")),
     (Capability::IssueReceipts, "Issue receipts", Unlock::Plugin("issue")),
@@ -64,7 +68,7 @@ pub const CAPABILITIES: [(Capability, &str, Unlock); 13] = [
     (Capability::ReplayReceipts, "Replay a receipt's number", Unlock::Plugin(alelyon_plugin_api::REPLAY)),
     (Capability::SinaiMind, "Sinai's mind", Unlock::Plugin(alelyon_plugin_api::SINAI_MIND)),
     (Capability::OwnModel, "Bring your own model (a GGUF file or an OpenAI-compatible endpoint)", Unlock::Always),
-    (Capability::StartEars, "Start the speech engine", Unlock::Plugin(alelyon_plugin_api::EARS)),
+    (Capability::StartEars, "Start the speech engine", Unlock::Always),
     (Capability::VoiceEnrolment, "Voice enrolment", Unlock::Plugin(alelyon_plugin_api::VOICE)),
     (Capability::SimulatorScenes, "The simulator's scenes", Unlock::DevCheckout),
 ];
@@ -116,6 +120,14 @@ pub fn absent(capability: Capability) -> Absent {
     }
 }
 
+/// The Fleet page in a build that does not carry it (its page is a plug-in of the official app), wherever the build
+/// runs from.
+pub const FLEET_ABSENT: Absent = Absent {
+    what: "Fleet",
+    why: "Fleet comes only with the official Alelyon app.",
+    how: "Install the official Alelyon app to use it.",
+};
+
 /// What the window knows when it asks: whether a person is signed in, the plug-ins this build carries, and whether
 /// it runs from a checkout.
 #[derive(Clone, Copy, Debug)]
@@ -158,6 +170,7 @@ mod tests {
         let public = Context { signed_in: false, plugins: &[], dev_checkout: false };
         assert!(available(Capability::VerifyReceipts, &public));
         assert!(available(Capability::OwnModel, &public), "a model of your own needs no plug-in, no account and no checkout");
+        assert!(available(Capability::StartEars, &public), "the speech engine is open: every build can start it");
         for c in [
             Capability::Friends,
             Capability::ComputeEmulator,
@@ -166,7 +179,6 @@ mod tests {
             Capability::DataTrust,
             Capability::ReplayReceipts,
             Capability::SinaiMind,
-            Capability::StartEars,
             Capability::VoiceEnrolment,
             Capability::SimulatorScenes,
         ] {
@@ -186,7 +198,7 @@ mod tests {
         }
         assert!(!available(Capability::Friends, &owner), "a plug-in does not sign anyone in");
         assert!(plugin_shown("emulator", &owner) && plugin_shown("anything else", &owner));
-        let official = Context { signed_in: false, plugins: &["replay", "sinai-mind", "ears", "voice"], dev_checkout: false };
+        let official = Context { signed_in: false, plugins: &["replay", "sinai-mind", "voice"], dev_checkout: false };
         for c in [Capability::ReplayReceipts, Capability::SinaiMind, Capability::StartEars, Capability::VoiceEnrolment] {
             assert!(available(c, &official), "{c:?} comes with the official build's plug-in");
         }
@@ -215,5 +227,8 @@ mod tests {
             assert!(absent(c).why.starts_with("It is not in this build"), "{c:?}");
         }
         assert_eq!(name(Capability::SimulatorScenes), "The simulator's scenes");
+        // a build without the Fleet page says where it comes from, run from a checkout or not
+        assert_eq!(FLEET_ABSENT.why, "Fleet comes only with the official Alelyon app.");
+        assert!(!FLEET_ABSENT.why.contains("checkout") && !FLEET_ABSENT.how.is_empty());
     }
 }

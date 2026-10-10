@@ -21,6 +21,7 @@ pub mod ide;
 pub mod morphometry;
 pub mod morphometry_store;
 pub mod probes;
+pub mod stages;
 pub mod obligations;
 pub mod system;
 pub mod training;
@@ -559,6 +560,13 @@ impl State {
             || self.morphometry.busy()
             || self.foundry.busy()
             || self.open.as_ref().is_some_and(|c| c.running)
+            // A chat in the grid at work, while the grid is on show (its tile's spinner turns).
+            || (self.ide.grid.shown && self.ide.grid.tiles.iter().any(|t| !t.recording && (t.sending || t.conversation.as_ref().is_some_and(|c| c.running))))
+    }
+
+    /// The chat is the planning chat beside the grid: Ask only.
+    pub fn planning(&self) -> bool {
+        self.ide.grid.shown && self.ide.grid.beside == ide::grid::Beside::Chat
     }
 
     /// The conversation shown, if any.
@@ -693,7 +701,7 @@ impl State {
                 #[cfg(debug_assertions)]
                 self.load_fixture();
                 // The agent's browser: on or off, for the composer and the Tools view.
-                let mut tasks = vec![self.refresh(), self.read_browser()];
+                let mut tasks = vec![self.refresh(), self.read_browser(), self.read_completion()];
                 // A folder named on the command line opens once the services run.
                 if let Some((folder, _)) = &self.ide.startup {
                     self.ide.folder_path = folder.clone();
@@ -720,6 +728,10 @@ impl State {
                 #[cfg(debug_assertions)]
                 if std::env::var_os("CENTCOM_LATTICE_PROJECT").is_some() {
                     tasks.push(self.photograph_project());
+                }
+                #[cfg(debug_assertions)]
+                if let Ok(paths) = std::env::var("CENTCOM_LATTICE_GRID") {
+                    self.photograph_grid(&paths);
                 }
                 // A debug build's photograph of the composer: it starts with this text (a `/` lists the commands; a
                 // release build never reads this).
@@ -755,7 +767,22 @@ impl State {
                                 }
                             }
                         }
+                        // A debug build's photograph of the grid: the newest chats put in it, up to its size (a release
+                        // build never reads this).
+                        #[cfg(debug_assertions)]
+                        let grid_photo: Vec<String> = if std::env::var("CENTCOM_LATTICE_GRID").is_ok_and(|v| !v.contains(".json"))
+                            && self.ide.grid.tiles.is_empty()
+                        {
+                            list.conversations.iter().take(ide::grid::MAX_TILES).map(|c| c.id.clone()).collect()
+                        } else {
+                            Vec::new()
+                        };
                         self.list = Some(list);
+                        #[cfg(debug_assertions)]
+                        if !grid_photo.is_empty() {
+                            let tasks: Vec<_> = grid_photo.into_iter().map(|id| self.grid(ide::grid::GridMsg::Add(id))).collect();
+                            return Task::batch(tasks);
+                        }
                     }
                     Err(why) => self.problem = Some(why),
                 }
@@ -841,6 +868,12 @@ impl State {
                         self.open = Some(chat::Conversation::from_snapshot(snapshot));
                         self.follow_generation += 1;
                         let mut next = vec![self.read_changes(), self.follow_folder()];
+                        // An action pressed in this chat's pane in the grid, done now that it is the open chat.
+                        if let Some((pending, msg)) = self.ide.grid.pending.take() {
+                            if pending == id {
+                                next.push(self.update(*msg));
+                            }
+                        }
                         if self.ide.side_open && self.ide.side == ide::Side::Changes {
                             next.push(self.ide_update(ide::IdeMsg::ReadHistory));
                         }
@@ -905,6 +938,18 @@ impl State {
                 }
             }
             Msg::Batch(id, events) => {
+                // A chat in the grid takes the batch too (a chat open on the right as well is followed once).
+                let mut grid_task = if self.ide.grid.apply(&id, &events) { self.grid_changes(id.clone()) } else { Task::none() };
+                // Following the agent: the newest change staged in this batch opens as its diff. One of the open
+                // chat's opens at once; one of another chat in the grid opens that chat on the right first.
+                let followed = self.ide.follow.then(|| ide::followed_change(&events)).flatten();
+                let open_here = self.open.as_ref().is_some_and(|c| c.id() == id);
+                if let Some(change) = followed.clone()
+                    && !open_here
+                    && self.ide.grid.holds(&id)
+                {
+                    grid_task = Task::batch([grid_task, self.grid(ide::grid::GridMsg::Act(id.clone(), Box::new(Msg::ShowDiff(change))))]);
+                }
                 if let Some(c) = &mut self.open
                     && c.id() == id
                 {
@@ -937,10 +982,16 @@ impl State {
                     if ended {
                         next.push(self.refresh());
                     }
+                    next.push(grid_task);
+                    if let Some(change) = followed.filter(|_| open_here) {
+                        next.push(self.update(Msg::ShowDiff(change)));
+                    }
                     return Task::batch(next);
                 }
+                return grid_task;
             }
             Msg::FollowEnded(id) => {
+                self.ide.grid.follow_ended(&id);
                 if self.open.as_ref().is_some_and(|c| c.id() == id && c.running) {
                     self.follow_generation += 1;
                 }
@@ -1547,6 +1598,17 @@ impl State {
                 follow_stream,
             ));
         }
+        // Each chat in the grid is followed while the page shows, as the open one is.
+        if let Some(services) = &self.services {
+            for tile in &self.ide.grid.tiles {
+                if let Some(c) = tile.conversation.as_ref().filter(|_| !tile.recording) {
+                    subs.push(Subscription::run_with(
+                        Follow { service: services.agent(), conversation: tile.id.clone(), after: c.last_seq, generation: tile.generation },
+                        follow_stream,
+                    ));
+                }
+            }
+        }
         if self.tab == Tab::Runs && self.runs.list.iter().any(|r| r.status.is_active()) {
             subs.push(iced::time::every(RUNS_POLL).map(|_| Msg::RunsPoll));
         }
@@ -1585,6 +1647,8 @@ impl State {
         if text.is_empty() || self.sending {
             return Task::none();
         }
+        // The planning chat beside the grid asks only: whatever mode was last picked, it writes nothing.
+        let mode = if self.planning() { Mode::Ask } else { mode };
         self.sending = true;
         self.ide.inline_sending = inline;
         let mut request = self.send_request(text, mode, edit_of);
@@ -1600,6 +1664,8 @@ impl State {
     /// What a send asks the core: the open chat (a new one when none is open), the model picked, in the chat's
     /// folder; a new chat joins the project the Chats view has picked (an open one keeps its own).
     pub(in crate::lattice) fn send_request(&self, text: String, mode: Mode, edit_of: Option<String>) -> SendRequest {
+        // Every send from the planning chat beside the grid is Ask, whichever path built it.
+        let mode = if self.planning() { Mode::Ask } else { mode };
         SendRequest {
             conversation: self.open.as_ref().map(|c| c.id().to_string()),
             text,

@@ -27,14 +27,17 @@
 pub mod agent;
 pub mod attach;
 pub mod buffer;
+pub mod complete;
 pub mod editing;
 // Replaces and places files through Win32 (ReplaceFileW, MoveFileExW), so it may use unsafe code, as the job object
 // does.
 #[allow(unsafe_code)]
 pub mod files;
 pub mod find;
+pub mod grid;
 pub mod highlight;
 pub mod mention;
+pub mod notes;
 // Windows' folder picker (IFileOpenDialog, through COM), so it may use unsafe code, as the job object does.
 #[allow(unsafe_code)]
 pub mod picker;
@@ -76,6 +79,15 @@ pub const MAX_TABS: usize = 12;
 pub const PAGE_LINES: u32 = 400;
 /// How long a confirmation ignores input after it appears (as the core's dialogs do).
 pub const CONFIRM_QUIET: Duration = Duration::from_millis(500);
+
+/// The newest change a batch of a chat's events staged, which follow mode opens.
+pub fn followed_change(events: &[lattice_protocol::conversation::ConversationEvent]) -> Option<String> {
+    use lattice_protocol::conversation::ConversationEventKind as Ev;
+    events.iter().rev().find_map(|e| match &e.kind {
+        Ev::Staged { change, .. } => Some(change.to_string()),
+        _ => None,
+    })
+}
 
 /// What the side bar shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -384,6 +396,13 @@ pub struct Ide {
     /// A border being dragged, and the pointer's last position along it.
     pub drag: Option<(Splitter, Option<f32>)>,
     pub chat_filter: ChatFilter,
+    /// Follow the agent: each change it stages opens in the editor as its diff, as it is made.
+    pub follow: bool,
+    /// What the Chats list is searched for (titles), the folders whose every chat is shown, and whether the
+    /// projects are listed under Projects.
+    pub chat_search: String,
+    pub chat_more: HashSet<String>,
+    pub projects_open: bool,
     /// Tool steps opened to show their output.
     pub expanded_calls: HashSet<String>,
     /// A new file's name being typed in the Explorer.
@@ -406,6 +425,8 @@ pub struct Ide {
     pub startup: Option<(String, Option<String>)>,
     /// The person's terminals, the one on show, and whether it has the keyboard.
     pub terms: Vec<term::Term>,
+    /// The chats side by side, shown in the editor's place when on.
+    pub grid: grid::Grid,
     pub term_active: Option<u64>,
     pub term_focus: bool,
     next_term: u64,
@@ -436,10 +457,14 @@ pub struct Ide {
     pub project: Option<String>,
     /// The projects, and a project's page being edited.
     pub projects: projects::ProjectsState,
+    /// The notes beside the open files' lines.
+    pub line_notes: notes::NotesState,
     /// The composer's commands list (`/name`).
     pub slash: slash::Slash,
     /// The composer's file mentions list (`@path`).
     pub mention: mention::Mentioning,
+    /// The editor's Tab completions.
+    pub completion: complete::Completion,
 }
 
 impl Default for Ide {
@@ -467,6 +492,10 @@ impl Default for Ide {
             panel_height: PANEL_HEIGHT,
             drag: None,
             chat_filter: ChatFilter::All,
+            follow: false,
+            chat_search: String::new(),
+            chat_more: HashSet::new(),
+            projects_open: false,
             expanded_calls: HashSet::new(),
             new_file: None,
             filtered: Vec::new(),
@@ -480,6 +509,7 @@ impl Default for Ide {
             command_lines: None,
             startup: None,
             terms: Vec::new(),
+            grid: grid::Grid::default(),
             term_active: None,
             term_focus: false,
             next_term: 1,
@@ -497,8 +527,10 @@ impl Default for Ide {
             tools: tools::Tools::default(),
             project: None,
             projects: projects::ProjectsState::default(),
+            line_notes: notes::NotesState::default(),
             slash: slash::Slash::default(),
             mention: mention::Mentioning::default(),
+            completion: complete::Completion::default(),
         }
     }
 }
@@ -751,6 +783,20 @@ mod tests {
 
     fn file(path: &str) -> TabKind {
         TabKind::File { path: path.into(), lang: highlight::Lang::of(path), body: Body::Loading, note: None }
+    }
+
+    #[test]
+    fn following_opens_the_newest_change_a_batch_staged_and_nothing_without_one() {
+        use lattice_protocol::conversation::{ConversationEvent, ConversationEventKind as Ev};
+        let staged = |seq, change: &str| ConversationEvent {
+            seq,
+            at: seq as f64,
+            kind: Ev::Staged { change: change.into(), path: "a.rs".into(), added: 1, removed: 0, authority: false },
+        };
+        let other = ConversationEvent { seq: 3, at: 3.0, kind: Ev::Delta { text: "done".into() } };
+        assert_eq!(followed_change(&[staged(1, "c_one"), staged(2, "c_two"), other.clone()]).as_deref(), Some("c_two"));
+        assert_eq!(followed_change(&[other]), None);
+        assert_eq!(followed_change(&[]), None);
     }
 
     #[test]

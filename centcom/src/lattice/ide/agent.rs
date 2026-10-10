@@ -13,7 +13,7 @@ use crate::theme::{self, fonts};
 use lattice_protocol::Locality;
 use lattice_protocol::chat::{ChatTurn, Role};
 use lattice_protocol::conversation::{
-    ApprovalDetail, ArtifactKind, ChangeState, CommandMode, DecidedBy, ExitReason, Mode, Origin, PlanOutcome, ReviewOp,
+    ApprovalDetail, ArtifactKind, ChangeState, CommandMode, DecidedBy, ExitReason, Mode, PlanOutcome, ReviewOp,
     TaskOutcome,
     TodoStatus, TrustState,
     TurnStatus,
@@ -46,7 +46,7 @@ fn bubble(_: &iced::Theme) -> container::Style {
 }
 
 /// The composer: a raised card, gold edged while it has the focus.
-fn composer_card(_: &iced::Theme) -> container::Style {
+pub(super) fn composer_card(_: &iced::Theme) -> container::Style {
     container::Style {
         background: Some(Background::Color(theme::CANVAS)),
         text_color: Some(theme::TEXT),
@@ -101,12 +101,19 @@ fn header<'a>(state: &'a State) -> El<'a> {
         None => line = line.push(strong("New chat", 13.5, theme::TEXT)),
     }
     line = line.push(space().width(Length::Fill));
+    // The grid: chats side by side, shown in the editor's place.
+    let grid = &state.ide.grid;
+    let grid_tip = if grid.shown { "Back to the editor" } else { "Chats side by side" };
+    line = line.push(icon("\u{25A6}", grid_tip, Some(super::grid::go(super::grid::GridMsg::Show(!grid.shown)))));
     line = line.push(icon("\u{25C8}", "All chats", Some(go(IdeMsg::Side(Side::Chats)))));
     if let Some(c) = state.conversation() {
         line = line.push(icon("\u{2399}", "Archive this chat (it is never deleted)", Some(Msg::Archive(c.id().to_string()))));
     }
     line = line.push(icon("+", "New chat", Some(Msg::New)));
     let mut col = Column::new().push(container(line).padding([8.0, 12.0]));
+    if let Some(stages) = state.conversation().and_then(|c| stage_line(c, state.changes.as_ref())) {
+        col = col.push(container(stages).padding(Padding { top: 0.0, right: 12.0, bottom: 7.0, left: 12.0 }));
+    }
     // The chat works in another folder than the one the editor shows.
     if let (Some(c), Some(folder)) = (state.conversation(), &state.ide.folder)
         && let Some(w) = &c.summary.workspace
@@ -125,6 +132,37 @@ fn header<'a>(state: &'a State) -> El<'a> {
         );
     }
     col.into()
+}
+
+/// Where a chat is in its work, under its title: the stages, the one it is at in gold, those passed as plain text and
+/// those ahead faint, then how far along its task list is and the step in progress. Nothing until it has begun one.
+pub(super) fn stage_line<'a>(c: &'a Conversation, changes: Option<&'a lattice_protocol::conversation::ChangeSet>) -> Option<El<'a>> {
+    use crate::lattice::stages::{Mark, progress};
+    let p = progress(c, changes);
+    if p.now().is_none() && p.tasks.is_none() {
+        return None;
+    }
+    let mut line = Row::new().spacing(5).align_y(Alignment::Center);
+    for (i, (stage, mark)) in p.stages.iter().enumerate() {
+        if i > 0 {
+            line = line.push(label("\u{203A}", 11.0, theme::TEXT_FAINT));
+        }
+        let color = match mark {
+            Mark::Now => theme::GOLD,
+            Mark::Done => theme::TEXT,
+            Mark::Ahead => theme::TEXT_FAINT,
+        };
+        line = line.push(label(stage.words(), 11.0, color).wrapping(iced::widget::text::Wrapping::None));
+    }
+    if let Some(tasks) = &p.tasks {
+        line = line.push(space().width(Length::Fill));
+        let words = match &tasks.current {
+            Some(step) => format!("{}/{} \u{00B7} {}", tasks.done, tasks.total, ui::cut(step, 40)),
+            None => format!("{}/{}", tasks.done, tasks.total),
+        };
+        line = line.push(label(words, 11.0, theme::TEXT_DIM).wrapping(iced::widget::text::Wrapping::None));
+    }
+    Some(container(line).width(Length::Fill).clip(true).into())
 }
 
 /// No chat open: what the agent does, and a few starts.
@@ -180,7 +218,7 @@ fn empty_state<'a>(state: &'a State) -> El<'a> {
     scrollable(col).height(Length::Fill).style(theme::scrollbars).into()
 }
 
-fn transcript<'a>(c: &'a Conversation, state: &'a State, phase: f32) -> El<'a> {
+pub(super) fn transcript<'a>(c: &'a Conversation, state: &'a State, phase: f32) -> El<'a> {
     let mut col = Column::new().spacing(14).width(Length::Fill);
     let last_answer = c.turns.iter().rposition(|t| t.role == Role::Assistant);
     for (i, turn) in c.turns.iter().enumerate() {
@@ -952,7 +990,11 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
     );
     // The mode, the model, Send.
     let mut bottom = Row::new().spacing(6).align_y(Alignment::Center);
-    for (mode, words) in [(Mode::Agent, "Agent"), (Mode::Ask, "Ask")] {
+    // Beside the grid the chat plans: Ask only, so it reads and answers and writes nothing.
+    if state.planning() {
+        bottom = bottom.push(label("Ask \u{00B7} plans and answers, writes nothing", 12.0, theme::GOLD));
+    }
+    for (mode, words) in [(Mode::Agent, "Agent"), (Mode::Ask, "Ask")].into_iter().filter(|_| !state.planning()) {
         let on = state.mode == mode;
         bottom = bottom.push(
             button(label(words, 12.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
@@ -1082,16 +1124,35 @@ fn composer_keys(
 
 /// Every chat, grouped by the folder it works in, the running and those waiting for the reader marked: the agent
 /// manager's list.
+/// A folder's chats shown before its Show more.
+pub const CHATS_SHOWN: usize = 8;
+
+/// A place at the top of the Chats list: its glyph, its name, what it opens.
+fn place<'a>(glyph: &'a str, words: &'a str, on: bool, msg: Msg) -> El<'a> {
+    button(row![label(glyph, 13.0, if on { theme::GOLD } else { theme::TEXT_DIM }).width(18), label(words, 12.5, if on { theme::GOLD } else { theme::TEXT })].spacing(8).align_y(Alignment::Center))
+        .width(Length::Fill)
+        .padding([4.0, 10.0])
+        .style(theme::list_row(on))
+        .on_press(msg)
+        .into()
+}
+
 pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
     let ide = &state.ide;
-    let mut col = Column::new();
-    let mut head = Row::new().spacing(2).align_y(Alignment::Center).padding([6.0, 8.0]);
-    head = head.push(container(text("CHATS").size(11).font(fonts().ui_strong).color(theme::TEXT_FAINT)).padding([0.0, 4.0]));
-    head = head.push(space().width(Length::Fill));
-    head = head.push(icon("+", "New chat", Some(Msg::New)));
-    // No read-again icon: the chat core says whenever its chats change (`chats_changed`), and the list follows.
-    col = col.push(head);
-    let mut filters = Row::new().spacing(4).padding(Padding { top: 0.0, right: 10.0, bottom: 6.0, left: 10.0 });
+    let mut col = Column::new().spacing(2);
+    // Search, then the places.
+    col = col.push(
+        container(text_input("Search", &ide.chat_search).on_input(|t| go(IdeMsg::ChatSearch(t))).padding([5.0, 8.0]).size(12.5).style(ui::input_style))
+            .padding(Padding { top: 8.0, right: 10.0, bottom: 6.0, left: 10.0 }),
+    );
+    col = col.push(place("+", "New", false, Msg::New));
+    col = col.push(place("\u{25A3}", "Projects", ide.projects_open, go(IdeMsg::ProjectsOpen(!ide.projects_open))));
+    if ide.projects_open {
+        col = col.push(container(super::projects::picker(state)).padding(Padding { top: 2.0, right: 10.0, bottom: 6.0, left: 36.0 }));
+    }
+    col = col.push(place(Side::Tools.glyph(), "Tools", false, go(IdeMsg::Side(Side::Tools))));
+    // Every chat, or those working, or those waiting for you.
+    let mut filters = Row::new().spacing(4).padding(Padding { top: 10.0, right: 10.0, bottom: 2.0, left: 10.0 });
     for (f, words) in [(ChatFilter::All, "All"), (ChatFilter::Running, "Running"), (ChatFilter::NeedsYou, "Needs you")] {
         let on = ide.chat_filter == f;
         filters = filters.push(
@@ -1102,8 +1163,6 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
         );
     }
     col = col.push(filters);
-    // The projects: every chat, or one project's.
-    col = col.push(super::projects::picker(state));
     let mut rows = Column::new().spacing(1);
     match &state.list {
         None => rows = rows.push(container(ui::working(phase, "Reading the chats…")).padding(12)),
@@ -1111,7 +1170,7 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
             if list.index_unreadable {
                 rows = rows.push(container(ui::notice("The chat list could not be read; nothing was written over it.", theme::CAUTION)).padding(8));
             }
-            let now = crate::utc::now();
+            let search = ide.chat_search.trim().to_lowercase();
             let shown: Vec<_> = list
                 .conversations
                 .iter()
@@ -1121,64 +1180,53 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
                     ChatFilter::NeedsYou => c.needs_you || state.calling.contains(&c.id),
                 })
                 .filter(|c| super::projects::shows(state, &c.id))
+                .filter(|c| search.is_empty() || c.title.to_lowercase().contains(&search))
                 .collect();
             if shown.is_empty() {
-                rows = rows.push(container(note(match ide.chat_filter {
-                    ChatFilter::All if ide.project.is_some() => "No chats in this project yet: a new chat now joins it.",
-                    ChatFilter::All => "No chats yet: start one in the panel on the right.",
-                    ChatFilter::Running => "No chat is working now.",
-                    ChatFilter::NeedsYou => "Nothing is waiting for you.",
+                rows = rows.push(container(note(if !search.is_empty() {
+                    "No chat's title has that."
+                } else {
+                    match ide.chat_filter {
+                        ChatFilter::All if ide.project.is_some() => "No chats in this project yet: a new chat now joins it.",
+                        ChatFilter::All => "No chats yet.",
+                        ChatFilter::Running => "No chat is working now.",
+                        ChatFilter::NeedsYou => "Nothing is waiting for you.",
+                    }
                 }))
                 .padding(12));
             }
-            // Grouped by folder, in the order each folder's newest chat comes.
-            let mut groups: Vec<(String, Vec<&lattice_protocol::conversation::ConversationSummary>)> = Vec::new();
+            // By folder, in the order each folder's newest chat comes; the chats with no folder last, as Other.
+            let mut groups: Vec<(Option<&lattice_protocol::conversation::WorkspaceBadge>, Vec<&lattice_protocol::conversation::ConversationSummary>)> =
+                Vec::new();
             for c in shown {
-                let key = c.workspace.as_ref().map(|w| w.name.clone()).unwrap_or_else(|| "No folder".to_string());
-                match groups.iter_mut().find(|(k, _)| *k == key) {
+                let key = c.workspace.as_ref().map(|w| w.id.as_str());
+                match groups.iter_mut().find(|(w, _)| w.map(|w| w.id.as_str()) == key) {
                     Some((_, v)) => v.push(c),
-                    None => groups.push((key, vec![c])),
+                    None => groups.push((c.workspace.as_ref(), vec![c])),
                 }
             }
-            for (group, items) in groups {
-                rows = rows.push(container(label(group, 11.0, theme::TEXT_FAINT)).padding(Padding { top: 6.0, bottom: 2.0, left: 12.0, right: 8.0 }));
-                for c in items {
-                    let open = state.conversation().is_some_and(|o| o.id() == c.id);
-                    let needs = c.needs_you || state.calling.contains(&c.id);
-                    let mut line = Row::new().spacing(7).align_y(Alignment::Center);
-                    line = line.push(if c.running {
-                        crate::spinner::spinner(phase, 10.0)
-                    } else if needs {
-                        dot(theme::GOLD)
-                    } else {
-                        dot(theme::LINE)
-                    });
-                    let title = if c.title.is_empty() { "Untitled" } else { c.title.as_str() };
-                    line = line.push(label(ui::cut(title, 28), 12.5, if open { theme::GOLD } else { theme::TEXT }).width(Length::Fill));
-                    line = line.push(label(super::ago(now - c.updated), 10.5, theme::TEXT_FAINT));
-                    let mut sub = Row::new().spacing(6);
-                    if needs {
-                        sub = sub.push(label("needs you", 10.5, theme::GOLD));
-                    }
-                    if c.mode == Mode::Agent {
-                        sub = sub.push(label("agent", 10.5, theme::TEXT_FAINT));
-                    }
-                    if c.origin == Origin::Web {
-                        sub = sub.push(label("web", 10.5, theme::TEXT_FAINT));
-                    }
-                    // Its project, when every chat is listed.
-                    if ide.project.is_none()
-                        && let Some(name) = super::projects::project_of(state, &c.id)
-                    {
-                        sub = sub.push(label(ui::cut(name, 16), 10.5, theme::TEXT_FAINT));
-                    }
-                    sub = sub.push(label(format!("{} turns", c.turns), 10.5, theme::TEXT_FAINT));
+            groups.sort_by_key(|(w, _)| w.is_none());
+            for (folder, items) in groups {
+                let name = folder.map(|w| w.name.clone()).unwrap_or_else(|| "Other".to_string());
+                let key = folder.map(|w| w.id.clone()).unwrap_or_default();
+                let mut head = Row::new().spacing(4).align_y(Alignment::Center).padding(Padding { top: 10.0, bottom: 2.0, left: 12.0, right: 8.0 });
+                head = head.push(label(name, 11.5, theme::TEXT_FAINT).width(Length::Fill));
+                if let Some(w) = folder {
+                    head = head.push(icon("+", "A new chat in this folder", Some(go(IdeMsg::NewIn(w.path.clone())))));
+                }
+                rows = rows.push(head);
+                let all = ide.chat_more.contains(&key) || !search.is_empty();
+                let hidden = items.len().saturating_sub(CHATS_SHOWN);
+                for c in items.iter().take(if all { items.len() } else { CHATS_SHOWN }) {
+                    rows = rows.push(chat_row(state, c, phase));
+                }
+                if hidden > 0 && search.is_empty() {
+                    let words = if all { "Show fewer".to_string() } else { format!("Show {hidden} more") };
                     rows = rows.push(
-                        button(column![line, row![space().width(17), sub]].spacing(1))
-                            .width(Length::Fill)
-                            .padding([4.0, 10.0])
-                            .style(theme::list_row(open))
-                            .on_press(Msg::Open(c.id.clone())),
+                        button(label(words, 11.5, theme::TEXT_FAINT))
+                            .padding(Padding { top: 3.0, bottom: 3.0, left: 34.0, right: 8.0 })
+                            .style(theme::ghost_button)
+                            .on_press(go(IdeMsg::ChatMore(key, !all))),
                     );
                 }
             }
@@ -1189,6 +1237,31 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
     }
     col = col.push(scrollable(rows).height(Length::Fill).style(theme::scrollbars));
     col.into()
+}
+
+/// One chat's row: what it is doing (working, waiting for you, or still), its title, how long ago, and its grid button.
+fn chat_row<'a>(state: &'a State, c: &'a lattice_protocol::conversation::ConversationSummary, phase: f32) -> El<'a> {
+    let open = state.conversation().is_some_and(|o| o.id() == c.id);
+    let needs = c.needs_you || state.calling.contains(&c.id);
+    let mut line = Row::new().spacing(8).align_y(Alignment::Center);
+    line = line.push(if c.running {
+        crate::spinner::spinner(phase, 10.0)
+    } else if needs {
+        dot(theme::GOLD)
+    } else {
+        dot(theme::LINE)
+    });
+    let title = if c.title.is_empty() { "Untitled" } else { c.title.as_str() };
+    line = line.push(container(label(title, 12.5, if open { theme::GOLD } else { theme::TEXT }).wrapping(iced::widget::text::Wrapping::None)).width(Length::Fill).clip(true));
+    line = line.push(label(super::ago(crate::utc::now() - c.updated), 10.5, theme::TEXT_FAINT));
+    let in_grid = state.ide.grid.holds(&c.id);
+    let grid_msg = if in_grid { super::grid::GridMsg::Remove(c.id.clone()) } else { super::grid::GridMsg::Add(c.id.clone()) };
+    let grid_tip = if in_grid { "Take it out of the grid" } else { "Put it in the grid" };
+    Row::new()
+        .align_y(Alignment::Center)
+        .push(container(button(line).width(Length::Fill).padding([5.0, 10.0]).style(theme::list_row(open)).on_press(Msg::Open(c.id.clone()))).width(Length::Fill))
+        .push(icon(if in_grid { "\u{25A3}" } else { "\u{25A6}" }, grid_tip, Some(super::grid::go(grid_msg))))
+        .into()
 }
 
 // --------------------------------------------------------------------------------------------- the bottom panel

@@ -277,6 +277,8 @@ pub struct App {
     pub signin: crate::signin::State,
     /// Friends, presence and chat, while signed in.
     pub social: crate::social::State,
+    /// Pages: public profiles, organizations and posts, while signed in.
+    pub pages: crate::pages::State,
     /// The window (for the title bar's drag, buttons and edges), whether it is maximised, and the bar's last press.
     pub window_id: Option<window::Id>,
     pub maximised: bool,
@@ -493,6 +495,7 @@ pub enum Message {
     Maximised(bool),
     Resized,
     Social(crate::social::Msg),
+    Pages(crate::pages::Msg),
 }
 
 impl App {
@@ -572,6 +575,7 @@ impl App {
             voice: crate::voice::State::default(),
             signin: signin_state,
             social: crate::social::State::default(),
+            pages: crate::pages::State::default(),
             window_id: None,
             maximised: false,
             bar_pressed: None,
@@ -755,6 +759,7 @@ impl App {
             Section::Data => self.data.busy(),
             Section::Research => self.research.busy(),
             Section::Compute => self.compute.busy(),
+            Section::Pages => self.pages.busy(),
             Section::Lattice => self.lattice.busy(),
             Section::Account => self.signin.busy.is_some(),
         } || (self.models.open && self.models.busy())
@@ -975,6 +980,9 @@ impl App {
                 if section == Section::Compute {
                     return self.compute.open().map(Message::Compute);
                 }
+                if section == Section::Pages && self.pages.active() {
+                    return self.pages.open().map(Message::Pages);
+                }
                 if section == Section::Lattice {
                     return self.lattice.open().map(Message::Lattice);
                 }
@@ -1006,6 +1014,7 @@ impl App {
             Message::Research(msg) => return self.research.update(msg).map(Message::Research),
             Message::Compute(msg) => return self.compute.update(msg).map(Message::Compute),
             Message::Social(msg) => return self.social.update(msg).map(Message::Social),
+            Message::Pages(msg) => return self.pages.update(msg).map(Message::Pages),
             Message::Escape => {
                 if self.signin.settings.is_some() {
                     return self.update(Message::SignIn(crate::signin::Msg::SettingsClose));
@@ -1056,6 +1065,9 @@ impl App {
                 let task = self.signin.update(msg).map(Message::SignIn);
                 // the friends panel follows the session: it starts on signing in and forgets on signing out
                 let friends = self.social.attach(self.signin.session().filter(|_| self.can(Capability::Friends))).map(Message::Social);
+                // so does the Pages page: it is read again on signing in, and forgotten on signing out
+                let on_show = self.section == Section::Pages;
+                let pages = self.pages.attach(self.signin.session().filter(|_| self.can(Capability::Pages)), on_show).map(Message::Pages);
                 if exit {
                     // tell friends this app went offline before the window closes
                     return if self.social.active() {
@@ -1064,7 +1076,7 @@ impl App {
                         iced::exit()
                     };
                 }
-                return Task::batch([task, friends]);
+                return Task::batch([task, friends, pages]);
             }
             Message::Models(msg) => {
                 let task = self.models.update(msg, &mut self.lattice.choice).map(Message::Models);

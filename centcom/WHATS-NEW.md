@@ -3,6 +3,51 @@
 Shown by the account menu's "What's New" (src/signin/mod.rs reads this file at build time). Newest first. Each
 release is a `## ` heading (a date, then an optional title after " — "), followed by `- ` lines in plain words.
 
+## 2026-10-10 — Start the speech engine from the Words page
+
+- Every build of Alelyon can now start the speech engine from the Words page, when `angel-ears.exe` is beside Alelyon's program. The engine is open source.
+- When its speech model or its recogniser is not on this PC yet, the page says which file to put where. Alelyon never downloads them.
+- The Fleet page now says that it comes only with the official Alelyon app.
+
+## 2026-10-10 — Hooks
+
+- Commands you set can run when Lattice's agent works: before a tool runs (to stop it or change it), after it ran, when you send a message, when the agent stops (to have it go on), and when a chat starts.
+- Lattice reads your own hooks, your plugins', and those you already use in Claude Code, Cursor, Gemini CLI and Antigravity, and a trusted folder's.
+- Each hook asks you once, showing its exact command; any change asks again. The Tools page lists them all and takes an allowance back.
+
+## 2026-10-10 — Follow the agent, and notes beside the code
+
+- Follow, at the right of the editor's tabs: while it is on, each change the agent makes opens in the editor as its diff, as it makes it. A change made by another chat in the grid opens that chat beside the grid first.
+- Notes beside the code: explanations attached to lines, shown in the editor and never written into the file. A mark sits by the first line of each note (gold for the agent's), and the notes are listed under the editor; Notes in the file bar hides or shows them.
+- When the agent changes a file, its reason becomes a note on the lines it wrote. Add a note puts your own on the lines you select.
+- A note follows its lines when lines above them are added or removed, and says so when its lines change.
+
+## 2026-10-10 — More room at the top
+
+- The window no longer has a bar of its own above the page: minimise, maximise and close are at the top of the left rail, and you drag the window by the Alelyon mark or the rail's empty space.
+
+## 2026-10-10 — Tab completions in the editor
+
+- As you pause typing in a file, a code model suggests what comes next in grey: Tab takes it, Ctrl+Right takes its next word, Esc puts it away.
+- Choose the model on the Tools page: one on this PC (free, nothing leaves it) or a code model of a provider you connected. Each shows what 1,000 completions cost, grouped by price so you can filter them.
+
+## 2026-10-10 — Where each chat is, and a tidier Chats list
+
+- Under each chat's title: its stages (Plan, Build, Review, Commit, Pull request), the one it is at in gold, and how far along its task list is.
+- The Chats list has a search box, then New, Projects and Tools, then your chats by folder with a + for a new one there. Each folder shows its newest eight, and Show more brings the rest.
+- Beside the grid, the chat is for planning: it asks and answers and writes nothing.
+
+## 2026-10-10 — Chats side by side
+
+- Put up to ten chats side by side and watch them work at once: press the grid button on a chat in the Chats list.
+- Each one is a full chat panel, joined to the next by a thin gold line: its conversation, its approvals and questions, and its own box, mode and model.
+- Beside the grid sits the editor with its tabs, or a chat if you pick Chat above it.
+- Answering an approval in one opens that chat on the right first, so every answer goes to the chat that asked.
+
+## 2026-10-09 — Fleet activity
+
+- The Fleet page has an Activity tab: every session, the agents it started and what each is doing now, with their latest words, and a running tape of the newest turns.
+
 ## 2026-10-09 — Commit and open pull requests from the chat
 
 - In Agent mode, Lattice's agent can make a branch, commit, push and open a pull request (with GitHub's CLI, when it is installed).
