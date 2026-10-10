@@ -1,0 +1,48 @@
+{
+ "ledger": "{\"kind\":\"observation\",\"leaf_hash\":\"77cd03aed91e43d6bb6bcc137e50f71efeb7d3e89c43dc189c5dda9eefe2f31c\",\"payload\":{\"command\":\"git status --short\",\"tool\":\"Bash\"},\"prev_hash\":\"0000000000000000000000000000000000000000000000000000000000000000\",\"seq\":0,\"session\":\"s1\",\"ts\":1786000001}\n{\"kind\":\"observation\",\"leaf_hash\":\"9f7e811bdf3104f821a2e4b3c33275e416fff42be36a638467172e5c2c36e07a\",\"payload\":{\"content_digest\":\"abc\",\"path\":\"C:\\repo\\\\AGENTS.md\",\"tool\":\"Read\"},\"prev_hash\":\"77cd03aed91e43d6bb6bcc137e50f71efeb7d3e89c43dc189c5dda9eefe2f31c\",\"seq\":1,\"session\":\"s1\",\"ts\":1786000002}\n{\"kind\":\"observation\",\"leaf_hash\":\"b990237c310c2977926e12af2813a8ac298a1d965e971dca63f73dc7bac596ed\",\"payload\":{\"command\":\"pytest -q tests/x\",\"exit_status\":0,\"tool\":\"Bash\"},\"prev_hash\":\"9f7e811bdf3104f821a2e4b3c33275e416fff42be36a638467172e5c2c36e07a\",\"seq\":2,\"session\":\"s1\",\"ts\":1786000003}\n{\"kind\":\"declaration\",\"leaf_hash\":\"ebdb64ba89cfd3428375c9b82fd1778002f509399925f9c32da451e54cae8e14\",\"payload\":{\"text\":\"if X then the test fails\",\"what\":\"falsifier\"},\"prev_hash\":\"b990237c310c2977926e12af2813a8ac298a1d965e971dca63f73dc7bac596ed\",\"seq\":3,\"session\":\"s1\",\"ts\":1786000004}\n{\"kind\":\"observation\",\"leaf_hash\":\"f4b11a078b6a94416bdf963912a5f1569ebad061807cf3dc16d69b03663d0ab4\",\"payload\":{\"content_digest\":\"d\",\"path\":\"docs/cne/CLAIMS.md\",\"tool\":\"Read\"},\"prev_hash\":\"ebdb64ba89cfd3428375c9b82fd1778002f509399925f9c32da451e54cae8e14\",\"seq\":4,\"session\":\"s1\",\"ts\":1786000005}\n{\"kind\":\"observation\",\"leaf_hash\":\"be7359852314044b61134e8d0f69e1fe6f3ce5a20180a9d5ed4969a3f9a626b2\",\"payload\":{\"command\":\"cargo test\",\"tool\":\"Bash\"},\"prev_hash\":\"f4b11a078b6a94416bdf963912a5f1569ebad061807cf3dc16d69b03663d0ab4\",\"seq\":5,\"session\":\"s2\",\"ts\":1786000006}\n{\"kind\":\"observation\",\"leaf_hash\":\"da0992430c1b88e14adc65a6a092957b2b9cba803808e476ce3784578e19d3b1\",\"payload\":{\"command\":\"git status\",\"tool\":\"Bash\"},\"prev_hash\":\"be7359852314044b61134e8d0f69e1fe6f3ce5a20180a9d5ed4969a3f9a626b2\",\"seq\":6,\"session\":\"s2\",\"ts\":1786000007}\n{\"kind\":\"observation\",\"leaf_hash\":\"ee878c3cc4264c506b5fce9e0bbfe1be8aff3ea30988caae78883d19473b2faf\",\"payload\":{\"command\":\"git merge origin/main\",\"tool\":\"Bash\"},\"prev_hash\":\"da0992430c1b88e14adc65a6a092957b2b9cba803808e476ce3784578e19d3b1\",\"seq\":7,\"session\":\"s2\",\"ts\":1786000008}\n{\"kind\":\"grant\",\"leaf_hash\":\"97a76501f4aceece0e94542c22f3b21a6501038f872bdbe4b4244dd8cca69f51\",\"payload\":{\"expires_ts\":1786000100,\"scope\":\"merge PR 12\"},\"prev_hash\":\"ee878c3cc4264c506b5fce9e0bbfe1be8aff3ea30988caae78883d19473b2faf\",\"seq\":8,\"session\":\"s2\",\"ts\":1786000009}\n{\"kind\":\"grant\",\"leaf_hash\":\"67a3ef143b180f470295277bd05faa9469092bf257ae1223400cf8094c79dcd5\",\"payload\":{\"expires_ts\":1785999995,\"scope\":\"old grant\"},\"prev_hash\":\"97a76501f4aceece0e94542c22f3b21a6501038f872bdbe4b4244dd8cca69f51\",\"seq\":9,\"session\":\"s2\",\"ts\":1786000010}\n{\"kind\":\"decision\",\"leaf_hash\":\"52dab43507d7dee4c454366f15edd97be67a222163c61de71a070d99dd9094af\",\"payload\":{\"verdict\":\"allow\"},\"prev_hash\":\"67a3ef143b180f470295277bd05faa9469092bf257ae1223400cf8094c79dcd5\",\"seq\":10,\"session\":\"s3\",\"ts\":1786000011}\n",
+ "now": 1786000050,
+ "sessions": {
+  "s1": {
+   "held": [
+    "P0_WORKTREE",
+    "P1_POLICY",
+    "P3_BASELINE",
+    "P4_FALSIFIER",
+    "P5_CLAIM_SCOPE"
+   ],
+   "policy_digest_seen": "abc",
+   "falsifier": "if X then the test fails",
+   "grants": [],
+   "notes": []
+  },
+  "s2": {
+   "held": [
+    "OWNER_AUTHORITY"
+   ],
+   "policy_digest_seen": "",
+   "falsifier": "",
+   "grants": [
+    "merge PR 12"
+   ],
+   "notes": [
+    "a test command was seen but no exit status was recorded; that is UNMEASURED, not a baseline.",
+    "P0_WORKTREE lapsed: `git merge origin/main` changed the tree the evidence described.",
+    "owner grant for 'old grant' expired."
+   ]
+  },
+  "s3": {
+   "held": [],
+   "policy_digest_seen": "",
+   "falsifier": "",
+   "grants": [],
+   "notes": []
+  },
+  "nobody": {
+   "held": [],
+   "policy_digest_seen": "",
+   "falsifier": "",
+   "grants": [],
+   "notes": []
+  }
+ }
+}

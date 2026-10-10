@@ -1,0 +1,16 @@
+[package]
+name = "lattice-probe"
+description = "CENTCOM's activation probe: one forward pass of a prompt through the pinned llama.cpp build, recording activation statistics and the experts each layer chose."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+[[bin]]
+name = "lattice-probe"
+path = "src/main.rs"
+
+[build-dependencies]
+# Already in CENTCOM's lockfile (the morphometry engine builds its C++ with it).
+cc = "1.5.1"

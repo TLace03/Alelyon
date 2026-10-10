@@ -1,0 +1,105 @@
+# CENTCOM: Alelyon's one desktop window for everything it runs on this PC, on
+# iced, with a loading symbol wherever work is happening. It is drawn the way
+# the native Lattice window is (iced over wgpu, only when something changes)
+# and wears that window's black and gold, taken from lattice-app's theme. It is
+# its own workspace with its own lockfile, seeded from Lattice's, so it changes
+# nothing in Lattice's workspace.
+[workspace]
+resolver = "3"
+# Sinai's face is a crate of its own (../crates/sinai-face, its own workspace): its tests run there.
+default-members = [".", "probe"]
+# The activation probe (probe/), a process of its own that the Morphometry tab starts.
+members = ["probe"]
+
+[package]
+name = "centcom"
+description = "CENTCOM: Alelyon's one desktop window: Sinai, transcription, Lattice, data, research, trust, compute and the account."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+# The window is a library (`centcom::run`), and this program runs it with no plug-ins. A build with further sections
+# links the library from a crate of its own and passes `run` a registry (../crates/alelyon-plugin-api).
+[lib]
+name = "centcom"
+path = "src/lib.rs"
+
+[[bin]]
+name = "centcom"
+path = "src/main.rs"
+
+[dependencies]
+# The plug-in registry `run` reads (../crates/alelyon-plugin-api, Apache-2.0): optional Compute tabs and Trust cards.
+# It links iced, at the version and with the executor this lock already holds.
+alelyon-plugin-api = { path = "../crates/alelyon-plugin-api" }
+# The palette, fonts and widget styles (theme.rs), and the screenshot writer.
+lattice-app = { path = "../lattice/crates/lattice-app" }
+# lattice_native's own feature list, so the two windows draw alike, and images without codecs: the simulator's frames
+# arrive as raw pixels (its two extra packages, kamadak-exif and mutate_once, are in this lock).
+iced = { version = "0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "x11", "wayland", "tokio", "canvas", "markdown", "lazy", "advanced", "image-without-codecs"] }
+futures = "0.3.34"
+# The window's icon: the company mark, this crate's assets/alelyon_256.png. Already in this lock (iced's image
+# support brings it); nothing is downloaded for it.
+png = "0.18.1"
+# Signing in (src/signin) and friends (src/social): the identity service's client, UI-free, in its own crate
+# (../crates/alelyon-identity-client, Apache-2.0, also in the public Alelyon-Client repository). It brings the HTTPS
+# client (reqwest over the system's TLS) and PKCE's SHA-256, base64url, randomness and percent-encoding at the versions
+# this lock already holds; src/signin/{client,loopback,vault}.rs re-export it. The QR code for QR sign-in stays here.
+alelyon-identity-client = { path = "../crates/alelyon-identity-client" }
+# The research archive's core (the Research page is src/research), UI-free in its own crate. With `net` it brings reqwest's blocking client, whose extra packages (futures-channel among them) are
+# already in this lock; it is called from plain threads only, never inside the window's async runtime.
+alelyon-research = { path = "../crates/research-archive", features = ["net"] }
+qrcode = { version = "0.14", default-features = false }
+serde_json = "1.0.151"
+# The native Lattice's chat core and runs service, and their protocol, for the Lattice page (the chat core's window is
+# CENTCOM's Lattice section). They are what lattice-app already links, so the lockfile gains no package; the page's own tokio runtime uses the version and features lattice_native already builds.
+lattice-core = { path = "../lattice/crates/lattice-core" }
+lattice-protocol = { path = "../lattice/crates/lattice-protocol" }
+# The model boundary lattice-core's clients speak (a request, its streamed answer): Sinai's page talks to a model of the
+# person's own through lattice-core's client (src/models/byo.rs). Already in this lock through lattice-core: the lockfile
+# gains an edge, not a package.
+lattice-agents = { path = "../lattice/crates/lattice-agents" }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "time"] }
+# The project's own receipt verifier, in Rust. It links no deterministic kernel: a build hands it one through the
+# plug-in registry (Registry::replay), and this public build hands none, so it checks receipts without replaying
+# them. The kernel-backed substrate is private; the official build links it. It turns on serde_json's
+# arbitrary_precision for the whole binary (numbers keep their exact text).
+alelyon-verify = { path = "../crates/alelyon-verify" }
+# Model morphometry's maths in C++ (the measurement engine): the Lattice page's Morphometry tab and the System tab's
+# stack row.
+# Its packages (serde, serde_json, cc) are already in this lock; it compiles its own C++ with the platform compiler.
+alelyon-model-anatomy = { path = "../crates/model-anatomy" }
+# The ears' socket, as the ears speak it: blocking, loopback, no TLS.
+tungstenite = { version = "0.24", default-features = false, features = ["handshake"] }
+# The project's SQLite stores, read only, for the Data page (and the research archive's own store). SQLite is
+# compiled in, so the window needs no DLL; nothing else is turned on (no statement cache, no extensions).
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+# Sinai's simulator, run on the processor for the Compute page: its scene importer, its physics (the CPU
+# reference) and world state, and its CPU ray caster (sim-raycast: the renderer's host reference, which opens no
+# graphics device and links no GPU library) that draws the frames.
+sim-scene = { path = "../sim/crates/sim-scene" }
+sim-physics = { path = "../sim/crates/sim-physics" }
+sim-world = { path = "../sim/crates/sim-world" }
+sim-raycast = { path = "../sim/crates/sim-raycast" }
+# Sinai's face (src/face): the bust, expressions, appearance and shaders the Angel window draws too (../crates/sinai-face,
+# Apache-2.0, also in the public Alelyon-Client repository); the vertex and uniform layouts the card reads
+# (bytemuck); and the camera's matrices (glam, the version iced already builds).
+sinai-face = { path = "../crates/sinai-face" }
+bytemuck = { version = "1.25.2", features = ["derive"] }
+glam = "0.25.0"
+
+# The speech engine CENTCOM starts is tied to it by a job object, so it ends
+# with the window, a crash included (the ears do the same for their recogniser).
+# The Lattice IDE's saves replace a file in place (ReplaceFileW, MoveFileExW:
+# Storage_FileSystem), its Open Folder… is Windows' own folder picker (Shell,
+# Com), and its terminal runs a shell on a pseudoconsole (Console, Pipes).
+# Features of the same crate: nothing is downloaded.
+[target.'cfg(windows)'.dependencies.windows]
+version = "0.61"
+features = ["Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_Com", "Win32_System_Console", "Win32_System_JobObjects", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Shell"]
+
+[profile.release]
+lto = "thin"
+strip = true

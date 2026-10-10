@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "truncated_inventory"
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 80000,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "x",
+  "mixture_of_experts": false,
+  "active_parameters": 20000,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory was truncated at 20,000 tensors; totals below are for the truncated set"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

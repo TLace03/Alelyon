@@ -1,0 +1,27 @@
+{
+ "input": {
+  "model": "  raw name  ",
+  "payload": null
+ },
+ "expected": {
+  "model": "  raw name  ",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime returned no model metadata"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

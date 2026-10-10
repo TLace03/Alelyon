@@ -1,0 +1,823 @@
+{
+ "input": {
+  "measure": true,
+  "model": "a",
+  "payload": {
+   "model": "",
+   "family": "qwen3",
+   "quantization_level": "Q4_K_M",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3"}],
+    ["qwen3.block_count", {"int": "2"}],
+    ["qwen3.embedding_length", {"int": "8"}]
+   ],
+   "tensors": [
+    {"name": "token_embd.weight", "shape": [8, 100], "type": "Q4_K"},
+    {"name": "blk.0.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.0.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.0.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.0.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.0.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "blk.1.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.1.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.1.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.1.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.1.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "output_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "output.weight", "shape": [8, 100], "type": "Q6_K"}
+   ]
+  },
+  "nodes": [
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf00", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf01", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf02", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf03", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf04", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf05", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf06", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf07", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf08", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf09", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf10", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf11", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf12", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf13", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf14", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf15", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf16", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf17", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf18", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf19", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf20", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf21", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf22", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf23", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf24", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf25", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf26", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf27", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf28", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf29", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf30", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf31", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf32", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf33", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf34", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf35", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf36", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf37", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf38", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf39", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf40", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf41", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf42", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf43", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf44", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf45", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf46", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf47", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf48", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf49", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf50", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf51", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf52", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf53", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf54", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf55", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf56", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf57", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf58", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf59", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf60", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf61", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf62", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf63", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["leaf64", "1"],
+    "tier": "RESOLUTION_VARIANT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "block", "semantic_id": "alelyon:model.transformer.block", "kind": "MODEL_LAYER", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": [["stack_external", "block index is absent for embedding and output tensors"]]}, {"axis_id": "module", "semantic_id": "alelyon:model.transformer.module", "kind": "MODEL_STATE", "scalar_type": "LABEL", "ordering": "CANONICAL_LABEL_ORDER", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": "sha256:e5440f12d98a8cfb14f8e9dfa927a25f4f17e46d2479416c06d8c44c7b2ffe4d", "labels": ["attn_k", "attn_k_norm", "attn_norm", "attn_output", "attn_q", "attn_q_norm", "attn_v", "ffn_down", "ffn_expert", "ffn_gate", "ffn_norm", "ffn_up", "other", "output", "output_norm", "token_embd"], "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": [["schema", "alelyon.lattice.model-morphometry/0.1"]]},
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.hierarchy-morphometry/0.1",
+  "model": "a",
+  "hierarchy_state": "AVAILABLE",
+  "model_measured": true,
+  "volumes_built": 1,
+  "layers": [
+   {
+    "tier": "BASE_CONTRACT",
+    "order": 0,
+    "label": "Base CQCS contract",
+    "nodes": 1,
+    "abstract_nodes": 1,
+    "state": "COORDINATE_SPACE_ABSENT",
+    "reason": "this is an abstract lineage tier: it constrains meaning and declares no coordinate space, and no axes were invented for it",
+    "drawn": false,
+    "occupied": 0,
+    "frames": [],
+    "gaps": []
+   },
+   {
+    "tier": "DOMAIN_FAMILY",
+    "order": 1,
+    "label": "Domain template family",
+    "nodes": 0,
+    "abstract_nodes": 0,
+    "state": "TIER_UNPOPULATED",
+    "reason": "the declared hierarchy holds no template at this tier",
+    "drawn": false,
+    "occupied": 0,
+    "frames": [],
+    "gaps": []
+   },
+   {
+    "tier": "APPLICATION",
+    "order": 2,
+    "label": "Institution / application",
+    "nodes": 0,
+    "abstract_nodes": 0,
+    "state": "TIER_UNPOPULATED",
+    "reason": "the declared hierarchy holds no template at this tier",
+    "drawn": false,
+    "occupied": 0,
+    "frames": [],
+    "gaps": []
+   },
+   {
+    "tier": "STUDY_COHORT",
+    "order": 3,
+    "label": "Study / cohort",
+    "nodes": 0,
+    "abstract_nodes": 0,
+    "state": "TIER_UNPOPULATED",
+    "reason": "the declared hierarchy holds no template at this tier",
+    "drawn": false,
+    "occupied": 0,
+    "frames": [],
+    "gaps": []
+   },
+   {
+    "tier": "RESOLUTION_VARIANT",
+    "order": 4,
+    "label": "Resolution variant",
+    "nodes": 65,
+    "abstract_nodes": 0,
+    "state": "MEASURED",
+    "reason": "",
+    "drawn": true,
+    "occupied": 21,
+    "frames": [{"template_id": "leaf00", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf01", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf02", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf03", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf04", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf05", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf06", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf07", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf08", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf09", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf10", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf11", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf12", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf13", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf14", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf15", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf16", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf17", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf18", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf19", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf20", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf21", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf22", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf23", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf24", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf25", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf26", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf27", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf28", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf29", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf30", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf31", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf32", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf33", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf34", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf35", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf36", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf37", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf38", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf39", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf40", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf41", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf42", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf43", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf44", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf45", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf46", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf47", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf48", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf49", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf50", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf51", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf52", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf53", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf54", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf55", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf56", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf57", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf58", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf59", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf60", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf61", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf62", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}, {"template_id": "leaf63", "template_version": "1", "label": "L", "space_id": "alelyon.model.transformer.canonical", "space_version": "0.1.0", "space_commitment": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb", "state": "MEASURED", "compatibility": "EXACT_IDENTITY", "explanation": "ordered declared coordinate metadata matches exactly", "transform_policy": [], "drawn": true, "occupied": 21}],
+    "gaps": []
+   }
+  ],
+  "findings": [],
+  "gaps": [
+   "the volume is measured ONCE from the model's own inventory and shared by every frame it registers onto: these layers are frames, not independent measurements of the model",
+   "a layer draws only where the registration core returned an exact identity or axis permutation. No layer here resamples, remaps or aggregates the model's cells onto a different frame",
+   "tier RESOLUTION_VARIANT declares more than 64 concrete frames; the layer below is the truncated set",
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "field": {
+   "width": 2,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 800,
+   "has_stack_external": true,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": 800,
+   "has_active_path": true,
+   "occupied": 21,
+   "capacity": 50,
+   "voxels": [
+    {"x": -1, "y": 0, "z": 0, "module": "token_embd", "parameters": 800, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 800, "active_intensity": 1.0},
+    {"x": -1, "y": 1, "z": 4, "module": "output_norm", "parameters": 8, "intensity": 0.01, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.01},
+    {"x": -1, "y": 4, "z": 0, "module": "output", "parameters": 800, "intensity": 1.0, "bits_per_weight": 6.56, "active_parameters": 800, "active_intensity": 1.0},
+    {"x": 0, "y": 1, "z": 0, "module": "attn_norm", "parameters": 8, "intensity": 0.01, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.01},
+    {"x": 0, "y": 1, "z": 3, "module": "ffn_norm", "parameters": 8, "intensity": 0.01, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.01},
+    {"x": 0, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 0.08, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 0.08},
+    {"x": 0, "y": 2, "z": 1, "module": "attn_k", "parameters": 32, "intensity": 0.04, "bits_per_weight": 4.5, "active_parameters": 32, "active_intensity": 0.04},
+    {"x": 0, "y": 2, "z": 2, "module": "attn_v", "parameters": 32, "intensity": 0.04, "bits_per_weight": 6.5, "active_parameters": 32, "active_intensity": 0.04},
+    {"x": 0, "y": 2, "z": 3, "module": "attn_output", "parameters": 64, "intensity": 0.08, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 0.08},
+    {"x": 0, "y": 3, "z": 0, "module": "ffn_gate", "parameters": 128, "intensity": 0.16, "bits_per_weight": 4.5, "active_parameters": 128, "active_intensity": 0.16},
+    {"x": 0, "y": 3, "z": 1, "module": "ffn_up", "parameters": 128, "intensity": 0.16, "bits_per_weight": 4.5, "active_parameters": 128, "active_intensity": 0.16},
+    {"x": 0, "y": 3, "z": 2, "module": "ffn_down", "parameters": 128, "intensity": 0.16, "bits_per_weight": 6.5625, "active_parameters": 128, "active_intensity": 0.16},
+    {"x": 1, "y": 1, "z": 0, "module": "attn_norm", "parameters": 8, "intensity": 0.01, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.01},
+    {"x": 1, "y": 1, "z": 3, "module": "ffn_norm", "parameters": 8, "intensity": 0.01, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.01},
+    {"x": 1, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 0.08, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 0.08},
+    {"x": 1, "y": 2, "z": 1, "module": "attn_k", "parameters": 32, "intensity": 0.04, "bits_per_weight": 4.5, "active_parameters": 32, "active_intensity": 0.04},
+    {"x": 1, "y": 2, "z": 2, "module": "attn_v", "parameters": 32, "intensity": 0.04, "bits_per_weight": 6.5, "active_parameters": 32, "active_intensity": 0.04},
+    {"x": 1, "y": 2, "z": 3, "module": "attn_output", "parameters": 64, "intensity": 0.08, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 0.08},
+    {"x": 1, "y": 3, "z": 0, "module": "ffn_gate", "parameters": 128, "intensity": 0.16, "bits_per_weight": 4.5, "active_parameters": 128, "active_intensity": 0.16},
+    {"x": 1, "y": 3, "z": 1, "module": "ffn_up", "parameters": 128, "intensity": 0.16, "bits_per_weight": 4.5, "active_parameters": 128, "active_intensity": 0.16},
+    {"x": 1, "y": 3, "z": 2, "module": "ffn_down", "parameters": 128, "intensity": 0.16, "bits_per_weight": 6.5625, "active_parameters": 128, "active_intensity": 0.16}
+   ]
+  }
+ }
+}

@@ -1,0 +1,41 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "phi3",
+   "quantization_level": "F16",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "phi3"}],
+    ["general.parameter_count", {"int": "3800000000"}],
+    ["a.block_count", {"int": "32"}],
+    ["b.block_count", {"int": "40"}],
+    ["a.attention.head_count", {"int": "32"}],
+    ["b.attention.head_count", {"int": "16"}],
+    ["a.attention.head_count_kv", {"int": "8"}],
+    ["general.context_length", {"int": "4096"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": 8,
+  "key_length": null,
+  "value_length": null,
+  "context_max": 4096,
+  "weight_bytes": 7600000000,
+  "weight_provenance": "DERIVED",
+  "parameters": 3800000000,
+  "quantization": "F16",
+  "architecture": "phi3",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

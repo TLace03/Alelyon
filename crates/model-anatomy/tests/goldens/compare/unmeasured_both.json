@@ -1,0 +1,67 @@
+{
+ "input": {
+  "left": {
+   "analyze_case": "payload_none",
+   "model": "x",
+   "payload": null,
+   "record": {
+    "model": "x",
+    "source": "",
+    "schema_version": "alelyon.lattice.model-morphometry/0.1",
+    "refusal": "NO_MODEL_METADATA",
+    "gaps": ["the runtime returned no model metadata"],
+    "native_axis_order": ["block", "module"],
+    "expert_count": null,
+    "expert_used_count": null,
+    "cells": []
+   }
+  },
+  "right": {
+   "analyze_case": "empty_tensor_list",
+   "model": "x",
+   "payload": {
+    "model": "",
+    "family": "",
+    "quantization_level": "",
+    "parent_model": "",
+    "model_info": [["general.architecture", {"str": "llama"}], ["llama.block_count", {"int": "0"}]],
+    "tensors": []
+   },
+   "record": {
+    "model": "x",
+    "source": "DECLARED_ARCHITECTURE",
+    "schema_version": "alelyon.lattice.model-morphometry/0.1",
+    "refusal": "BLOCK_COUNT_NOT_DECLARED",
+    "gaps": ["the runtime declares no block count, so there is no stack to arrange"],
+    "native_axis_order": ["block", "module"],
+    "expert_count": null,
+    "expert_used_count": null,
+    "cells": []
+   }
+  }
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.model-morphometry-comparison/0.1",
+  "code": "INPUT_UNMEASURED",
+  "ok": false,
+  "complete": false,
+  "explanation": "comparison requires two measured operands (left: NO_MODEL_METADATA; right: BLOCK_COUNT_NOT_DECLARED)",
+  "left_model": "x",
+  "right_model": "x",
+  "left_source": "",
+  "right_source": "DECLARED_ARCHITECTURE",
+  "space_ref": "",
+  "cells": [],
+  "gaps": [],
+  "left_gaps": [
+   "the runtime returned no model metadata"
+  ],
+  "right_gaps": [
+   "the runtime declares no block count, so there is no stack to arrange"
+  ],
+  "unmeasured_sides": [
+   "left",
+   "right"
+  ]
+ }
+}

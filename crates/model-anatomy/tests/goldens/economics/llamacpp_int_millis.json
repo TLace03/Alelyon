@@ -1,0 +1,25 @@
+{
+ "input": {
+  "kind": "throughput_from_llamacpp",
+  "payload": {
+   "model": null,
+   "timings": [
+    ["predicted_n", {"int": "100"}],
+    ["predicted_ms", {"int": "2000"}],
+    ["prompt_n", {"int": "7"}],
+    ["prompt_ms", {"int": "3"}]
+   ]
+  },
+  "model": "",
+  "context": 32768
+ },
+ "expected": {
+  "model": "",
+  "context": 32768,
+  "decode_tokens_per_second": 50.0,
+  "prefill_tokens_per_second": 2333.3333333333335,
+  "method": "the runtime's own timings, excluding model load time",
+  "provenance": "OBSERVED",
+  "complete": true
+ }
+}

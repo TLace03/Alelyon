@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "one_sided_routing_5"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 2854,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": true,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares unusable routing metadata for expert_used_count; each value must be an integer. The expert partition is not established, so the active-parameter figure is UNMEASURED."
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

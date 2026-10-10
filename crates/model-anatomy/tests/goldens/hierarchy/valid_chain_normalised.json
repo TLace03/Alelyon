@@ -1,0 +1,107 @@
+{
+ "input": {
+  "nodes": [
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "  Root  ",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["z gap", "a gap", "z gap"]
+   },
+   {
+    "ref": ["fam", "1"],
+    "tier": "DOMAIN_FAMILY",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"], ["root", "1"]],
+    "coordinate_space": null,
+    "transform_policy": ["B", "A", "B"],
+    "gaps": []
+   },
+   {
+    "ref": ["app", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["fam", "1"]],
+    "coordinate_space": {"space_id": "s.app", "version": "1", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "a", "semantic_id": "test:a", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": []},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["app", "2"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["fam", "1"]],
+    "coordinate_space": {"space_id": "s.app", "version": "1", "topology": "RECTANGULAR_TABLE", "axes": [{"axis_id": "a", "semantic_id": "test:a", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": []}], "index_convention": "ZERO_BASED", "unit_system": null, "reference_frame": null, "valid_domain_rule": "ALL_DECLARED_COORDINATES", "region_atlas_refs": [], "metadata": []},
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "AVAILABLE",
+  "nodes": [
+   {
+    "ref": {"template_id": "root", "version": "1"},
+    "tier": "BASE_CONTRACT",
+    "label": "Root",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["a gap", "z gap"]
+   },
+   {
+    "ref": {"template_id": "fam", "version": "1"},
+    "tier": "DOMAIN_FAMILY",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "root", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": ["A", "B"],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "app", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "fam", "version": "1"}],
+    "coordinate_space": {"space_id": "s.app", "version": "1", "topology": "RECTANGULAR_TABLE", "axes": ["a"], "index_convention": "ZERO_BASED", "ref": "sha256:4f9c890e9d2ef9ea0addd6e9b10ddc0cd8d575b434c7ead21c97e04c0e8035ee"},
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "app", "version": "2"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "fam", "version": "1"}],
+    "coordinate_space": {"space_id": "s.app", "version": "1", "topology": "RECTANGULAR_TABLE", "axes": ["a"], "index_convention": "ZERO_BASED", "ref": "sha256:4f9c890e9d2ef9ea0addd6e9b10ddc0cd8d575b434c7ead21c97e04c0e8035ee"},
+    "transform_policy": [],
+    "gaps": []
+   }
+  ],
+  "findings": [],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": [
+   {
+    "template_id": "root",
+    "version": "1"
+   }
+  ]
+ }
+}

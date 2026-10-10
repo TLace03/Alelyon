@@ -1,0 +1,23 @@
+{
+ "input": {
+  "kind": "throughput_from_llamacpp",
+  "payload": {
+   "model": null,
+   "timings": [
+    ["predicted_n", {"str": "128"}],
+    ["predicted_ms", {"str": "1450"}]
+   ]
+  },
+  "model": "",
+  "context": 0
+ },
+ "expected": {
+  "model": "",
+  "context": 0,
+  "decode_tokens_per_second": null,
+  "prefill_tokens_per_second": null,
+  "method": "the runtime's own timings, excluding model load time",
+  "provenance": "OBSERVED",
+  "complete": false
+ }
+}

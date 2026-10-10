@@ -1,0 +1,72 @@
+{
+ "input": {
+  "model": "qwen3:test",
+  "payload": {
+   "model": "",
+   "family": "qwen3",
+   "quantization_level": "Q4_K_M",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3"}],
+    ["qwen3.block_count", {"int": "4"}],
+    ["qwen3.embedding_length", {"int": "8"}]
+   ],
+   "tensors": [
+    {"name": "token_embd.weight", "shape": [8, 100], "type": "Q4_K"},
+    {"name": "blk.0.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.0.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.0.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.0.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.0.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "blk.1.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.1.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.1.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.1.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.1.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "blk.2.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.2.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.2.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.2.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.2.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.2.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.2.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "blk.3.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.3.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.attn_k.weight", "shape": [8, 4], "type": "Q4_K"},
+    {"name": "blk.3.attn_v.weight", "shape": [8, 4], "type": "Q6_K"},
+    {"name": "blk.3.attn_output.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.3.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.3.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"},
+    {"name": "blk.3.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"},
+    {"name": "output_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "output.weight", "shape": [8, 100], "type": "Q6_K"}
+   ]
+  }
+ },
+ "expected": {
+  "code": "EXACT_IDENTITY",
+  "compatible": true,
+  "explanation": "ordered declared coordinate metadata matches exactly",
+  "transform": {
+   "transforms": [
+    {"transform_type": "IDENTITY", "loss_class": "LOSSLESS", "invertibility": "EXACT", "source_order": null}
+   ],
+   "loss_class": "LOSSLESS",
+   "invertibility": "EXACT"
+  },
+  "failing_constraint": null,
+  "evidence": [],
+  "can_retry_with_metadata_or_policy": false
+ }
+}

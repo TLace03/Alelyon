@@ -1,0 +1,115 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3"}]
+   ],
+   "tensors": [
+    {"name": "  blk.0.attn_q.weight  ", "shape": [8, 8], "type": " q4_k "},
+    {"name": "BLK.0.ATTN_K.WEIGHT", "shape": [4, 4], "type": "f16"},
+    {"name": "x.blk.1.ffn_up.weight", "shape": [2, 2], "type": ""},
+    {"name": "blk.1234567.attn_v.weight", "shape": [2], "type": "Q8_0"},
+    {"name": "blk.12x.blk.3.attn_output.weight", "shape": [16], "type": "iq2_xxs"},
+    {"name": "model.blk.0.Ffn_Down_Exps.weight", "shape": [2, 2], "type": "bf16"},
+    {"name": "caf\u00e9.attn_out.w\u00e9ight", "shape": [4], "type": "q6_k"},
+    {"name": "blk.2.attn_q_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "weird.thing", "shape": [3], "type": "I8"}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "qwen3",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": null,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "",
+   "gaps": [],
+   "native_axis_order": [
+    "block",
+    "module"
+   ],
+   "tensors": [
+    {"name": "blk.0.attn_q.weight", "module": "attn_q", "block": 0, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "BLK.0.ATTN_K.WEIGHT", "module": "attn_k", "block": null, "shape": [4, 4], "element_type": "F16", "parameters": 16, "family": "attention", "stage": 1, "bits_per_weight": [16, 1], "nominal_bytes": 32},
+    {"name": "x.blk.1.ffn_up.weight", "module": "ffn_up", "block": 1, "shape": [2, 2], "element_type": "", "parameters": 4, "family": "feed-forward", "stage": 1, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "blk.1234567.attn_v.weight", "module": "attn_v", "block": null, "shape": [2], "element_type": "Q8_0", "parameters": 2, "family": "attention", "stage": 2, "bits_per_weight": [17, 2], "nominal_bytes": 2},
+    {"name": "blk.12x.blk.3.attn_output.weight", "module": "attn_output", "block": 3, "shape": [16], "element_type": "IQ2_XXS", "parameters": 16, "family": "attention", "stage": 3, "bits_per_weight": [33, 16], "nominal_bytes": 4},
+    {"name": "model.blk.0.Ffn_Down_Exps.weight", "module": "ffn_expert", "block": 0, "shape": [2, 2], "element_type": "BF16", "parameters": 4, "family": "feed-forward", "stage": 3, "bits_per_weight": [16, 1], "nominal_bytes": 8},
+    {"name": "caf\u00e9.attn_out.w\u00e9ight", "module": "attn_output", "block": null, "shape": [4], "element_type": "Q6_K", "parameters": 4, "family": "attention", "stage": 3, "bits_per_weight": [105, 16], "nominal_bytes": 3},
+    {"name": "blk.2.attn_q_norm.weight", "module": "attn_q_norm", "block": 2, "shape": [8], "element_type": "F32", "parameters": 8, "family": "normalisation", "stage": 1, "bits_per_weight": [32, 1], "nominal_bytes": 32},
+    {"name": "weird.thing", "module": "other", "block": null, "shape": [3], "element_type": "I8", "parameters": 3, "family": "output", "stage": 1, "bits_per_weight": [8, 1], "nominal_bytes": 3}
+   ],
+   "cells": [
+    {"block": null, "module": "attn_k", "parameters": 16, "tensors": 1, "element_types": ["F16"], "nominal_bytes": 32, "routed_parameters": 0, "family": "attention", "stage": 1, "label": "Key projection", "mean_bits_per_weight": [16, 1], "active_parameters": 16},
+    {"block": null, "module": "attn_output", "parameters": 4, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 3, "routed_parameters": 0, "family": "attention", "stage": 3, "label": "Attention output", "mean_bits_per_weight": [6, 1], "active_parameters": 4},
+    {"block": null, "module": "attn_v", "parameters": 2, "tensors": 1, "element_types": ["Q8_0"], "nominal_bytes": 2, "routed_parameters": 0, "family": "attention", "stage": 2, "label": "Value projection", "mean_bits_per_weight": [8, 1], "active_parameters": 2},
+    {"block": null, "module": "other", "parameters": 3, "tensors": 1, "element_types": ["I8"], "nominal_bytes": 3, "routed_parameters": 0, "family": "output", "stage": 1, "label": "Unclassified", "mean_bits_per_weight": [8, 1], "active_parameters": 3},
+    {"block": 0, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 0, "module": "ffn_expert", "parameters": 4, "tensors": 1, "element_types": ["BF16"], "nominal_bytes": 8, "routed_parameters": 0, "family": "feed-forward", "stage": 3, "label": "Expert bank", "mean_bits_per_weight": [16, 1], "active_parameters": 4},
+    {"block": 1, "module": "ffn_up", "parameters": 4, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "feed-forward", "stage": 1, "label": "Feed-forward up", "mean_bits_per_weight": null, "active_parameters": 4},
+    {"block": 2, "module": "attn_q_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0, "family": "normalisation", "stage": 1, "label": "Query norm", "mean_bits_per_weight": [32, 1], "active_parameters": 8},
+    {"block": 3, "module": "attn_output", "parameters": 16, "tensors": 1, "element_types": ["IQ2_XXS"], "nominal_bytes": 4, "routed_parameters": 0, "family": "attention", "stage": 3, "label": "Attention output", "mean_bits_per_weight": [2, 1], "active_parameters": 16}
+   ],
+   "derived": {
+    "ok": true,
+    "counted_parameters": 121,
+    "nominal_bytes": null,
+    "coverage": null,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": 0,
+    "always_active_parameters": 121,
+    "active_path_gap": null,
+    "active_parameters": 121,
+    "active_fraction": 1.0,
+    "blocks": [{"block": 0, "parameters": 68, "nominal_bytes": 44, "modules": 2, "mean_bits_per_weight": [88, 17]}, {"block": 1, "parameters": 4, "nominal_bytes": null, "modules": 1, "mean_bits_per_weight": null}, {"block": 2, "parameters": 8, "nominal_bytes": 32, "modules": 1, "mean_bits_per_weight": [32, 1]}, {"block": 3, "parameters": 16, "nominal_bytes": 4, "modules": 1, "mean_bits_per_weight": [2, 1]}],
+    "by_family": [["embedding", 0], ["normalisation", 8], ["attention", 102], ["feed-forward", 8], ["output", 3]],
+    "block_dispersion": {"relative": 0.5, "outliers": [0]}
+   }
+  },
+  "voxel_field": {
+   "width": 4,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 64,
+   "has_stack_external": true,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": 64,
+   "has_active_path": true,
+   "occupied": 9,
+   "capacity": 100,
+   "voxels": [
+    {"x": -1, "y": 2, "z": 1, "module": "attn_k", "parameters": 16, "intensity": 0.25, "bits_per_weight": 16.0, "active_parameters": 16, "active_intensity": 0.25},
+    {"x": -1, "y": 2, "z": 2, "module": "attn_v", "parameters": 2, "intensity": 0.03125, "bits_per_weight": 8.0, "active_parameters": 2, "active_intensity": 0.03125},
+    {"x": -1, "y": 2, "z": 3, "module": "attn_output", "parameters": 4, "intensity": 0.0625, "bits_per_weight": 6.0, "active_parameters": 4, "active_intensity": 0.0625},
+    {"x": -1, "y": 4, "z": 1, "module": "other", "parameters": 3, "intensity": 0.046875, "bits_per_weight": 8.0, "active_parameters": 3, "active_intensity": 0.046875},
+    {"x": 0, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 0, "y": 3, "z": 3, "module": "ffn_expert", "parameters": 4, "intensity": 0.0625, "bits_per_weight": 16.0, "active_parameters": 4, "active_intensity": 0.0625},
+    {"x": 1, "y": 3, "z": 1, "module": "ffn_up", "parameters": 4, "intensity": 0.0625, "bits_per_weight": null, "active_parameters": 4, "active_intensity": 0.0625},
+    {"x": 2, "y": 1, "z": 1, "module": "attn_q_norm", "parameters": 8, "intensity": 0.125, "bits_per_weight": 32.0, "active_parameters": 8, "active_intensity": 0.125},
+    {"x": 3, "y": 2, "z": 3, "module": "attn_output", "parameters": 16, "intensity": 0.25, "bits_per_weight": 2.0, "active_parameters": 16, "active_intensity": 0.25}
+   ]
+  },
+  "native_space": {
+   "axis_order": [
+    "block",
+    "module"
+   ],
+   "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+  }
+ }
+}

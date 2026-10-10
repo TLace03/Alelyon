@@ -1,0 +1,17 @@
+Alelyon model anatomy (the measurement engine)
+==============================================
+
+This crate is licensed under the Apache License, Version 2.0.
+
+Third-party material in this crate
+----------------------------------
+
+`cpp/gguf_quant_tables.hpp` holds tables derived from gguf-py, and
+`cpp/dequant.cpp` ports gguf-py's dequantisation block by block.
+
+  Project:   gguf-py, the Python package `gguf` 0.19.0, part of llama.cpp
+             (https://github.com/ggml-org/llama.cpp, gguf-py/gguf/constants.py
+             and gguf-py/gguf/quants.py)
+  Copyright: Copyright (c) 2023 Georgi Gerganov
+  Licence:   MIT License (the full text is reproduced at the top of
+             cpp/gguf_quant_tables.hpp, as its terms require)

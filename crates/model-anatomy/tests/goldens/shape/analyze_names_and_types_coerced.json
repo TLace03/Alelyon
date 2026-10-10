@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "names_and_types_coerced"
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 121,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

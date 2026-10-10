@@ -1,0 +1,92 @@
+{
+ "input": {
+  "kind": "compare",
+  "throughput": {
+   "model": "m",
+   "context": 4096,
+   "decode_tokens_per_second": "12345.678",
+   "prefill_tokens_per_second": "1234567.891",
+   "method": "test",
+   "provenance": "OBSERVED"
+  },
+  "energy": {
+   "draw_watts": "1234567.0",
+   "usd_per_kwh": "0.000125",
+   "source": "a test declaration",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "price": {
+   "provider": "\u00dcnicode Lab",
+   "model": "test-1",
+   "usd_per_million_input": "1e-05",
+   "usd_per_million_output": "123456789.0",
+   "source": "a test price list",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "volume": {
+   "input_tokens": 20000000,
+   "output_tokens": 4000000,
+   "stated_by": "the user"
+  }
+ },
+ "expected": {
+  "inputs_complete": {
+   "throughput": true,
+   "energy": true,
+   "price": true,
+   "volume": true
+  },
+  "established": true,
+  "refusals": [],
+  "local": [
+   {
+    "label": "Energy, reading prompts",
+    "usd": 0.0006944439432569404,
+    "provenance": "DERIVED",
+    "rule": "20,000,000 tokens / 1,234,567.9 tok/s x 1.23457e+06 W x $0.000125/kWh"
+   },
+   {
+    "label": "Energy, writing answers",
+    "usd": 0.013888879888888152,
+    "provenance": "DERIVED",
+    "rule": "4,000,000 tokens / 12,345.7 tok/s x 1.23457e+06 W x $0.000125/kWh"
+   }
+  ],
+  "hosted": [
+   {
+    "label": "\u00dcnicode Lab input",
+    "usd": 0.0002,
+    "provenance": "DERIVED",
+    "rule": "$1e-05/M declared by a test price list as of 2026-08-22"
+   },
+   {
+    "label": "\u00dcnicode Lab output",
+    "usd": 493827156.0,
+    "provenance": "DERIVED",
+    "rule": "$1.23457e+08/M declared by a test price list as of 2026-08-22"
+   }
+  ],
+  "caveats": [
+   "excludes the hardware. For most users the accelerator is the largest cost in this comparison and it does not appear in it at all.",
+   "excludes the operator's time \u2014 running a local model is work a hosted API does for you.",
+   "is not quality-matched. A local model and a frontier API are different products; nothing here has compared what they produce.",
+   "is a projection from declared prices and measured rates, not an observed bill."
+  ],
+  "local_usd": 0.014583323832145093,
+  "hosted_usd": 493827156.0002,
+  "monthly_delta_usd": 493827155.9856166,
+  "gpu_hours_per_month": 0.0945000074173056,
+  "describe": [
+   "Local energy: $0.01/month",
+   "\u00dcnicode Lab: $493,827,156.00/month",
+   "Running locally costs $493,827,155.99 less per month in energy at this volume \u2014 a projection, not an observed bill.",
+   "That volume occupies the accelerator for 0.1 hours of the month.",
+   "This comparison excludes the hardware. For most users the accelerator is the largest cost in this comparison and it does not appear in it at all.",
+   "This comparison excludes the operator's time \u2014 running a local model is work a hosted API does for you.",
+   "This comparison is not quality-matched. A local model and a frontier API are different products; nothing here has compared what they produce.",
+   "This comparison is a projection from declared prices and measured rates, not an observed bill."
+  ]
+ }
+}

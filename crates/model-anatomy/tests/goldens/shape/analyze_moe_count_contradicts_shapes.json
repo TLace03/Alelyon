@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "moe_count_contradicts_shapes"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 6466,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": true,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares expert_count=8, but 8 of 8 routed tensor shape(s) do not end in an expert axis of length 8. Stored parameter counts still follow the inventory; the active-parameter figure is UNMEASURED."
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

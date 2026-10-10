@@ -1,0 +1,92 @@
+{
+ "input": {
+  "model": "tiny.gguf",
+  "metadata": [
+   [
+    "general.architecture",
+    {"str": "qwen3moe"}
+   ],
+   [
+    "qwen3moe.expert_count",
+    {"int": "4"}
+   ],
+   [
+    "qwen3moe.expert_used_count",
+    {"int": "2"}
+   ],
+   [
+    "general.file_type",
+    {"int": "15"}
+   ]
+  ],
+  "tensors": [
+   {
+    "name": "blk.0.ffn_up_exps.weight",
+    "shape": [8, 16, 4],
+    "ggml_type": 12
+   },
+   {
+    "name": "blk.0.ffn_gate_inp.weight",
+    "shape": [8, 4],
+    "ggml_type": 0
+   }
+  ]
+ },
+ "expected": {
+  "payload": {
+   "model": "tiny.gguf",
+   "family": "qwen3moe",
+   "quantization_level": "Q4_K_M",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3moe"}],
+    ["qwen3moe.expert_count", {"int": "4"}],
+    ["qwen3moe.expert_used_count", {"int": "2"}],
+    ["general.file_type", {"int": "15"}]
+   ],
+   "tensors": [
+    {"name": "blk.0.ffn_up_exps.weight", "shape": [8, 16, 4], "type": "Q4_K"},
+    {"name": "blk.0.ffn_gate_inp.weight", "shape": [8, 4], "type": "F32"}
+   ]
+  },
+  "analysis": {
+   "morphometry": {
+    "schema_version": "alelyon.lattice.model-morphometry/0.1",
+    "model": "tiny.gguf",
+    "source": "TENSOR_INVENTORY",
+    "architecture": "qwen3moe",
+    "family": "qwen3moe",
+    "quantization": "Q4_K_M",
+    "declared_parameters": null,
+    "context_length": null,
+    "embedding_length": null,
+    "block_count": null,
+    "expert_count": 4,
+    "expert_used_count": 2,
+    "routing_metadata_error": "",
+    "refusal": "",
+    "gaps": [],
+    "native_axis_order": ["block", "module"],
+    "tensors": [{"name": "blk.0.ffn_up_exps.weight", "module": "ffn_expert", "block": 0, "shape": [8, 16, 4], "element_type": "Q4_K", "parameters": 512, "family": "feed-forward", "stage": 3, "bits_per_weight": [9, 2], "nominal_bytes": 288}, {"name": "blk.0.ffn_gate_inp.weight", "module": "ffn_expert", "block": 0, "shape": [8, 4], "element_type": "F32", "parameters": 32, "family": "feed-forward", "stage": 3, "bits_per_weight": [32, 1], "nominal_bytes": 128}],
+    "cells": [{"block": 0, "module": "ffn_expert", "parameters": 544, "tensors": 2, "element_types": ["F32", "Q4_K"], "nominal_bytes": 416, "routed_parameters": 512, "family": "feed-forward", "stage": 3, "label": "Expert bank", "mean_bits_per_weight": [104, 17], "active_parameters": 288}],
+    "derived": {"ok": true, "counted_parameters": 544, "nominal_bytes": 416, "coverage": null, "is_mixture_of_experts": true, "routed_expert_parameters": 512, "always_active_parameters": 32, "active_path_gap": null, "active_parameters": 288, "active_fraction": 0.5294117647058824, "blocks": [{"block": 0, "parameters": 544, "nominal_bytes": 416, "modules": 1, "mean_bits_per_weight": [104, 17]}], "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 0], ["feed-forward", 544], ["output", 0]], "block_dispersion": {"relative": null, "outliers": []}}
+   },
+   "voxel_field": {
+    "width": 1,
+    "height": 5,
+    "depth": 5,
+    "max_parameters": 544,
+    "has_stack_external": false,
+    "source": "TENSOR_INVENTORY",
+    "max_active_parameters": 288,
+    "has_active_path": true,
+    "occupied": 1,
+    "capacity": 25,
+    "voxels": [{"x": 0, "y": 3, "z": 3, "module": "ffn_expert", "parameters": 544, "intensity": 1.0, "bits_per_weight": 6.117647058823529, "active_parameters": 288, "active_intensity": 1.0}]
+   },
+   "native_space": {
+    "axis_order": ["block", "module"],
+    "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+   }
+  }
+ }
+}

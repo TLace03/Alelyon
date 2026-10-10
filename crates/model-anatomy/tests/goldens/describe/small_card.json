@@ -1,0 +1,55 @@
+{
+ "input": {
+  "backend": "rocm",
+  "torch_version": "2.7.1+rocm6.4",
+  "gpu": {
+   "name": "small",
+   "total_bytes": 3221225472,
+   "free_bytes": 1
+  },
+  "ram_total_bytes": 68719476736,
+  "disk_free_bytes": 536870912000,
+  "bf16": true,
+  "gaps": []
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "rocm",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator",
+    "small",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator memory",
+    "3.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator memory free now",
+    "0.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "System memory",
+    "64.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "bfloat16",
+    "supported",
+    "OBSERVED"
+   ],
+   [
+    "Free disk",
+    "500.00 GiB",
+    "OBSERVED"
+   ]
+  ],
+  "gaps": []
+ }
+}

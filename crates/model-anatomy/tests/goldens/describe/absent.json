@@ -1,0 +1,55 @@
+{
+ "input": {
+  "backend": "absent",
+  "torch_version": "",
+  "gpu": null,
+  "ram_total_bytes": null,
+  "disk_free_bytes": null,
+  "bf16": null,
+  "gaps": [
+   "torch could not be imported (ModuleNotFoundError), so GPU memory is UNMEASURED rather than assumed absent"
+  ]
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "absent",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory free now",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "System memory",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "bfloat16",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Free disk",
+    "UNMEASURED",
+    "UNMEASURED"
+   ]
+  ],
+  "gaps": [
+   "torch could not be imported (ModuleNotFoundError), so GPU memory is UNMEASURED rather than assumed absent"
+  ]
+ }
+}

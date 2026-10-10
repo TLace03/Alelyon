@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "incoherent_routing_8_9"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 7170,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": true,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares expert_used_count=9, greater than expert_count=8. Parameter share is exact; the active-parameter figure is UNMEASURED."
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

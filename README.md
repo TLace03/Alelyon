@@ -20,8 +20,8 @@ agent with its own editor; a **physics simulator** you can watch step by step; a
 **receipts**, numbers that carry the evidence of how they were computed. It runs on your
 PC: nothing you say, type or open leaves it unless you send it somewhere yourself.
 
-This repository is where the open parts come together into that app, built and run
-locally with no servers. It is assembled from the module repositories listed below.
+This repository is that app's source, built and run locally with no servers: the window
+and every module it is built from, at one source revision.
 
 ## A look around
 
@@ -62,32 +62,44 @@ data and no account.
 
 | Part | What you get |
 |---|---|
-| The app shell | The window and its title bar, sign-in, the gold-fog backdrop, Settings, and the Overview, Words, Data and Trust pages. |
-| Lattice | The chat and coding agent with its IDE: explorer, editor, search, a terminal, staged changes with a review, and a policy that allows, asks or refuses each tool call. |
-| Sinai | Its face and its page, with a model of your own. |
-| The simulator | A scene importer for MuJoCo's MJCF files and a CPU physics core ported from MuJoCo, held to it by golden files. |
-| Measurement and training | Lattice's measurement engine and the Training Studio. |
-| The research archive | Subjects, their papers, the citation map and the gaps worth pursuing, kept on this PC. |
+| The app shell (`centcom/`) | The window and its title bar, sign-in, the gold-fog backdrop, Settings, and the Overview, Words, Data and Trust pages. |
+| Lattice (`lattice/`) | The chat and coding agent with its IDE: explorer, editor, search, a terminal, staged changes with a review, and a policy that allows, asks or refuses each tool call. |
+| Sinai (`crates/sinai-face/`) | Its face and its page, with a model of your own. |
+| The simulator (`sim/`) | A scene importer for MuJoCo's MJCF files, a CPU physics core ported from MuJoCo and held to it by golden files, and a CPU ray caster that draws it. |
+| Measurement and training (`crates/model-anatomy/`) | Lattice's measurement engine, in C++, and the Training Studio's view of a trainer's metrics. |
+| The research archive (`crates/research-archive/`) | Subjects, their papers, the citation map and the gaps worth pursuing, kept on this PC. |
+| Receipts (`crates/alelyon-verify/`) | The receipt verifier the Trust page runs: signatures, input commitments, key lifecycle and transparency proofs, checked on this PC. |
+| Sign-in (`crates/alelyon-identity-client/`) and plug-ins (`crates/alelyon-plugin-api/`) | The identity service's client, and the registry through which the live package adds what is not open. |
 
 ## Build and run it locally
 
-The app's own source joins this repository once its window builds from open code alone;
-that is the next step of opening it, and until it lands this repository carries no build
-that does not work. The open modules it is assembled from build, test and run on their own
-today, from [Alelyon-Client](https://github.com/TLace03/Alelyon-Client) (Windows, Rust 1.97
-or later):
+Windows, Rust 1.97 or later, and the Visual Studio C++ build tools (the measurement
+engine and the activation probe compile C++). Every dependency is pinned by a committed
+`Cargo.lock`, so the build needs nothing from another repository, no server and no account.
 
 ```bash
-git clone https://github.com/TLace03/Alelyon-Client
-cd Alelyon-Client
-(cd lattice && cargo run --release --locked -p lattice-app -- --demo)   # Lattice's window, demonstration data
-(cd sim && cargo test --locked --workspace)                             # the simulator's physics and importer
-(cd crates/sinai-face && cargo test --locked)                           # Sinai's face: bust, expressions, shaders
+git clone https://github.com/TLace03/Alelyon
+cd Alelyon/centcom
+cargo build --release --locked
+target/release/centcom.exe
 ```
 
-When the app lands, its modules will sit in this repository as copies taken from the same
-source revision as the app, so one `UPSTREAM.json` names the whole tree and a build needs
-nothing fetched from another repository, no server and no account.
+The window opens on the sign-in screen; *Use Alelyon offline* opens everything that runs on
+this PC. Run it from inside this checkout: the simulator reads its scenes from `sim/`.
+`centcom --help` lists the options (`--section`, `--tab`, `--screenshot`).
+
+Each module also builds and tests on its own:
+
+```bash
+(cd centcom && cargo test --locked)                     # the window
+(cd lattice && cargo test --locked --workspace)         # Lattice
+(cd sim && cargo test --locked --workspace)             # the simulator
+(cd crates/alelyon-verify && cargo test --locked)       # the receipt verifier
+```
+
+The modules are copies taken from the same source revision as the window, so one
+`UPSTREAM.json` names the whole tree. Set `ALELYON_NO_CREDENTIALS=1` for test or
+screenshot runs: nothing is then read from or written to Windows Credential Manager.
 
 ## What the live package adds
 
@@ -103,8 +115,8 @@ what the part is, and how to get it, instead of showing an error.
 | Repository | What it holds |
 |---|---|
 | [Alelyon-Client](https://github.com/TLace03/Alelyon-Client) | The client's open modules: the identity client, Lattice, the simulator and Sinai's face. |
-| [Alelyon-OS](https://github.com/TLace03/Alelyon-OS) | The `alelyon-os` package: the receipt verifier and its specification. |
-| Alelyon (this one) | The app, assembled from those modules, and this showcase. |
+| [Alelyon-OS](https://github.com/TLace03/Alelyon-OS) | The `alelyon-os` package and the Rust receipt verifier, with the receipts' specification. |
+| Alelyon (this one) | The app, with copies of those modules from the same revision, and this showcase. |
 
 ## This tree is generated
 

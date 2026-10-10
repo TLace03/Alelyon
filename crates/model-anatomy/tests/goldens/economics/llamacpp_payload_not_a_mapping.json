@@ -1,0 +1,17 @@
+{
+ "input": {
+  "kind": "throughput_from_llamacpp",
+  "payload": null,
+  "model": "kept",
+  "context": 8192
+ },
+ "expected": {
+  "model": "kept",
+  "context": 8192,
+  "decode_tokens_per_second": null,
+  "prefill_tokens_per_second": null,
+  "method": "the runtime's own timings, excluding model load time",
+  "provenance": "OBSERVED",
+  "complete": false
+ }
+}

@@ -1,0 +1,17 @@
+{
+ "input": {
+  "kind": "throughput_from_llamacpp",
+  "payload": {
+   "model": null,
+   "timings": [
+    ["predicted_n", {"int": "3"}],
+    ["predicted_ms", {"f64": "5e-324"}]
+   ]
+  },
+  "model": "",
+  "context": 0
+ },
+ "expected": {
+  "error": "ZeroDivisionError: float division by zero"
+ }
+}

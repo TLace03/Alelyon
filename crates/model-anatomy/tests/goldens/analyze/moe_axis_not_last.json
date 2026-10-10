@@ -1,0 +1,89 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3moe"}],
+    ["qwen3moe.expert_count", {"int": "8"}],
+    ["qwen3moe.expert_used_count", {"int": "2"}]
+   ],
+   "tensors": [
+    {"name": "blk.0.ffn_up_exps.weight", "shape": [8, 8, 16], "type": "Q4_K"},
+    {"name": "blk.0.ffn_down_exps.weight", "shape": [16, 8, 8], "type": "Q4_K"}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "qwen3moe",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": null,
+   "expert_count": 8,
+   "expert_used_count": 2,
+   "routing_metadata_error": "",
+   "refusal": "",
+   "gaps": [
+    "the runtime declares expert_count=8, but 1 of 2 routed tensor shape(s) do not end in an expert axis of length 8. Stored parameter counts still follow the inventory; the active-parameter figure is UNMEASURED."
+   ],
+   "native_axis_order": [
+    "block",
+    "module"
+   ],
+   "tensors": [
+    {"name": "blk.0.ffn_up_exps.weight", "module": "ffn_expert", "block": 0, "shape": [8, 8, 16], "element_type": "Q4_K", "parameters": 1024, "family": "feed-forward", "stage": 3, "bits_per_weight": [9, 2], "nominal_bytes": 576},
+    {"name": "blk.0.ffn_down_exps.weight", "module": "ffn_expert", "block": 0, "shape": [16, 8, 8], "element_type": "Q4_K", "parameters": 1024, "family": "feed-forward", "stage": 3, "bits_per_weight": [9, 2], "nominal_bytes": 576}
+   ],
+   "cells": [
+    {"block": 0, "module": "ffn_expert", "parameters": 2048, "tensors": 2, "element_types": ["Q4_K"], "nominal_bytes": 1152, "routed_parameters": 2048, "family": "feed-forward", "stage": 3, "label": "Expert bank", "mean_bits_per_weight": [9, 2], "active_parameters": 512}
+   ],
+   "derived": {
+    "ok": true,
+    "counted_parameters": 2048,
+    "nominal_bytes": 1152,
+    "coverage": null,
+    "is_mixture_of_experts": true,
+    "routed_expert_parameters": 2048,
+    "always_active_parameters": 0,
+    "active_path_gap": "the runtime declares expert_count=8, but 1 of 2 routed tensor shape(s) do not end in an expert axis of length 8. Stored parameter counts still follow the inventory; the active-parameter figure is UNMEASURED.",
+    "active_parameters": null,
+    "active_fraction": null,
+    "blocks": [{"block": 0, "parameters": 2048, "nominal_bytes": 1152, "modules": 1, "mean_bits_per_weight": [9, 2]}],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 0], ["feed-forward", 2048], ["output", 0]],
+    "block_dispersion": {"relative": null, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 1,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 2048,
+   "has_stack_external": false,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": null,
+   "has_active_path": false,
+   "occupied": 1,
+   "capacity": 25,
+   "voxels": [
+    {"x": 0, "y": 3, "z": 3, "module": "ffn_expert", "parameters": 2048, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": null, "active_intensity": null}
+   ]
+  },
+  "native_space": {
+   "axis_order": [
+    "block",
+    "module"
+   ],
+   "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+  }
+ }
+}

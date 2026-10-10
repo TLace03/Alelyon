@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "skipped_blocks"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 3,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 72,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 128,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares 3 blocks; the inventory contains 2 \u2014 the breakdown follows the inventory"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

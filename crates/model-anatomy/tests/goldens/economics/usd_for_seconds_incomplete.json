@@ -1,0 +1,17 @@
+{
+ "input": {
+  "kind": "usd_for_seconds",
+  "energy": {
+   "draw_watts": null,
+   "usd_per_kwh": "0.17",
+   "source": "a test declaration",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "seconds": "3600"
+ },
+ "expected": {
+  "complete": false,
+  "usd": null
+ }
+}

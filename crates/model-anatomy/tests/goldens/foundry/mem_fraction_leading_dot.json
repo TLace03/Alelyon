@@ -1,0 +1,60 @@
+{
+ "input": {
+  "reading": {
+   "backend": "rocm",
+   "torch_version": "2.7.1+rocm6.4",
+   "gpu": {
+    "name": "AMD Radeon RX 9070 XT",
+    "total_bytes": 17095983104,
+    "free_bytes": 15000000000
+   },
+   "ram_total_bytes": 68719476736,
+   "disk_free_bytes": 536870912000,
+   "bf16": true,
+   "gaps": []
+  },
+  "models": [
+   {
+    "name": "llama3:8b",
+    "payload": {"model": "", "family": "llama", "quantization_level": "Q4_K_M", "parent_model": "", "model_info": [["general.architecture", {"str": "llama"}], ["general.parameter_count", {"int": "8030261248"}], ["llama.block_count", {"int": "32"}], ["llama.embedding_length", {"int": "4096"}], ["llama.feed_forward_length", {"int": "12288"}], ["llama.attention.head_count", {"int": "32"}], ["llama.attention.head_count_kv", {"int": "8"}], ["llama.context_length", {"int": "8192"}]], "tensors": null},
+    "raised": null,
+    "requires_backends": []
+   }
+  ],
+  "context": 8192,
+  "mem_fraction": ".6",
+  "source": "the GGUF files under a test folder",
+  "as_of": "2026-10-07"
+ },
+ "expected": {
+  "reserve": {
+   "fraction": 0.4,
+   "provenance": "OBSERVED"
+  },
+  "context": 8192,
+  "catalog": [
+   {
+    "id": "llama3:8b",
+    "label": "llama3:8b",
+    "pull_ref": "llama3:8b",
+    "license": "",
+    "roles": ["generalist"],
+    "source": "the GGUF files under a test folder",
+    "as_of": "2026-10-07",
+    "provenance": "OBSERVED",
+    "installed": true,
+    "shape": {"model": "llama3:8b", "layers": 32, "kv_heads": 8, "key_length": 128, "value_length": 128, "context_max": 8192, "weight_bytes": 4868345881, "weight_provenance": "DERIVED", "parameters": 8030261248, "quantization": "Q4_K_M", "architecture": "llama", "mixture_of_experts": false, "active_parameters": null, "requires_backends": [], "gaps": ["the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial", "the runtime published no tensor inventory", "counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented", "per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors", "the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown", "no declared attention.key_length; head dimension taken as embedding_length / head_count", "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio", "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"], "kv_established": true, "kv_bytes_per_token": 65536},
+    "verdict": {"verdict": "RUNS", "fits": true, "budget_bytes": 10257589862, "budget_basis": "60% of accelerator memory; 40% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 8192, "headroom_bytes": 4315502157, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "it fits with 4.02 GiB spare", "shape gap: the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial", "shape gap: the runtime published no tensor inventory", "shape gap: counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented", "shape gap: per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors", "shape gap: the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown", "shape gap: no declared attention.key_length; head dimension taken as embedding_length / head_count", "shape gap: per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio", "shape gap: per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"], "footprint": {"context": 8192, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 4868345881, "gib": 4.53400042001158, "provenance": "DERIVED", "rule": "parameters x declared bits per weight / 8", "rendered": "4.53 GiB"}, "kv_cache": {"label": "KV cache @ 8,192 tokens", "bytes": 1073741824, "gib": 1.0, "provenance": "DERIVED", "rule": "32 layers x 8,192 tokens x 8 kv heads x (128+128) x 2.0B", "rendered": "1.00 GiB"}, "margin": null, "established_bytes": 5942087705, "total_bytes": 5942087705, "missing_terms": []}},
+    "notes": [{"claim": "served at Q4_K_M (4.85 bits per weight, the format's published average): a lossy format. The quality cost is UNMEASURED here \u2014 nothing in this product has evaluated it", "kind": "CAVEAT", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}, {"claim": "declares a maximum context of 8,192 tokens", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}, {"claim": "its full 8,192-token context fits this machine's budget", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}]
+   }
+  ],
+  "runnable": [
+   {
+    "index": 0,
+    "id": "llama3:8b",
+    "fit": {"verdict": "RUNS", "fits": true, "budget_bytes": 10257589862, "budget_basis": "60% of accelerator memory; 40% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 8192, "headroom_bytes": 4315502157, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "it fits with 4.02 GiB spare", "shape gap: the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial", "shape gap: the runtime published no tensor inventory", "shape gap: counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented", "shape gap: per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors", "shape gap: the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown", "shape gap: no declared attention.key_length; head dimension taken as embedding_length / head_count", "shape gap: per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio", "shape gap: per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"], "footprint": {"context": 8192, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 4868345881, "gib": 4.53400042001158, "provenance": "DERIVED", "rule": "parameters x declared bits per weight / 8", "rendered": "4.53 GiB"}, "kv_cache": {"label": "KV cache @ 8,192 tokens", "bytes": 1073741824, "gib": 1.0, "provenance": "DERIVED", "rule": "32 layers x 8,192 tokens x 8 kv heads x (128+128) x 2.0B", "rendered": "1.00 GiB"}, "margin": null, "established_bytes": 5942087705, "total_bytes": 5942087705, "missing_terms": []}}
+   }
+  ],
+  "pairs": []
+ }
+}

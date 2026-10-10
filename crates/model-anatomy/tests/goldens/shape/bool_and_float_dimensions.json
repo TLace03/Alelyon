@@ -1,0 +1,43 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "llama",
+   "quantization_level": "MXFP4",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "llama"}],
+    ["general.parameter_count", {"f64": "2000000000.0"}],
+    ["llama.block_count", {"bool": true}],
+    ["llama.attention.head_count", {"f64": "8.0"}],
+    ["llama.attention.head_count_kv", {"str": " 2 "}],
+    ["llama.embedding_length", {"int": "512"}],
+    ["llama.context_length", {"int": "-5"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": 2,
+  "key_length": 64,
+  "value_length": 64,
+  "context_max": -5,
+  "weight_bytes": 1062500000,
+  "weight_provenance": "DERIVED",
+  "parameters": 2000000000,
+  "quantization": "MXFP4",
+  "architecture": "llama",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio",
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

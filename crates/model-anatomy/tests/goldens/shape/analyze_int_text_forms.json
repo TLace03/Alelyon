@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "int_text_forms"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 2,
+  "kv_heads": 0,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": 1000000,
+  "quantization": "",
+  "architecture": "llama",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares no separate key/value head count; the cache is sized as multi-head attention, which OVERSTATES it on a grouped-query model"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

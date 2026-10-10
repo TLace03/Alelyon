@@ -1,0 +1,20 @@
+{
+ "input": {
+  "nodes": []
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "EMPTY",
+  "nodes": [],
+  "findings": [],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": []
+ }
+}

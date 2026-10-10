@@ -1,0 +1,85 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "  llama\t"}],
+    ["general.parameter_count", {"str": "1_000_000"}],
+    ["llama.block_count", {"str": "\u001c 2 \u001f"}],
+    ["llama.embedding_length", {"str": "+8"}],
+    ["llama.context_length", {"str": "0x10"}],
+    ["llama.feed_forward_length", {"str": "1__6"}],
+    ["llama.attention.head_count", {"str": "-0"}],
+    ["llama.vocab_size", {"str": "_5"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "DECLARED_ARCHITECTURE",
+   "architecture": "llama",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": 1000000,
+   "context_length": null,
+   "embedding_length": 8,
+   "block_count": 2,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "ARCHITECTURE_FIELDS_INCOMPLETE",
+   "gaps": [
+    "the runtime published no tensor inventory",
+    "the runtime declares no feed_forward_length, attention.head_count \u2014 the per-cell arithmetic needs them"
+   ],
+   "native_axis_order": [
+    "block",
+    "module"
+   ],
+   "tensors": [],
+   "cells": [],
+   "derived": {
+    "ok": false,
+    "counted_parameters": 0,
+    "nominal_bytes": 0,
+    "coverage": 0.0,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": null,
+    "always_active_parameters": null,
+    "active_path_gap": null,
+    "active_parameters": null,
+    "active_fraction": null,
+    "blocks": [],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 0], ["feed-forward", 0], ["output", 0]],
+    "block_dispersion": {"relative": null, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 0,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 0,
+   "has_stack_external": false,
+   "source": "DECLARED_ARCHITECTURE",
+   "max_active_parameters": null,
+   "has_active_path": false,
+   "occupied": 0,
+   "capacity": 0,
+   "voxels": []
+  },
+  "native_space": {
+   "axis_order": [
+    "block",
+    "module"
+   ],
+   "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+  }
+ }
+}

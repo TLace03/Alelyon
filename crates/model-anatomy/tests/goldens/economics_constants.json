@@ -1,0 +1,17 @@
+{
+ "structural_caveats": [
+  "excludes the hardware. For most users the accelerator is the largest cost in this comparison and it does not appear in it at all.",
+  "excludes the operator's time \u2014 running a local model is work a hosted API does for you.",
+  "is not quality-matched. A local model and a frontier API are different products; nothing here has compared what they produce.",
+  "is a projection from declared prices and measured rates, not an observed bill."
+ ],
+ "provenance": [
+  "OBSERVED",
+  "DERIVED",
+  "DECLARED",
+  "UNMEASURED"
+ ],
+ "seconds_per_hour": 3600,
+ "watts_per_kw": 1000,
+ "million": 1000000
+}

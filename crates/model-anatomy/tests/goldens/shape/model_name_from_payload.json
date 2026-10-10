@@ -1,0 +1,35 @@
+{
+ "input": {
+  "model": "",
+  "payload": {
+   "model": "  from-payload  ",
+   "family": "llama",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "llama"}],
+    ["llama.block_count", {"int": "2"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "from-payload",
+  "layers": 2,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "llama",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

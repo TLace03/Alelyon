@@ -1,0 +1,74 @@
+{
+ "input": {
+  "model": "tiny.gguf",
+  "metadata": [
+   [
+    "general.architecture",
+    {"str": "llama"}
+   ],
+   [
+    "general.name",
+    {"str": "tiny"}
+   ],
+   [
+    "llama.block_count",
+    {"int": "2"}
+   ],
+   [
+    "llama.embedding_length",
+    {"int": "8"}
+   ],
+   [
+    "llama.rope.freq_base",
+    {"f64": "10000.0"}
+   ],
+   [
+    "tokenizer.ggml.add_bos_token",
+    {"bool": true}
+   ],
+   [
+    "tokenizer.ggml.merges_short",
+    {"list": [1, 2, 3], "text": "[1, 2, 3]"}
+   ],
+   [
+    "general.file_type",
+    {"list": [1], "text": "[1]"}
+   ]
+  ],
+  "tensors": [
+   {
+    "name": "token_embd.weight",
+    "shape": [8, 100],
+    "ggml_type": 12
+   },
+   {
+    "name": "blk.0.attn_norm.weight",
+    "shape": [8],
+    "ggml_type": 0
+   },
+   {
+    "name": "blk.0.attn_q.weight",
+    "shape": [8, 8],
+    "ggml_type": 14
+   },
+   {
+    "name": "blk.0.ffn_up.weight",
+    "shape": [8, 16],
+    "ggml_type": 99
+   },
+   {
+    "name": "blk.1.attn_q.weight",
+    "shape": [8, 8],
+    "ggml_type": 30
+   },
+   {
+    "name": "output.weight",
+    "shape": [8, 100],
+    "ggml_type": 1
+   }
+  ]
+ },
+ "expected": {
+  "error": "TypeError"
+ }
+}

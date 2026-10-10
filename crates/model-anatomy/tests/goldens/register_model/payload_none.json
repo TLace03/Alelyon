@@ -1,0 +1,21 @@
+{
+ "input": {
+  "model": "x",
+  "payload": null
+ },
+ "expected": {
+  "code": "EXACT_IDENTITY",
+  "compatible": true,
+  "explanation": "ordered declared coordinate metadata matches exactly",
+  "transform": {
+   "transforms": [
+    {"transform_type": "IDENTITY", "loss_class": "LOSSLESS", "invertibility": "EXACT", "source_order": null}
+   ],
+   "loss_class": "LOSSLESS",
+   "invertibility": "EXACT"
+  },
+  "failing_constraint": null,
+  "evidence": [],
+  "can_retry_with_metadata_or_policy": false
+ }
+}

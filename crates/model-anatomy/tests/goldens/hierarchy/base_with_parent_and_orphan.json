@@ -1,0 +1,110 @@
+{
+ "input": {
+  "nodes": [
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["root2", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["orphan", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "INVALID",
+  "nodes": [
+   {
+    "ref": {"template_id": "root", "version": "1"},
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "root2", "version": "1"},
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "root", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "orphan", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ],
+  "findings": [
+   {
+    "code": "BASE_CONTRACT_HAS_PARENT",
+    "detail": "a BASE_CONTRACT is a hierarchy root and cannot name a parent",
+    "node_ref": {"template_id": "root2", "version": "1"},
+    "parent_ref": null
+   },
+   {
+    "code": "DERIVED_TEMPLATE_HAS_NO_PARENT",
+    "detail": "APPLICATION must name at least one parent",
+    "node_ref": {"template_id": "orphan", "version": "1"},
+    "parent_ref": null
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent BASE_CONTRACT must sit above child BASE_CONTRACT",
+    "node_ref": {"template_id": "root2", "version": "1"},
+    "parent_ref": {"template_id": "root", "version": "1"}
+   }
+  ],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": [
+   {
+    "template_id": "root",
+    "version": "1"
+   },
+   {
+    "template_id": "orphan",
+    "version": "1"
+   }
+  ]
+ }
+}

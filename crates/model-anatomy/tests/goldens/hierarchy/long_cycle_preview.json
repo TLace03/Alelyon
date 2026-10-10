@@ -1,0 +1,289 @@
+{
+ "input": {
+  "nodes": [
+   {
+    "ref": ["n0", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n1", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n1", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n2", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n2", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n3", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n3", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n4", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n4", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n5", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n5", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n6", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n6", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n7", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n7", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n8", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n8", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n9", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["n9", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["n0", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "INVALID",
+  "nodes": [
+   {
+    "ref": {"template_id": "n0", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n1", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n1", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n2", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n2", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n3", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n3", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n4", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n4", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n5", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n5", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n6", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n6", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n7", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n7", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n8", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n8", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n9", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "n9", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "n0", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ],
+  "findings": [
+   {
+    "code": "CYCLE_DETECTED",
+    "detail": "parent graph contains a cycle involving n0@1, n1@1, n2@1, n3@1, n4@1, n5@1, n6@1, n7@1",
+    "node_ref": {"template_id": "n0", "version": "1"},
+    "parent_ref": null
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n0", "version": "1"},
+    "parent_ref": {"template_id": "n1", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n1", "version": "1"},
+    "parent_ref": {"template_id": "n2", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n2", "version": "1"},
+    "parent_ref": {"template_id": "n3", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n3", "version": "1"},
+    "parent_ref": {"template_id": "n4", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n4", "version": "1"},
+    "parent_ref": {"template_id": "n5", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n5", "version": "1"},
+    "parent_ref": {"template_id": "n6", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n6", "version": "1"},
+    "parent_ref": {"template_id": "n7", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n7", "version": "1"},
+    "parent_ref": {"template_id": "n8", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n8", "version": "1"},
+    "parent_ref": {"template_id": "n9", "version": "1"}
+   },
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child APPLICATION",
+    "node_ref": {"template_id": "n9", "version": "1"},
+    "parent_ref": {"template_id": "n0", "version": "1"}
+   }
+  ],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": []
+ }
+}

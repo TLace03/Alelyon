@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "huge_parameters"
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": 3,
+  "quantization": "",
+  "architecture": "x",
+  "mixture_of_experts": false,
+  "active_parameters": 7638707616191610893,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

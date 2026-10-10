@@ -1,0 +1,59 @@
+{
+ "input": {
+  "backend": "rocm",
+  "torch_version": "2.7.1+rocm6.4",
+  "gpu": {
+   "name": "AMD Radeon RX 9070 XT",
+   "total_bytes": 17095983104,
+   "free_bytes": null
+  },
+  "ram_total_bytes": 68719476736,
+  "disk_free_bytes": 536870912000,
+  "bf16": false,
+  "gaps": [
+   "device 0 did not report free memory; the fit below uses total memory under the serving policy"
+  ]
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "rocm",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator",
+    "AMD Radeon RX 9070 XT",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator memory",
+    "15.92 GiB",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator memory free now",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "System memory",
+    "64.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "bfloat16",
+    "not supported",
+    "OBSERVED"
+   ],
+   [
+    "Free disk",
+    "500.00 GiB",
+    "OBSERVED"
+   ]
+  ],
+  "gaps": [
+   "device 0 did not report free memory; the fit below uses total memory under the serving policy"
+  ]
+ }
+}

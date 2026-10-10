@@ -1,0 +1,21 @@
+{
+ "input": {
+  "root_then_leaves": 1024
+ },
+ "expected": {
+  "state": "INVALID",
+  "node_count": 1024,
+  "findings": [
+   {
+    "code": "NODE_BUDGET_EXCEEDED",
+    "detail": "hierarchy exceeds the 1024-node inspection budget",
+    "node_ref": null,
+    "parent_ref": null
+   }
+  ],
+  "last_node": {
+   "template_id": "leaf1022",
+   "version": "1"
+  }
+ }
+}

@@ -1,0 +1,25 @@
+# The plug-in registry of the Alelyon desktop app (CENTCOM): the few traits and types through which a build adds
+# sections the public app does not carry. No dynamic loading: a wrapper crate links its plug-ins in and passes a
+# Registry to `centcom::run`. The public app runs with an empty one.
+#
+# Its own workspace and lockfile, so it builds and tests on its own.
+[workspace]
+resolver = "3"
+
+[package]
+name = "alelyon-plugin-api"
+description = "The plug-in registry of the Alelyon desktop app: optional Compute tabs and Trust cards, behind small traits."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+[dependencies]
+# The receipt verifier's replay-substrate trait (ReplayKernel), which a build registers (Registry::replay). The
+# verifier (Apache-2.0) links no kernel of its own; the kernel-backed implementation is private and is registered by
+# the official build, never named here.
+alelyon-verify = { path = "../alelyon-verify" }
+# A plug-in's page is drawn with the app's own toolkit: its Element, Task and Subscription. Only the executor the app
+# runs on (tokio) is turned on here; the app chooses the rest, and the version is the one the app's lock holds.
+iced = { version = "0.14.0", default-features = false, features = ["tokio"] }

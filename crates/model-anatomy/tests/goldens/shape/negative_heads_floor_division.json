@@ -1,0 +1,50 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "llama",
+   "quantization_level": "Q4_K_M",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "llama"}],
+    ["general.parameter_count", {"int": "1000000"}],
+    ["llama.block_count", {"int": "32"}],
+    ["llama.embedding_length", {"int": "4097"}],
+    ["llama.feed_forward_length", {"int": "12291"}],
+    ["llama.attention.head_count", {"int": "-3"}],
+    ["llama.attention.head_count_kv", {"int": "8"}],
+    ["llama.context_length", {"int": "8192"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": 32,
+  "kv_heads": 8,
+  "key_length": -1366,
+  "value_length": -1366,
+  "context_max": 8192,
+  "weight_bytes": 606250,
+  "weight_provenance": "DERIVED",
+  "parameters": 1000000,
+  "quantization": "Q4_K_M",
+  "architecture": "llama",
+  "mixture_of_experts": false,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial",
+   "the runtime published no tensor inventory",
+   "counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented",
+   "per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors",
+   "the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown",
+   "no declared attention.key_length; head dimension taken as embedding_length / head_count",
+   "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio",
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": true,
+  "kv_bytes_per_token": -699392
+ }
+}

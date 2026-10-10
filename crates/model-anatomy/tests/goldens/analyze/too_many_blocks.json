@@ -1,0 +1,79 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "x"}]
+   ],
+   "tensors": [
+    {"$each": 4097, "name": "blk.{}.attn_q.weight", "shape": [1], "type": "F32"}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "x",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": null,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "BLOCK_COUNT_NOT_DECLARED",
+   "gaps": [
+    "the inventory declares more than 4,096 blocks, beyond this view's budget"
+   ],
+   "native_axis_order": [
+    "block",
+    "module"
+   ],
+   "tensors": [],
+   "cells": [],
+   "derived": {
+    "ok": false,
+    "counted_parameters": 0,
+    "nominal_bytes": 0,
+    "coverage": null,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": null,
+    "always_active_parameters": null,
+    "active_path_gap": null,
+    "active_parameters": null,
+    "active_fraction": null,
+    "blocks": [],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 0], ["feed-forward", 0], ["output", 0]],
+    "block_dispersion": {"relative": null, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 0,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 0,
+   "has_stack_external": false,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": null,
+   "has_active_path": false,
+   "occupied": 0,
+   "capacity": 0,
+   "voxels": []
+  },
+  "native_space": {
+   "axis_order": [
+    "block",
+    "module"
+   ],
+   "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+  }
+ }
+}

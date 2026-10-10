@@ -1,0 +1,11 @@
+{
+ "input": {
+  "kind": "read_power",
+  "meter": "returns",
+  "watts": "287.5"
+ },
+ "expected": {
+  "watts": 287.5,
+  "provenance": "OBSERVED"
+ }
+}
