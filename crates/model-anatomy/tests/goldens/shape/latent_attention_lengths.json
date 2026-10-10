@@ -1,0 +1,41 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "deepseek2",
+   "quantization_level": "q8_0",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "deepseek2"}],
+    ["general.parameter_count", {"str": "15_700_000_000"}],
+    ["deepseek2.block_count", {"int": "27"}],
+    ["deepseek2.attention.head_count", {"int": "16"}],
+    ["deepseek2.attention.head_count_kv", {"int": "16"}],
+    ["deepseek2.attention.key_length", {"int": "192"}],
+    ["deepseek2.attention.value_length", {"int": "128"}],
+    ["deepseek2.context_length", {"int": "163840"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": 27,
+  "kv_heads": 16,
+  "key_length": 192,
+  "value_length": 128,
+  "context_max": 163840,
+  "weight_bytes": 16681250000,
+  "weight_provenance": "DERIVED",
+  "parameters": 15700000000,
+  "quantization": "q8_0",
+  "architecture": "deepseek2",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": true,
+  "kv_bytes_per_token": 138240
+ }
+}

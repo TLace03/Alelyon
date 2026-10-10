@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "moe_unequal_layers"
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 326,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": true,
+  "active_parameters": 296,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

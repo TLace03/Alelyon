@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "model_name_blank_wins"
+ },
+ "expected": {
+  "model": "",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 36,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "",
+  "mixture_of_experts": false,
+  "active_parameters": 64,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

@@ -1,0 +1,72 @@
+{
+ "input": {
+  "left": {
+   "analyze_case": "dense_inventory",
+   "model": "qwen3:test",
+   "payload": {
+    "model": "",
+    "family": "qwen3",
+    "quantization_level": "Q4_K_M",
+    "parent_model": "",
+    "model_info": [["general.architecture", {"str": "qwen3"}], ["qwen3.block_count", {"int": "4"}], ["qwen3.embedding_length", {"int": "8"}]],
+    "tensors": [{"name": "token_embd.weight", "shape": [8, 100], "type": "Q4_K"}, {"name": "blk.0.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.0.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.0.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.0.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.0.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.0.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.0.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.0.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.1.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.1.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.1.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.1.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.1.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.1.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.1.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.1.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.2.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.2.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.2.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.2.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.2.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.2.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.2.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.2.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.2.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.3.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.3.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.3.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.3.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.3.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.3.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.3.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.3.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.3.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "output_norm.weight", "shape": [8], "type": "F32"}, {"name": "output.weight", "shape": [8, 100], "type": "Q6_K"}]
+   },
+   "record": {
+    "model": "qwen3:test",
+    "source": "TENSOR_INVENTORY",
+    "schema_version": "alelyon.lattice.model-morphometry/0.1",
+    "refusal": "",
+    "gaps": [],
+    "native_axis_order": ["block", "module"],
+    "expert_count": null,
+    "expert_used_count": null,
+    "cells": [{"block": null, "module": "output", "parameters": 800, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 656, "routed_parameters": 0}, {"block": null, "module": "output_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": null, "module": "token_embd", "parameters": 800, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 450, "routed_parameters": 0}, {"block": 0, "module": "attn_k", "parameters": 32, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 18, "routed_parameters": 0}, {"block": 0, "module": "attn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 0, "module": "attn_output", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 0, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 0, "module": "attn_v", "parameters": 32, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 26, "routed_parameters": 0}, {"block": 0, "module": "ffn_down", "parameters": 128, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 105, "routed_parameters": 0}, {"block": 0, "module": "ffn_gate", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 0, "module": "ffn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 0, "module": "ffn_up", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 1, "module": "attn_k", "parameters": 32, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 18, "routed_parameters": 0}, {"block": 1, "module": "attn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 1, "module": "attn_output", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 1, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 1, "module": "attn_v", "parameters": 32, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 26, "routed_parameters": 0}, {"block": 1, "module": "ffn_down", "parameters": 128, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 105, "routed_parameters": 0}, {"block": 1, "module": "ffn_gate", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 1, "module": "ffn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 1, "module": "ffn_up", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 2, "module": "attn_k", "parameters": 32, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 18, "routed_parameters": 0}, {"block": 2, "module": "attn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 2, "module": "attn_output", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 2, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 2, "module": "attn_v", "parameters": 32, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 26, "routed_parameters": 0}, {"block": 2, "module": "ffn_down", "parameters": 128, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 105, "routed_parameters": 0}, {"block": 2, "module": "ffn_gate", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 2, "module": "ffn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 2, "module": "ffn_up", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 3, "module": "attn_k", "parameters": 32, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 18, "routed_parameters": 0}, {"block": 3, "module": "attn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 3, "module": "attn_output", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 3, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0}, {"block": 3, "module": "attn_v", "parameters": 32, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 26, "routed_parameters": 0}, {"block": 3, "module": "ffn_down", "parameters": 128, "tensors": 1, "element_types": ["Q6_K"], "nominal_bytes": 105, "routed_parameters": 0}, {"block": 3, "module": "ffn_gate", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}, {"block": 3, "module": "ffn_norm", "parameters": 8, "tensors": 1, "element_types": ["F32"], "nominal_bytes": 32, "routed_parameters": 0}, {"block": 3, "module": "ffn_up", "parameters": 128, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 72, "routed_parameters": 0}]
+   }
+  },
+  "right": {
+   "analyze_case": "moe_without_inventory_refused",
+   "model": "moe",
+   "payload": {
+    "model": "",
+    "family": "",
+    "quantization_level": "",
+    "parent_model": "",
+    "model_info": [["general.architecture", {"str": "qwen3moe"}], ["qwen3moe.block_count", {"int": "48"}], ["qwen3moe.expert_count", {"int": "128"}], ["qwen3moe.embedding_length", {"int": "2048"}], ["qwen3moe.feed_forward_length", {"int": "6144"}], ["qwen3moe.attention.head_count", {"int": "32"}]],
+    "tensors": null
+   },
+   "record": {
+    "model": "moe",
+    "source": "DECLARED_ARCHITECTURE",
+    "schema_version": "alelyon.lattice.model-morphometry/0.1",
+    "refusal": "MIXTURE_OF_EXPERTS_WITHOUT_TENSOR_INVENTORY",
+    "gaps": ["the runtime published no tensor inventory", "this model declares routing metadata (expert_count=128, expert_used_count=None). The dense decoder arithmetic below could understate it, so no breakdown is produced. A runtime that publishes a tensor inventory can establish the expert bank."],
+    "native_axis_order": ["block", "module"],
+    "expert_count": 128,
+    "expert_used_count": null,
+    "cells": []
+   }
+  }
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.model-morphometry-comparison/0.1",
+  "code": "INPUT_UNMEASURED",
+  "ok": false,
+  "complete": false,
+  "explanation": "comparison requires two measured operands (right: MIXTURE_OF_EXPERTS_WITHOUT_TENSOR_INVENTORY)",
+  "left_model": "qwen3:test",
+  "right_model": "moe",
+  "left_source": "TENSOR_INVENTORY",
+  "right_source": "DECLARED_ARCHITECTURE",
+  "space_ref": "",
+  "cells": [],
+  "gaps": [],
+  "left_gaps": [],
+  "right_gaps": [
+   "the runtime published no tensor inventory",
+   "this model declares routing metadata (expert_count=128, expert_used_count=None). The dense decoder arithmetic below could understate it, so no breakdown is produced. A runtime that publishes a tensor inventory can establish the expert bank."
+  ],
+  "unmeasured_sides": [
+   "right"
+  ]
+ }
+}

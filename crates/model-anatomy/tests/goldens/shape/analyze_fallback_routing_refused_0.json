@@ -1,0 +1,28 @@
+{
+ "input": {
+  "analyze_case": "fallback_routing_refused_0"
+ },
+ "expected": {
+  "model": "moe",
+  "layers": 4,
+  "kv_heads": 2,
+  "key_length": 4,
+  "value_length": 4,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares no separate key/value head count; the cache is sized as multi-head attention, which OVERSTATES it on a grouped-query model",
+   "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio",
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": true,
+  "kv_bytes_per_token": 64
+ }
+}

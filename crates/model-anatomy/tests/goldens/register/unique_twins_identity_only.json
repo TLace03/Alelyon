@@ -1,0 +1,50 @@
+{
+ "input": {
+  "source": {
+   "space_id": "test.space",
+   "version": "1",
+   "topology": "RECTANGULAR_TABLE",
+   "axes": [
+    {"axis_id": "p", "semantic_id": "test:twin", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["IDENTITY"], "metadata": []},
+    {"axis_id": "q", "semantic_id": "test:twin", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["IDENTITY"], "metadata": []}
+   ],
+   "index_convention": "ZERO_BASED",
+   "unit_system": null,
+   "reference_frame": null,
+   "valid_domain_rule": "ALL_DECLARED_COORDINATES",
+   "region_atlas_refs": [],
+   "metadata": []
+  },
+  "target": {
+   "space_id": "test.space",
+   "version": "1",
+   "topology": "RECTANGULAR_TABLE",
+   "axes": [
+    {"axis_id": "r", "semantic_id": "test:twin", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["IDENTITY"], "metadata": []},
+    {"axis_id": "s", "semantic_id": "test:twin", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["IDENTITY"], "metadata": []}
+   ],
+   "index_convention": "ZERO_BASED",
+   "unit_system": null,
+   "reference_frame": null,
+   "valid_domain_rule": "ALL_DECLARED_COORDINATES",
+   "region_atlas_refs": [],
+   "metadata": []
+  },
+  "edge_visit_budget": 1048576
+ },
+ "expected": {
+  "code": "EXACT_IDENTITY",
+  "compatible": true,
+  "explanation": "ordered declared coordinate metadata matches exactly",
+  "transform": {
+   "transforms": [
+    {"transform_type": "IDENTITY", "loss_class": "LOSSLESS", "invertibility": "EXACT", "source_order": null}
+   ],
+   "loss_class": "LOSSLESS",
+   "invertibility": "EXACT"
+  },
+  "failing_constraint": null,
+  "evidence": [],
+  "can_retry_with_metadata_or_policy": false
+ }
+}

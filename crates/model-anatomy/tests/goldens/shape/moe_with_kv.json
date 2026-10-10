@@ -1,0 +1,72 @@
+{
+ "input": {
+  "model": "moe",
+  "payload": {
+   "model": "",
+   "family": "qwen3moe",
+   "quantization_level": "Q4_K_M",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3moe"}],
+    ["qwen3moe.block_count", {"int": "4"}],
+    ["qwen3moe.embedding_length", {"int": "8"}],
+    ["qwen3moe.expert_count", {"int": "8"}],
+    ["qwen3moe.expert_used_count", {"int": "2"}],
+    ["qwen3moe.attention.head_count", {"int": "4"}],
+    ["qwen3moe.attention.head_count_kv", {"int": "2"}],
+    ["qwen3moe.attention.key_length", {"int": "2"}],
+    ["qwen3moe.context_length", {"int": "4096"}]
+   ],
+   "tensors": [
+    {"name": "token_embd.weight", "shape": [8, 100], "type": "Q4_K"},
+    {"name": "blk.0.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.0.ffn_gate_exps.weight", "shape": [8, 16, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_down_exps.weight", "shape": [16, 8, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_gate_inp.weight", "shape": [8, 8], "type": "F32"},
+    {"name": "blk.1.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.1.ffn_gate_exps.weight", "shape": [8, 16, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_down_exps.weight", "shape": [16, 8, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_gate_inp.weight", "shape": [8, 8], "type": "F32"},
+    {"name": "blk.2.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.2.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.2.ffn_gate_exps.weight", "shape": [8, 16, 8], "type": "Q4_K"},
+    {"name": "blk.2.ffn_down_exps.weight", "shape": [16, 8, 8], "type": "Q4_K"},
+    {"name": "blk.2.ffn_gate_inp.weight", "shape": [8, 8], "type": "F32"},
+    {"name": "blk.3.attn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.3.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.ffn_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "blk.3.ffn_gate_exps.weight", "shape": [8, 16, 8], "type": "Q4_K"},
+    {"name": "blk.3.ffn_down_exps.weight", "shape": [16, 8, 8], "type": "Q4_K"},
+    {"name": "blk.3.ffn_gate_inp.weight", "shape": [8, 8], "type": "F32"},
+    {"name": "output_norm.weight", "shape": [8], "type": "F32"},
+    {"name": "output.weight", "shape": [8, 100], "type": "Q6_K"}
+   ]
+  }
+ },
+ "expected": {
+  "model": "moe",
+  "layers": 4,
+  "kv_heads": 2,
+  "key_length": 2,
+  "value_length": 2,
+  "context_max": 4096,
+  "weight_bytes": 7170,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": true,
+  "active_parameters": 4232,
+  "requires_backends": [],
+  "gaps": [
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": true,
+  "kv_bytes_per_token": 32
+ }
+}

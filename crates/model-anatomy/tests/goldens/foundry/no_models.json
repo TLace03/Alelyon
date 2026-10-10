@@ -1,0 +1,32 @@
+{
+ "input": {
+  "reading": {
+   "backend": "rocm",
+   "torch_version": "2.7.1+rocm6.4",
+   "gpu": {
+    "name": "AMD Radeon RX 9070 XT",
+    "total_bytes": 17095983104,
+    "free_bytes": 15000000000
+   },
+   "ram_total_bytes": 68719476736,
+   "disk_free_bytes": 536870912000,
+   "bf16": true,
+   "gaps": []
+  },
+  "models": [],
+  "context": 4096,
+  "mem_fraction": null,
+  "source": "the GGUF files under a test folder",
+  "as_of": "2026-10-07"
+ },
+ "expected": {
+  "reserve": {
+   "fraction": 0.15000000000000002,
+   "provenance": "OBSERVED"
+  },
+  "context": 4096,
+  "catalog": [],
+  "runnable": [],
+  "pairs": []
+ }
+}

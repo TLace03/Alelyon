@@ -1,0 +1,30 @@
+[package]
+name = "alelyon-model-anatomy"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Model morphometry's maths in C++ (a port of the Python reference's morphometry) behind a C ABI, with a safe Rust wrapper."
+license = "Apache-2.0"
+publish = false
+build = "build.rs"
+
+# Its own workspace and lockfile, like cne_verify: nothing outside this folder
+# resolves through it.
+[workspace]
+
+[lib]
+name = "model_anatomy"
+path = "src/lib.rs"
+
+[dependencies]
+# Both already locked in CENTCOM's lock, the crate's consumer; this lock was
+# seeded from those entries.
+# `float_roundtrip` (no extra package) parses every float exactly, which the
+# parity test's bit-for-bit comparison relies on.
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+
+[build-dependencies]
+# Compiles cpp/*.cpp with the platform's C++ compiler (MSVC here). Already
+# locked in CENTCOM; no third-party C++ is compiled.
+cc = "1.5.1"

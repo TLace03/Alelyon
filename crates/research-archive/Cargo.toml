@@ -1,0 +1,39 @@
+# The research archive's core: gather every paper on a subject from the open scholarly indexes, merge the copies
+# each index holds of one paper, follow the citation graph outward until it stops yielding relevant papers, and
+# estimate how many relevant papers no index has shown yet. No user interface: CENTCOM (and a model's tool server)
+# draw their own over these calls.
+#
+# Its own workspace and lockfile, so it builds and tests on its own. Every package below is already in CENTCOM's
+# lock at the version named; the lockfile was generated offline from that cache.
+[workspace]
+resolver = "3"
+
+[package]
+name = "alelyon-research"
+description = "Research archive core: topic harvest from open scholarly indexes, identity merge, citation snowball and a capture-recapture estimate of what is still missing."
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+license = "Apache-2.0"
+publish = false
+
+[features]
+default = []
+# The live HTTP fetcher (src/net.rs). Off by default: the core and its tests never touch the network.
+net = ["dep:reqwest"]
+
+[dependencies]
+serde_json = "1.0.151"
+# arXiv answers in Atom.
+roxmltree = "0.20.0"
+# The archive on disk, with SQLite's full-text index (FTS5 is compiled into the bundled build).
+rusqlite = { version = "0.40.2", default-features = false, features = ["bundled"] }
+reqwest = { version = "0.13.5", default-features = false, features = ["native-tls", "http2", "charset", "system-proxy", "blocking"], optional = true }
+
+[[example]]
+name = "harvest"
+required-features = ["net"]
+
+[[example]]
+name = "update"
+required-features = ["net"]

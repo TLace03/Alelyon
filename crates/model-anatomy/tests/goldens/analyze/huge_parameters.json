@@ -1,0 +1,100 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "x"}],
+    ["general.parameter_count", {"int": "3"}]
+   ],
+   "tensors": [
+    {"name": "token_embd.weight", "shape": [4611686018427387905], "type": ""},
+    {"name": "output.weight", "shape": [3, 1000000000000000001], "type": ""},
+    {"name": "blk.0.attn_q.weight", "shape": [9007199254740993], "type": ""},
+    {"name": "blk.1.attn_q.weight", "shape": [9007199254740995], "type": ""},
+    {"name": "blk.2.attn_q.weight", "shape": [9007199254740997], "type": ""}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "x",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": 3,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": null,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "",
+   "gaps": [],
+   "native_axis_order": [
+    "module",
+    "block"
+   ],
+   "tensors": [
+    {"name": "token_embd.weight", "module": "token_embd", "block": null, "shape": [4611686018427387905], "element_type": "", "parameters": 4611686018427387905, "family": "embedding", "stage": 0, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "output.weight", "module": "output", "block": null, "shape": [3, 1000000000000000001], "element_type": "", "parameters": 3000000000000000003, "family": "output", "stage": 0, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "blk.0.attn_q.weight", "module": "attn_q", "block": 0, "shape": [9007199254740993], "element_type": "", "parameters": 9007199254740993, "family": "attention", "stage": 0, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "blk.1.attn_q.weight", "module": "attn_q", "block": 1, "shape": [9007199254740995], "element_type": "", "parameters": 9007199254740995, "family": "attention", "stage": 0, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "blk.2.attn_q.weight", "module": "attn_q", "block": 2, "shape": [9007199254740997], "element_type": "", "parameters": 9007199254740997, "family": "attention", "stage": 0, "bits_per_weight": null, "nominal_bytes": null}
+   ],
+   "cells": [
+    {"block": null, "module": "output", "parameters": 3000000000000000003, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "output", "stage": 0, "label": "Output projection", "mean_bits_per_weight": null, "active_parameters": 3000000000000000003},
+    {"block": null, "module": "token_embd", "parameters": 4611686018427387905, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "embedding", "stage": 0, "label": "Token embedding", "mean_bits_per_weight": null, "active_parameters": 4611686018427387905},
+    {"block": 0, "module": "attn_q", "parameters": 9007199254740993, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": null, "active_parameters": 9007199254740993},
+    {"block": 1, "module": "attn_q", "parameters": 9007199254740995, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": null, "active_parameters": 9007199254740995},
+    {"block": 2, "module": "attn_q", "parameters": 9007199254740997, "tensors": 1, "element_types": [""], "nominal_bytes": null, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": null, "active_parameters": 9007199254740997}
+   ],
+   "derived": {
+    "ok": true,
+    "counted_parameters": 7638707616191610893,
+    "nominal_bytes": null,
+    "coverage": 2.5462358720638705e+18,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": 0,
+    "always_active_parameters": 7638707616191610893,
+    "active_path_gap": null,
+    "active_parameters": 7638707616191610893,
+    "active_fraction": 1.0,
+    "blocks": [{"block": 0, "parameters": 9007199254740993, "nominal_bytes": null, "modules": 1, "mean_bits_per_weight": null}, {"block": 1, "parameters": 9007199254740995, "nominal_bytes": null, "modules": 1, "mean_bits_per_weight": null}, {"block": 2, "parameters": 9007199254740997, "nominal_bytes": null, "modules": 1, "mean_bits_per_weight": null}],
+    "by_family": [["embedding", 4611686018427387905], ["normalisation", 0], ["attention", 27021597764222985], ["feed-forward", 0], ["output", 3000000000000000003]],
+    "block_dispersion": {"relative": 0.0, "outliers": [0, 1, 2]}
+   }
+  },
+  "voxel_field": {
+   "width": 3,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 4611686018427387905,
+   "has_stack_external": true,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": 4611686018427387905,
+   "has_active_path": true,
+   "occupied": 5,
+   "capacity": 75,
+   "voxels": [
+    {"x": -1, "y": 0, "z": 0, "module": "token_embd", "parameters": 4611686018427387905, "intensity": 1.0, "bits_per_weight": null, "active_parameters": 4611686018427387905, "active_intensity": 1.0},
+    {"x": -1, "y": 4, "z": 0, "module": "output", "parameters": 3000000000000000003, "intensity": 0.6505213034913027, "bits_per_weight": null, "active_parameters": 3000000000000000003, "active_intensity": 0.6505213034913027},
+    {"x": 0, "y": 2, "z": 0, "module": "attn_q", "parameters": 9007199254740993, "intensity": 0.001953125, "bits_per_weight": null, "active_parameters": 9007199254740993, "active_intensity": 0.001953125},
+    {"x": 1, "y": 2, "z": 0, "module": "attn_q", "parameters": 9007199254740995, "intensity": 0.0019531250000000004, "bits_per_weight": null, "active_parameters": 9007199254740995, "active_intensity": 0.0019531250000000004},
+    {"x": 2, "y": 2, "z": 0, "module": "attn_q", "parameters": 9007199254740997, "intensity": 0.001953125000000001, "bits_per_weight": null, "active_parameters": 9007199254740997, "active_intensity": 0.001953125000000001}
+   ]
+  },
+  "native_space": {
+   "axis_order": [
+    "module",
+    "block"
+   ],
+   "ref": "sha256:a637ec1154003be0e1c5237fe93542d59e67ce26cabfddb2f9e254c70e5af6d3"
+  }
+ }
+}

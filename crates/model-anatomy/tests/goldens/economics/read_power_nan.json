@@ -1,0 +1,11 @@
+{
+ "input": {
+  "kind": "read_power",
+  "meter": "returns",
+  "watts": "nan"
+ },
+ "expected": {
+  "watts": "nan",
+  "provenance": "OBSERVED"
+ }
+}

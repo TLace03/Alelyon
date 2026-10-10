@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "dispersion_zero_mad"
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 82,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "x",
+  "mixture_of_experts": false,
+  "active_parameters": 41,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

@@ -1,0 +1,61 @@
+{
+ "input": {
+  "kind": "compare",
+  "throughput": {
+   "model": "m",
+   "context": 4096,
+   "decode_tokens_per_second": "88.3",
+   "prefill_tokens_per_second": "224.5",
+   "method": "test",
+   "provenance": "OBSERVED"
+  },
+  "energy": {
+   "draw_watts": null,
+   "usd_per_kwh": null,
+   "source": "",
+   "as_of": "",
+   "provenance": "DECLARED"
+  },
+  "price": {
+   "provider": "TestLab",
+   "model": "test-1",
+   "usd_per_million_input": "3.0",
+   "usd_per_million_output": "15.0",
+   "source": "a test price list",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "volume": {
+   "input_tokens": 20000000,
+   "output_tokens": 4000000,
+   "stated_by": "the user"
+  }
+ },
+ "expected": {
+  "inputs_complete": {
+   "throughput": true,
+   "energy": false,
+   "price": true,
+   "volume": true
+  },
+  "established": false,
+  "refusals": [
+   "the energy declaration is incomplete \u2014 board draw, tariff, source and date are all required. There is no default: a typical price chosen here would be the number doing the work in the result."
+  ],
+  "local": [],
+  "hosted": [],
+  "caveats": [
+   "excludes the hardware. For most users the accelerator is the largest cost in this comparison and it does not appear in it at all.",
+   "excludes the operator's time \u2014 running a local model is work a hosted API does for you.",
+   "is not quality-matched. A local model and a frontier API are different products; nothing here has compared what they produce.",
+   "is a projection from declared prices and measured rates, not an observed bill."
+  ],
+  "local_usd": null,
+  "hosted_usd": null,
+  "monthly_delta_usd": null,
+  "gpu_hours_per_month": 37.32971470513309,
+  "describe": [
+   "UNMEASURED: the energy declaration is incomplete \u2014 board draw, tariff, source and date are all required. There is no default: a typical price chosen here would be the number doing the work in the result."
+  ]
+ }
+}

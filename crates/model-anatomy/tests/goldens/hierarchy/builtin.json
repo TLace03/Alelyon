@@ -1,0 +1,76 @@
+{
+ "input": {
+  "nodes": null
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "AVAILABLE",
+  "nodes": [
+   {
+    "ref": {"template_id": "alelyon.cqcs.contract", "version": "0.1.0"},
+    "tier": "BASE_CONTRACT",
+    "label": "CQCS base contract",
+    "description": "Universal coordinate-contract semantics; abstract rather than a fabricated universal axis grid.",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["COORDINATE_SPACE_ABSENT: this is an abstract lineage tier; no axes were invented for it"]
+   },
+   {
+    "ref": {"template_id": "alelyon.model.template-family", "version": "0.1.0"},
+    "tier": "DOMAIN_FAMILY",
+    "label": "Model domain family",
+    "description": "The model-structure branch of the CQCS hierarchy.",
+    "parent_refs": [{"template_id": "alelyon.cqcs.contract", "version": "0.1.0"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["COORDINATE_SPACE_ABSENT: this is an abstract lineage tier; no axes were invented for it"]
+   },
+   {
+    "ref": {"template_id": "alelyon.model.transformer", "version": "0.1.0"},
+    "tier": "APPLICATION",
+    "label": "Transformer application",
+    "description": "Transformer block and module conventions.",
+    "parent_refs": [{"template_id": "alelyon.model.template-family", "version": "0.1.0"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["COORDINATE_SPACE_ABSENT: this is an abstract lineage tier; no axes were invented for it"]
+   },
+   {
+    "ref": {"template_id": "alelyon.model.transformer.declared-anatomy", "version": "0.1.0"},
+    "tier": "STUDY_COHORT",
+    "label": "Declared-anatomy profile",
+    "description": "The declaration-only model anatomy profile; it is not a population-derived cohort template.",
+    "parent_refs": [{"template_id": "alelyon.model.transformer", "version": "0.1.0"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": ["COHORT_CONSTRUCTION_ABSENT: no population-derived template is claimed", "COORDINATE_SPACE_ABSENT: this is an abstract lineage tier; no axes were invented for it"]
+   },
+   {
+    "ref": {"template_id": "alelyon.model.transformer.canonical", "version": "0.1.0"},
+    "tier": "RESOLUTION_VARIANT",
+    "label": "Canonical (block, module) frame",
+    "description": "The immutable coordinate space used by the current declared model-morphometry analysis.",
+    "parent_refs": [{"template_id": "alelyon.model.transformer.declared-anatomy", "version": "0.1.0"}],
+    "coordinate_space": {"space_id": "alelyon.model.transformer.canonical", "version": "0.1.0", "topology": "RECTANGULAR_TABLE", "axes": ["block", "module"], "index_convention": "ZERO_BASED", "ref": "sha256:7b4aad345c23bfa824e8f82313f08ec49aa7eba6e7148151e3cf75410b09a9eb"},
+    "transform_policy": ["AXIS_PERMUTATION", "IDENTITY", "LABEL_REINDEX"],
+    "gaps": ["TEMPLATE_MANIFEST_ABSENT: this leaf is an existing CoordinateSpace, not a published template manifest"]
+   }
+  ],
+  "findings": [],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": [
+   {
+    "template_id": "alelyon.cqcs.contract",
+    "version": "0.1.0"
+   }
+  ]
+ }
+}

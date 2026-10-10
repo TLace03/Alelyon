@@ -1,0 +1,89 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "x"}]
+   ],
+   "tensors": [
+    {"name": "blk.0.attn_q.weight", "shape": [7, 3], "type": "Q4_K"},
+    {"name": "blk.0.attn_q.bias", "shape": [3], "type": ""},
+    {"name": "blk.1.attn_q.weight", "shape": [5, 5], "type": "IQ1_S"}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "x",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": null,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "",
+   "gaps": [],
+   "native_axis_order": [
+    "module",
+    "block"
+   ],
+   "tensors": [
+    {"name": "blk.0.attn_q.weight", "module": "attn_q", "block": 0, "shape": [7, 3], "element_type": "Q4_K", "parameters": 21, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 11},
+    {"name": "blk.0.attn_q.bias", "module": "attn_q", "block": 0, "shape": [3], "element_type": "", "parameters": 3, "family": "attention", "stage": 0, "bits_per_weight": null, "nominal_bytes": null},
+    {"name": "blk.1.attn_q.weight", "module": "attn_q", "block": 1, "shape": [5, 5], "element_type": "IQ1_S", "parameters": 25, "family": "attention", "stage": 0, "bits_per_weight": [25, 16], "nominal_bytes": 4}
+   ],
+   "cells": [
+    {"block": 0, "module": "attn_q", "parameters": 24, "tensors": 2, "element_types": ["", "Q4_K"], "nominal_bytes": null, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": null, "active_parameters": 24},
+    {"block": 1, "module": "attn_q", "parameters": 25, "tensors": 1, "element_types": ["IQ1_S"], "nominal_bytes": 4, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [32, 25], "active_parameters": 25}
+   ],
+   "derived": {
+    "ok": true,
+    "counted_parameters": 49,
+    "nominal_bytes": null,
+    "coverage": null,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": 0,
+    "always_active_parameters": 49,
+    "active_path_gap": null,
+    "active_parameters": 49,
+    "active_fraction": 1.0,
+    "blocks": [{"block": 0, "parameters": 24, "nominal_bytes": null, "modules": 1, "mean_bits_per_weight": null}, {"block": 1, "parameters": 25, "nominal_bytes": 4, "modules": 1, "mean_bits_per_weight": [32, 25]}],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 49], ["feed-forward", 0], ["output", 0]],
+    "block_dispersion": {"relative": null, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 2,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 25,
+   "has_stack_external": false,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": 25,
+   "has_active_path": true,
+   "occupied": 2,
+   "capacity": 50,
+   "voxels": [
+    {"x": 0, "y": 2, "z": 0, "module": "attn_q", "parameters": 24, "intensity": 0.96, "bits_per_weight": null, "active_parameters": 24, "active_intensity": 0.96},
+    {"x": 1, "y": 2, "z": 0, "module": "attn_q", "parameters": 25, "intensity": 1.0, "bits_per_weight": 1.28, "active_parameters": 25, "active_intensity": 1.0}
+   ]
+  },
+  "native_space": {
+   "axis_order": [
+    "module",
+    "block"
+   ],
+   "ref": "sha256:a637ec1154003be0e1c5237fe93542d59e67ce26cabfddb2f9e254c70e5af6d3"
+  }
+ }
+}

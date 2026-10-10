@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "module_major_order"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 432,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 768,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

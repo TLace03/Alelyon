@@ -1,0 +1,11 @@
+{
+ "input": {
+  "kind": "read_power",
+  "meter": "none",
+  "watts": null
+ },
+ "expected": {
+  "watts": null,
+  "provenance": "UNMEASURED"
+ }
+}

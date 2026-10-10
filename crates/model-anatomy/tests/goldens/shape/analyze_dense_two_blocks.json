@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "dense_two_blocks"
+ },
+ "expected": {
+  "model": "a",
+  "layers": 2,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 1996,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 2792,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

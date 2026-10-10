@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "int_text_digit_limit"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 1,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": 0,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "llama",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

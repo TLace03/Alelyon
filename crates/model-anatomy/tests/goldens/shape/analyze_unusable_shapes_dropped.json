@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "unusable_shapes_dropped"
+ },
+ "expected": {
+  "model": "qwen3:test",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 2854,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 3976,
+  "requires_backends": [],
+  "gaps": [
+   "5 tensor entries had no usable name or shape and were dropped rather than counted as zero"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

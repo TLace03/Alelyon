@@ -1,0 +1,27 @@
+{
+ "input": {
+  "analyze_case": "unknown_element_type"
+ },
+ "expected": {
+  "model": "qwen3:test",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 4040,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial",
+   "no published bits-per-weight for element type(s) Q9_FUTURE \u2014 storage for those cells is UNMEASURED"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

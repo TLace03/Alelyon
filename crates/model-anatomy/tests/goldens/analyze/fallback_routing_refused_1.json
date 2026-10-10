@@ -1,0 +1,83 @@
+{
+ "input": {
+  "model": "moe",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3moe"}],
+    ["qwen3moe.block_count", {"int": "4"}],
+    ["qwen3moe.embedding_length", {"int": "8"}],
+    ["qwen3moe.feed_forward_length", {"int": "16"}],
+    ["qwen3moe.attention.head_count", {"int": "2"}],
+    ["qwen3moe.expert_used_count", {"int": "0"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "moe",
+   "source": "DECLARED_ARCHITECTURE",
+   "architecture": "qwen3moe",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": 8,
+   "block_count": 4,
+   "expert_count": null,
+   "expert_used_count": 0,
+   "routing_metadata_error": "",
+   "refusal": "MIXTURE_OF_EXPERTS_WITHOUT_TENSOR_INVENTORY",
+   "gaps": [
+    "the runtime published no tensor inventory",
+    "this model declares routing metadata (expert_count=None, expert_used_count=0). The dense decoder arithmetic below could understate it, so no breakdown is produced. A runtime that publishes a tensor inventory can establish the expert bank."
+   ],
+   "native_axis_order": [
+    "block",
+    "module"
+   ],
+   "tensors": [],
+   "cells": [],
+   "derived": {
+    "ok": false,
+    "counted_parameters": 0,
+    "nominal_bytes": 0,
+    "coverage": null,
+    "is_mixture_of_experts": true,
+    "routed_expert_parameters": null,
+    "always_active_parameters": null,
+    "active_path_gap": "the runtime declares routing metadata (expert_count=None, expert_used_count=0), but its tensor inventory contains no recognized routed _exps expert bank. Stored inventory counts remain measured; the active-parameter figure is UNMEASURED.",
+    "active_parameters": null,
+    "active_fraction": null,
+    "blocks": [],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 0], ["feed-forward", 0], ["output", 0]],
+    "block_dispersion": {"relative": null, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 0,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 0,
+   "has_stack_external": false,
+   "source": "DECLARED_ARCHITECTURE",
+   "max_active_parameters": null,
+   "has_active_path": false,
+   "occupied": 0,
+   "capacity": 0,
+   "voxels": []
+  },
+  "native_space": {
+   "axis_order": [
+    "block",
+    "module"
+   ],
+   "ref": "sha256:4bd1b2f0ddb59eef7bdaa21a9dc11f041517130db707761f1e8be9b7cf81bdbf"
+  }
+ }
+}

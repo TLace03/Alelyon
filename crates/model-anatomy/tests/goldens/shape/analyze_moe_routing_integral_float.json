@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "moe_routing_integral_float"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 7170,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3moe",
+  "mixture_of_experts": true,
+  "active_parameters": 4232,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

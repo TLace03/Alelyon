@@ -1,0 +1,64 @@
+{
+ "input": {
+  "nodes": [
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "Other",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "INVALID",
+  "nodes": [
+   {
+    "ref": {"template_id": "root", "version": "1"},
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ],
+  "findings": [
+   {
+    "code": "DUPLICATE_TEMPLATE_REF",
+    "detail": "more than one node declares root@1",
+    "node_ref": {"template_id": "root", "version": "1"},
+    "parent_ref": null
+   }
+  ],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": [
+   {
+    "template_id": "root",
+    "version": "1"
+   }
+  ]
+ }
+}

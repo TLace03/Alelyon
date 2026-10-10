@@ -1,0 +1,55 @@
+{
+ "input": {
+  "backend": "cpu",
+  "torch_version": "2.7.1+cpu",
+  "gpu": null,
+  "ram_total_bytes": 34359738368,
+  "disk_free_bytes": 536870912000,
+  "bf16": null,
+  "gaps": [
+   "no accelerator is available to torch; every fit below is against system RAM"
+  ]
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "cpu",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory free now",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "System memory",
+    "32.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "bfloat16",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Free disk",
+    "500.00 GiB",
+    "OBSERVED"
+   ]
+  ],
+  "gaps": [
+   "no accelerator is available to torch; every fit below is against system RAM"
+  ]
+ }
+}

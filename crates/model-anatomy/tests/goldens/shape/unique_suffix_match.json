@@ -1,0 +1,43 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "phi3",
+   "quantization_level": "Q4_0",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "phi3"}],
+    ["general.parameter_count", {"int": "3800000000"}],
+    ["llama.block_count", {"int": "32"}],
+    ["x.attention.head_count", {"int": "32"}],
+    ["x.attention.head_count_kv", {"int": "8"}],
+    ["x.embedding_length", {"int": "3072"}],
+    ["y.context_length", {"int": "4096"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": 32,
+  "kv_heads": 8,
+  "key_length": 96,
+  "value_length": 96,
+  "context_max": 4096,
+  "weight_bytes": 2137500000,
+  "weight_provenance": "DERIVED",
+  "parameters": 3800000000,
+  "quantization": "Q4_0",
+  "architecture": "phi3",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio",
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": true,
+  "kv_bytes_per_token": 49152
+ }
+}

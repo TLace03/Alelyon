@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "refused_moe_empty_field"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "qwen3",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

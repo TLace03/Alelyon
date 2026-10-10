@@ -1,0 +1,88 @@
+{
+  "capture_fit": "fit",
+  "capture_titles": true,
+  "root": {
+    "children": [
+      {
+        "children": [
+          {
+            "active": 0,
+            "views": [
+              "angel"
+            ]
+          },
+          {
+            "children": [
+              {
+                "active": 0,
+                "views": [
+                  "machine"
+                ]
+              },
+              {
+                "active": 0,
+                "views": [
+                  "grants"
+                ]
+              }
+            ],
+            "orientation": "horizontal",
+            "weights": [
+              1000,
+              1000
+            ]
+          }
+        ],
+        "orientation": "vertical",
+        "weights": [
+          1389,
+          611
+        ]
+      },
+      {
+        "children": [
+          {
+            "active": 0,
+            "views": [
+              "stage"
+            ]
+          },
+          {
+            "children": [
+              {
+                "active": 0,
+                "views": [
+                  "actions"
+                ]
+              },
+              {
+                "active": 0,
+                "views": [
+                  "waiting"
+                ]
+              }
+            ],
+            "orientation": "horizontal",
+            "weights": [
+              620,
+              400
+            ]
+          }
+        ],
+        "orientation": "vertical",
+        "weights": [
+          673,
+          297
+        ]
+      }
+    ],
+    "orientation": "horizontal",
+    "weights": [
+      333,
+      1027
+    ]
+  },
+  "schema": "alelyon.angel.dock",
+  "stage_columns": 0,
+  "version": 1
+}

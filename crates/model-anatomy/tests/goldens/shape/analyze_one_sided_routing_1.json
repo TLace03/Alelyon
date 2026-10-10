@@ -1,0 +1,26 @@
+{
+ "input": {
+  "analyze_case": "one_sided_routing_1"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 2854,
+  "weight_provenance": "OBSERVED",
+  "parameters": null,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": true,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares routing metadata (expert_count=1, expert_used_count=2), but its tensor inventory contains no recognized routed _exps expert bank. Stored inventory counts remain measured; the active-parameter figure is UNMEASURED."
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

@@ -1,0 +1,44 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "llama",
+   "quantization_level": "bf16",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "llama"}],
+    ["general.parameter_count", {"int": "1000"}],
+    ["llama.block_count", {"none": null}],
+    ["other.block_count", {"int": "6"}],
+    ["llama.attention.head_count_kv", {"none": null}],
+    ["llama.attention.head_count", {"int": "4"}],
+    ["llama.attention.key_length", {"str": "16"}],
+    ["llama.attention.value_length", {"f64": "16.0"}],
+    ["llama.context_length", {"f64": "2048.5"}]
+   ],
+   "tensors": null
+  }
+ },
+ "expected": {
+  "model": "x",
+  "layers": null,
+  "kv_heads": 4,
+  "key_length": 16,
+  "value_length": 16,
+  "context_max": null,
+  "weight_bytes": 2000,
+  "weight_provenance": "DERIVED",
+  "parameters": 1000,
+  "quantization": "bf16",
+  "architecture": "llama",
+  "mixture_of_experts": null,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the runtime declares no separate key/value head count; the cache is sized as multi-head attention, which OVERSTATES it on a grouped-query model"
+  ],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

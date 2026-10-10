@@ -1,0 +1,24 @@
+{
+ "input": {
+  "analyze_case": "coverage_shortfall"
+ },
+ "expected": {
+  "model": "qwen3:test",
+  "layers": 4,
+  "kv_heads": null,
+  "key_length": null,
+  "value_length": null,
+  "context_max": null,
+  "weight_bytes": 2854,
+  "weight_provenance": "OBSERVED",
+  "parameters": 10000,
+  "quantization": "Q4_K_M",
+  "architecture": "qwen3",
+  "mixture_of_experts": false,
+  "active_parameters": 3976,
+  "requires_backends": [],
+  "gaps": [],
+  "kv_established": false,
+  "kv_bytes_per_token": null
+ }
+}

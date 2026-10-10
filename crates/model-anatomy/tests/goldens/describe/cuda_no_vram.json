@@ -1,0 +1,55 @@
+{
+ "input": {
+  "backend": "cuda",
+  "torch_version": "2.7.1+cu126",
+  "gpu": {
+   "name": "device 0",
+   "total_bytes": null,
+   "free_bytes": null
+  },
+  "ram_total_bytes": 68719476736,
+  "disk_free_bytes": 536870912000,
+  "bf16": null,
+  "gaps": []
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "cuda",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator",
+    "device 0",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator memory",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory free now",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "System memory",
+    "64.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "bfloat16",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Free disk",
+    "500.00 GiB",
+    "OBSERVED"
+   ]
+  ],
+  "gaps": []
+ }
+}

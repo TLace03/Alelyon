@@ -1,0 +1,20 @@
+lattice-probe: CENTCOM's activation probe
+=========================================
+
+This crate is licensed under the Apache License, Version 2.0.
+
+Third-party material in this crate
+----------------------------------
+
+`vendor/llama.cpp/ggml.h` is vendored unmodified from llama.cpp, and
+`src/llama_abi.h` transcribes, field for field, the parts of llama.cpp's
+`include/llama.h` the probe uses. Nothing from llama.cpp is linked: the probe
+loads the pinned llama.dll at run time.
+
+  Project:   llama.cpp (https://github.com/ggml-org/llama.cpp)
+  Commit:    fb27a525d28381a16a4bb038858a10e4927381ca (2026-09-16)
+  Files:     ggml/include/ggml.h (vendored as vendor/llama.cpp/ggml.h);
+             include/llama.h (transcribed in part as src/llama_abi.h)
+  Copyright: Copyright (c) 2023-2026 The ggml authors
+  Licence:   MIT License (vendor/llama.cpp/LICENSE, the file `LICENSE` of
+             the llama.cpp tree at that commit, copied unmodified)

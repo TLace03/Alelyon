@@ -1,0 +1,97 @@
+{
+ "input": {
+  "reading": {
+   "backend": "rocm",
+   "torch_version": "2.7.1+rocm6.4",
+   "gpu": {
+    "name": "AMD Radeon RX 9070 XT",
+    "total_bytes": 17095983104,
+    "free_bytes": 15000000000
+   },
+   "ram_total_bytes": 68719476736,
+   "disk_free_bytes": 536870912000,
+   "bf16": true,
+   "gaps": []
+  },
+  "models": [
+   {
+    "name": "qwen3:test",
+    "payload": {"model": "", "family": "qwen3", "quantization_level": "Q4_K_M", "parent_model": "", "model_info": [["general.architecture", {"str": "qwen3"}], ["qwen3.block_count", {"int": "4"}], ["qwen3.embedding_length", {"int": "8"}], ["general.parameter_count", {"int": "4000"}], ["qwen3.attention.head_count", {"int": "2"}], ["qwen3.attention.head_count_kv", {"int": "1"}], ["qwen3.attention.key_length", {"int": "4"}], ["qwen3.attention.value_length", {"int": "4"}], ["qwen3.context_length", {"int": "40960"}]], "tensors": [{"name": "token_embd.weight", "shape": [8, 100], "type": "Q4_K"}, {"name": "blk.0.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.0.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.0.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.0.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.0.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.0.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.0.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.0.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.1.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.1.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.1.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.1.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.1.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.1.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.1.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.1.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.2.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.2.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.2.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.2.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.2.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.2.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.2.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.2.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.2.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "blk.3.attn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.3.attn_q.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.3.attn_k.weight", "shape": [8, 4], "type": "Q4_K"}, {"name": "blk.3.attn_v.weight", "shape": [8, 4], "type": "Q6_K"}, {"name": "blk.3.attn_output.weight", "shape": [8, 8], "type": "Q4_K"}, {"name": "blk.3.ffn_norm.weight", "shape": [8], "type": "F32"}, {"name": "blk.3.ffn_gate.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.3.ffn_up.weight", "shape": [8, 16], "type": "Q4_K"}, {"name": "blk.3.ffn_down.weight", "shape": [16, 8], "type": "Q6_K"}, {"name": "output_norm.weight", "shape": [8], "type": "F32"}, {"name": "output.weight", "shape": [8, 100], "type": "Q6_K"}]},
+    "raised": null,
+    "requires_backends": []
+   },
+   {
+    "name": "llama3:8b",
+    "payload": {"model": "", "family": "llama", "quantization_level": "Q4_K_M", "parent_model": "", "model_info": [["general.architecture", {"str": "llama"}], ["general.parameter_count", {"int": "8030261248"}], ["llama.block_count", {"int": "32"}], ["llama.embedding_length", {"int": "4096"}], ["llama.feed_forward_length", {"int": "12288"}], ["llama.attention.head_count", {"int": "32"}], ["llama.attention.head_count_kv", {"int": "8"}], ["llama.context_length", {"int": "8192"}]], "tensors": null},
+    "raised": null,
+    "requires_backends": []
+   }
+  ],
+  "context": -4096,
+  "mem_fraction": null,
+  "source": "the GGUF files under a test folder",
+  "as_of": "2026-10-07"
+ },
+ "expected": {
+  "reserve": {
+   "fraction": 0.15000000000000002,
+   "provenance": "OBSERVED"
+  },
+  "context": -4096,
+  "catalog": [
+   {
+    "id": "qwen3:test",
+    "label": "qwen3:test",
+    "pull_ref": "qwen3:test",
+    "license": "",
+    "roles": ["generalist"],
+    "source": "the GGUF files under a test folder",
+    "as_of": "2026-10-07",
+    "provenance": "OBSERVED",
+    "installed": true,
+    "shape": {"model": "qwen3:test", "layers": 4, "kv_heads": 1, "key_length": 4, "value_length": 4, "context_max": 40960, "weight_bytes": 2854, "weight_provenance": "OBSERVED", "parameters": 4000, "quantization": "Q4_K_M", "architecture": "qwen3", "mixture_of_experts": false, "active_parameters": 3976, "requires_backends": [], "gaps": [], "kv_established": true, "kv_bytes_per_token": 32},
+    "verdict": {"verdict": "RUNS", "fits": true, "budget_bytes": 14531585638, "budget_basis": "85% of accelerator memory; 15% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 40960, "headroom_bytes": 14531058496, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "it fits with 13.53 GiB spare"], "footprint": {"context": 8192, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 2854, "gib": 2.6579946279525757e-06, "provenance": "OBSERVED", "rule": "summed over the runtime's tensor inventory", "rendered": "0.00 GiB"}, "kv_cache": {"label": "KV cache @ 8,192 tokens", "bytes": 524288, "gib": 0.00048828125, "provenance": "DERIVED", "rule": "4 layers x 8,192 tokens x 1 kv heads x (4+4) x 2.0B", "rendered": "0.00 GiB"}, "margin": null, "established_bytes": 527142, "total_bytes": 527142, "missing_terms": []}},
+    "notes": [{"claim": "labelled Q4_K_M and measured at 5.71 bits per weight over its own tensor inventory: a lossy format. The quality cost is UNMEASURED here \u2014 nothing in this product has evaluated it", "kind": "CAVEAT", "provenance": "OBSERVED", "source": "", "as_of": "", "sourced": true}, {"claim": "declares a maximum context of 40,960 tokens", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}, {"claim": "its full 40,960-token context fits this machine's budget", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}]
+   },
+   {
+    "id": "llama3:8b",
+    "label": "llama3:8b",
+    "pull_ref": "llama3:8b",
+    "license": "",
+    "roles": ["generalist"],
+    "source": "the GGUF files under a test folder",
+    "as_of": "2026-10-07",
+    "provenance": "OBSERVED",
+    "installed": true,
+    "shape": {"model": "llama3:8b", "layers": 32, "kv_heads": 8, "key_length": 128, "value_length": 128, "context_max": 8192, "weight_bytes": 4868345881, "weight_provenance": "DERIVED", "parameters": 8030261248, "quantization": "Q4_K_M", "architecture": "llama", "mixture_of_experts": false, "active_parameters": null, "requires_backends": [], "gaps": ["the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial", "the runtime published no tensor inventory", "counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented", "per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors", "the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown", "no declared attention.key_length; head dimension taken as embedding_length / head_count", "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio", "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"], "kv_established": true, "kv_bytes_per_token": 65536},
+    "verdict": {"verdict": "RUNS", "fits": true, "budget_bytes": 14531585638, "budget_basis": "85% of accelerator memory; 15% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 8192, "headroom_bytes": 8589497933, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "it fits with 8.00 GiB spare", "shape gap: the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial", "shape gap: the runtime published no tensor inventory", "shape gap: counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented", "shape gap: per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors", "shape gap: the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown", "shape gap: no declared attention.key_length; head dimension taken as embedding_length / head_count", "shape gap: per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio", "shape gap: per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"], "footprint": {"context": 8192, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 4868345881, "gib": 4.53400042001158, "provenance": "DERIVED", "rule": "parameters x declared bits per weight / 8", "rendered": "4.53 GiB"}, "kv_cache": {"label": "KV cache @ 8,192 tokens", "bytes": 1073741824, "gib": 1.0, "provenance": "DERIVED", "rule": "32 layers x 8,192 tokens x 8 kv heads x (128+128) x 2.0B", "rendered": "1.00 GiB"}, "margin": null, "established_bytes": 5942087705, "total_bytes": 5942087705, "missing_terms": []}},
+    "notes": [{"claim": "served at Q4_K_M (4.85 bits per weight, the format's published average): a lossy format. The quality cost is UNMEASURED here \u2014 nothing in this product has evaluated it", "kind": "CAVEAT", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}, {"claim": "declares a maximum context of 8,192 tokens", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}, {"claim": "its full 8,192-token context fits this machine's budget", "kind": "STRENGTH", "provenance": "DERIVED", "source": "", "as_of": "", "sourced": true}]
+   }
+  ],
+  "runnable": [
+   {
+    "index": 0,
+    "id": "qwen3:test",
+    "fit": {"verdict": "UNDECIDABLE", "fits": null, "budget_bytes": 14531585638, "budget_basis": "85% of accelerator memory; 15% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 40960, "headroom_bytes": null, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "UNMEASURED: KV cache @ -4,096 tokens. A footprint missing a term is not a smaller footprint, so no verdict is produced."], "footprint": {"context": -4096, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 2854, "gib": 2.6579946279525757e-06, "provenance": "OBSERVED", "rule": "summed over the runtime's tensor inventory", "rendered": "0.00 GiB"}, "kv_cache": {"label": "KV cache @ -4,096 tokens", "bytes": null, "gib": null, "provenance": "UNMEASURED", "rule": "4 layers x -4,096 tokens x 1 kv heads x (4+4) x 2.0B", "rendered": "UNMEASURED"}, "margin": null, "established_bytes": null, "total_bytes": null, "missing_terms": ["KV cache @ -4,096 tokens"]}}
+   },
+   {
+    "index": 1,
+    "id": "llama3:8b",
+    "fit": {"verdict": "UNDECIDABLE", "fits": null, "budget_bytes": 14531585638, "budget_basis": "85% of accelerator memory; 15% is reserved for everything else on the device, the desktop compositor above all", "budget_provenance": "OBSERVED", "max_context": 8192, "headroom_bytes": null, "reasons": ["no backend restriction is declared for this checkpoint; that is an absent declaration, not established portability", "UNMEASURED: KV cache @ -4,096 tokens. A footprint missing a term is not a smaller footprint, so no verdict is produced."], "footprint": {"context": -4096, "kv_precision": "f16", "weights": {"label": "Weights", "bytes": 4868345881, "gib": 4.53400042001158, "provenance": "DERIVED", "rule": "parameters x declared bits per weight / 8", "rendered": "4.53 GiB"}, "kv_cache": {"label": "KV cache @ -4,096 tokens", "bytes": null, "gib": null, "provenance": "UNMEASURED", "rule": "32 layers x -4,096 tokens x 8 kv heads x (128+128) x 2.0B", "rendered": "UNMEASURED"}, "margin": null, "established_bytes": null, "total_bytes": null, "missing_terms": ["KV cache @ -4,096 tokens"]}}
+   }
+  ],
+  "pairs": [
+   {
+    "left": 0,
+    "left_id": "qwen3:test",
+    "right": 1,
+    "right_id": "llama3:8b",
+    "context": -4096,
+    "combined_bytes": null,
+    "budget_bytes": 14531585638,
+    "fits_together": null,
+    "spare_bytes": null
+   }
+  ]
+ }
+}

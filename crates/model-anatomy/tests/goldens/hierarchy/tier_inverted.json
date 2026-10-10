@@ -1,0 +1,94 @@
+{
+ "input": {
+  "nodes": [
+   {
+    "ref": ["root", "1"],
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["app", "1"],
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["root", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": ["fam", "1"],
+    "tier": "DOMAIN_FAMILY",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [["app", "1"]],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ]
+ },
+ "expected": {
+  "schema_version": "alelyon.lattice.template-hierarchy/0.1",
+  "state": "INVALID",
+  "nodes": [
+   {
+    "ref": {"template_id": "root", "version": "1"},
+    "tier": "BASE_CONTRACT",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "fam", "version": "1"},
+    "tier": "DOMAIN_FAMILY",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "app", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   },
+   {
+    "ref": {"template_id": "app", "version": "1"},
+    "tier": "APPLICATION",
+    "label": "L",
+    "description": "D",
+    "parent_refs": [{"template_id": "root", "version": "1"}],
+    "coordinate_space": null,
+    "transform_policy": [],
+    "gaps": []
+   }
+  ],
+  "findings": [
+   {
+    "code": "TIER_ORDER_INVALID",
+    "detail": "parent APPLICATION must sit above child DOMAIN_FAMILY",
+    "node_ref": {"template_id": "fam", "version": "1"},
+    "parent_ref": {"template_id": "app", "version": "1"}
+   }
+  ],
+  "gaps": [
+   "TEMPLATE_MANIFEST_ABSENT: nodes are read descriptors; no CanonicalTemplate manifest protocol exists",
+   "TEMPLATE_PERSISTENCE_ABSENT: the hierarchy is rebuilt in memory and writes no store",
+   "TEMPLATE_PUBLICATION_ABSENT: AVAILABLE means structurally renderable, not published or approved",
+   "TEMPLATE_SIGNING_ABSENT: no key or signature authenticates this hierarchy",
+   "TEMPLATE_MIGRATION_ABSENT: no migration between template versions is represented",
+   "TEMPLATE_SEMANTIC_NARROWING_UNMEASURED: structural parent, tier, and cycle validation does not prove that child constraints narrow parent semantics"
+  ],
+  "roots": [
+   {
+    "template_id": "root",
+    "version": "1"
+   }
+  ]
+ }
+}

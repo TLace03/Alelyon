@@ -1,0 +1,42 @@
+{
+ "input": {
+  "source": {
+   "space_id": "test.space",
+   "version": "1",
+   "topology": "RECTANGULAR_TABLE",
+   "axes": [
+    {"axis_id": "a", "semantic_id": "test:a", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["LABEL_REINDEX"], "metadata": []}
+   ],
+   "index_convention": "ZERO_BASED",
+   "unit_system": null,
+   "reference_frame": null,
+   "valid_domain_rule": "ALL_DECLARED_COORDINATES",
+   "region_atlas_refs": [],
+   "metadata": []
+  },
+  "target": {
+   "space_id": "test.space",
+   "version": "1",
+   "topology": "RECTANGULAR_TABLE",
+   "axes": [
+    {"axis_id": "a", "semantic_id": "test:a", "kind": "DISCRETE_ORDINAL", "scalar_type": "INTEGER", "ordering": "ASCENDING", "unit": null, "reference_frame": null, "calendar": null, "timezone": null, "orientation": null, "origin": null, "resolution": null, "bounds": null, "periodicity": null, "labels_ref": null, "labels": null, "missingness_policy": "TYPED", "interpolation_policy": [], "transform_policy": ["AXIS_PERMUTATION", "IDENTITY"], "metadata": []}
+   ],
+   "index_convention": "ZERO_BASED",
+   "unit_system": null,
+   "reference_frame": null,
+   "valid_domain_rule": "ALL_DECLARED_COORDINATES",
+   "region_atlas_refs": [],
+   "metadata": []
+  },
+  "edge_visit_budget": 1048576
+ },
+ "expected": {
+  "code": "PROHIBITED_TRANSFORM",
+  "compatible": false,
+  "explanation": "declared transform policies prohibit every complete semantic mapping",
+  "transform": null,
+  "failing_constraint": "transform_policy",
+  "evidence": [],
+  "can_retry_with_metadata_or_policy": true
+ }
+}

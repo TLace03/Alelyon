@@ -1,0 +1,61 @@
+{
+ "input": {
+  "kind": "compare",
+  "throughput": {
+   "model": "m",
+   "context": 4096,
+   "decode_tokens_per_second": "0.0",
+   "prefill_tokens_per_second": "0.0",
+   "method": "test",
+   "provenance": "OBSERVED"
+  },
+  "energy": {
+   "draw_watts": "304.0",
+   "usd_per_kwh": "0.17",
+   "source": "a test declaration",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "price": {
+   "provider": "TestLab",
+   "model": "test-1",
+   "usd_per_million_input": "3.0",
+   "usd_per_million_output": "15.0",
+   "source": "a test price list",
+   "as_of": "2026-08-22",
+   "provenance": "DECLARED"
+  },
+  "volume": {
+   "input_tokens": 20000000,
+   "output_tokens": 4000000,
+   "stated_by": "the user"
+  }
+ },
+ "expected": {
+  "inputs_complete": {
+   "throughput": false,
+   "energy": true,
+   "price": true,
+   "volume": true
+  },
+  "established": false,
+  "refusals": [
+   "throughput is UNMEASURED (both rates). Generate once with this model and read the runtime's own counters; a rate quoted from a specification is not this machine's rate."
+  ],
+  "local": [],
+  "hosted": [],
+  "caveats": [
+   "excludes the hardware. For most users the accelerator is the largest cost in this comparison and it does not appear in it at all.",
+   "excludes the operator's time \u2014 running a local model is work a hosted API does for you.",
+   "is not quality-matched. A local model and a frontier API are different products; nothing here has compared what they produce.",
+   "is a projection from declared prices and measured rates, not an observed bill."
+  ],
+  "local_usd": null,
+  "hosted_usd": null,
+  "monthly_delta_usd": null,
+  "gpu_hours_per_month": null,
+  "describe": [
+   "UNMEASURED: throughput is UNMEASURED (both rates). Generate once with this model and read the runtime's own counters; a rate quoted from a specification is not this machine's rate."
+  ]
+ }
+}

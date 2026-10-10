@@ -1,0 +1,99 @@
+{
+ "source": "alelyon/runtime/vector/lattice/transforms.py",
+ "loss_class_rank": [
+  [
+   "LOSSLESS",
+   0
+  ],
+  [
+   "EXACT_WITH_REPRESENTATION_CHANGE",
+   1
+  ],
+  [
+   "BOUNDED_LOSS",
+   2
+  ],
+  [
+   "LOSSY_REQUIRES_EXPLICIT_APPROVAL",
+   3
+  ],
+  [
+   "PROHIBITED",
+   4
+  ]
+ ],
+ "families": [
+  {
+   "class": "AxisOrderingTransform",
+   "transform_type": "AXIS_ORDERING",
+   "loss_class": "LOSSLESS",
+   "loss_rank": 0,
+   "invertibility": "EXACT",
+   "doc": "Reconcile axes stored in opposite directions. No coordinate moves.\n\n\u00a711.5 requires a canonical cell address to be derived from \"canonical\ncoordinate values or labels\" and forbids it depending on \"storage chunk\nplacement\". Addressing is therefore by *value*, and an axis stored back to\nfront holds the same coordinates at the same addresses. `apply_coordinates`\nis the identity here, and that is the finding rather than a stub: a\ndifference in `ordering` cannot move a coordinate in this model.\n\nSo why a record at all? \u00a78.4 \u2014 every transformation is explicit. Two spaces\nthat disagree about storage direction *do* differ, and a consumer that walks\nan axis by position rather than by address has to reverse one of them. A\nchain that silently registered these as identical would take that difference\nout of the audit trail, which is the one thing it must not do.\n\nAlone among the families that relax a field, this one needs **no\ndeclaration**. `CoordinateOrdering` is a closed enum defined by this\ncontract, and \"the reverse of ASCENDING is DESCENDING\" is a fact about the\nschema rather than about the world. The unit, timezone, label and\norientation vocabularies are all open and carry no algebra, which is exactly\nwhy each of those needs a caller to supply the relationship and this one does\nnot."
+  },
+  {
+   "class": "AxisPermutationTransform",
+   "transform_type": "AXIS_PERMUTATION",
+   "loss_class": "LOSSLESS",
+   "loss_rank": 0,
+   "invertibility": "EXACT",
+   "doc": "Map a target coordinate tuple into the source's axis order.\n\nsource_order[j] is the target-axis index supplying source axis j."
+  },
+  {
+   "class": "CalendarTransform",
+   "transform_type": "CALENDAR",
+   "loss_class": "LOSSLESS",
+   "loss_rank": 0,
+   "invertibility": "EXACT",
+   "doc": "Re-spell the calendar an axis names. No coordinate moves.\n\n\u00a711.3 makes ``calendar`` one field meaning \"calendar/session definition\", so\na calendar here is the rule deciding **which instants exist** on an axis \u2014\nan exchange session as much as a leap rule. It does not decide where an\ninstant sits. Two calendars that admit the same instants therefore hold the\nsame coordinates, and `apply_coordinates` is the identity, for the same\nreason `AxisOrderingTransform`'s is: the record carries a difference the map\nhas nothing to do about. \u00a78.4 still requires that difference to be explicit.\n\nWhat this rung refuses is the case the spec names directly \u2014 \"calendar\nreindexing without inventing observations on closed days\". Two calendars\nadmitting *different* instants do not correspond exactly in either\ndirection: one way invents observations on days the other closes, the other\ndrops them. That is a resampling, rung 11 at best, and this slice does not\ndo it. Nothing here can tell the two cases apart from the names, which is\nwhy a caller has to.\n\nSo the declaration asserts set equality of the instants and nothing else.\nThat it can stop there is a consequence of a limit this slice already has:\n`unsupported_exact_features` refuses any axis carrying `origin`, `bounds`,\n`resolution` or `periodicity`, which are the fields that would rest on the\n*separate* claim that both calendars number the same instants alike \u2014 Julian\nand Gregorian admit every real day, and disagree about what \"1900-02-28\"\nnames. With those fields refused the axis says nothing a calendar\nreinterprets, so one assertion is sufficient. It would not be if that\nrefusal were lifted, and\n`test_the_calendar_rung_rests_on_the_unsupported_feature_refusal` fails on\npurpose if it is.\n\nWhere the instants *are* committed, this is the weaker path and a caller\nshould not be on it: an axis that enumerates its sessions as a LABEL domain\ngets `LabelReindexTransform`, whose declared map is checked for bijectivity\nagainst both committed dictionaries. This family exists for the axis whose\ninstant set is not committed, where the two calendar names are the only\nevidence and no check is possible."
+  },
+  {
+   "class": "IdentityTransform",
+   "transform_type": "IDENTITY",
+   "loss_class": "LOSSLESS",
+   "loss_rank": 0,
+   "invertibility": "EXACT",
+   "doc": "An exact identity sampling map between semantically equal spaces."
+  },
+  {
+   "class": "AxisOrientationTransform",
+   "transform_type": "AXIS_ORIENTATION",
+   "loss_class": "EXACT_WITH_REPRESENTATION_CHANGE",
+   "loss_rank": 1,
+   "invertibility": "EXACT",
+   "doc": "Reflect one or more axes that point the opposite way: source = -target.\n\nThe named axes declare *different* orientations on the two sides, and this\ntransform is the statement that those two declarations are exact opposites\nof one another. It carries no parameters at all. \u00a78.6 asks for the\nleast-expressive sufficient transform, and \"this axis points the other way\"\nhas no magnitude in it: a reflection about some other centre is a reflection\n*and* a translation, which is rung 5 or 7 and must be composed, not folded\ninto this record.\n\nThe flip is *declared*, like every other field this slice can relax, and for\na reason of its own. ``orientation`` holds a free-text domain code \u2014 \"RAS\",\n\"LPS\", \"up\", \"depth-positive-down\" \u2014 and that vocabulary is open and has no\nalgebra. Nothing here can compute that \"LPS\" is the reverse of \"RAS\" rather\nthan an unrelated basis or a permutation of three axes, so a caller says so\nand the record commits to having been told. Nothing in the data can\ncontradict it either: with `bounds`, `origin` and `resolution` all outside\nthis slice, the coordinates carry no evidence about which way they run."
+  },
+  {
+   "class": "LabelReindexTransform",
+   "transform_type": "LABEL_REINDEX",
+   "loss_class": "EXACT_WITH_REPRESENTATION_CHANGE",
+   "loss_rank": 1,
+   "invertibility": "EXACT",
+   "doc": "An explicit total bijection between two committed label domains."
+  },
+  {
+   "class": "ReferenceBasisTransform",
+   "transform_type": "REFERENCE_BASIS",
+   "loss_class": "EXACT_WITH_REPRESENTATION_CHANGE",
+   "loss_rank": 1,
+   "invertibility": "EXACT",
+   "doc": "Re-express a coordinate against a different declared reference frame.\n\nThe map is `source = target + offset`: a translation, and nothing else.\n\u00a78.6 asks for the least-expressive sufficient transform, and \"measured from\na different origin\" has no scaling in it. A frame change that also rescales\nis a *unit* change as well, and the two compose \u2014 one record per thing said,\nwhich is also what keeps the offset unambiguous, because it is declared in\nthe target axis's own unit and the shift happens while the coordinate is\nstill expressed in it.\n\nDeclared, like every family whose vocabulary is open. A reference-frame\nidentifier is free text \u2014 \"mean-sea-level\", \"drill-floor\", \"EPSG:4326\" \u2014\nand nothing here can compute how far apart two origins are. Ranked against\nthe others by how much the data can push back, this sits with the unit rung:\nnothing in the coordinates can contradict a declared origin offset."
+  },
+  {
+   "class": "TimezoneTransform",
+   "transform_type": "TIMEZONE",
+   "loss_class": "EXACT_WITH_REPRESENTATION_CHANGE",
+   "loss_rank": 1,
+   "invertibility": "EXACT",
+   "doc": "Re-spell the same instant under a different declared UTC offset.\n\nThe instant is not moved: the target coordinate already carries its own\nnumeric offset, so it names an absolute instant, and this transform writes\nthat same instant with the source axis's offset. No IANA timezone database is\nread. The offsets are *declared*, exactly as a unit conversion's factor is,\nbecause resolving ``America/New_York`` to ``-04:00`` on a given date is a\nlookup in external, versioned data that a verifier on another machine may not\nhave the same edition of.\n\nWhat the data can still catch: a coordinate whose own offset contradicts the\ndeclared one is refused, which is precisely what a daylight-saving change\nlooks like from in here."
+  },
+  {
+   "class": "UnitAffineTransform",
+   "transform_type": "UNIT_AFFINE",
+   "loss_class": "EXACT_WITH_REPRESENTATION_CHANGE",
+   "loss_rank": 1,
+   "invertibility": "EXACT",
+   "doc": "An exact declared unit conversion on one or more numeric axes.\n\nThe conversion is *declared*, never inferred. Nothing here parses a unit\nstring, consults a unit registry or derives a factor from magnitudes, so the\nrecord commits to the caller's declaration exactly as given. Replay detects\nrevision of that declaration; it does not establish that \"centimetre\" really\nis a hundredth of \"metre\"."
+  }
+ ]
+}

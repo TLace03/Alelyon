@@ -1,0 +1,128 @@
+{
+ "input": {
+  "model": "x",
+  "payload": {
+   "model": "",
+   "family": "",
+   "quantization_level": "",
+   "parent_model": "",
+   "model_info": [
+    ["general.architecture", {"str": "qwen3"}],
+    ["qwen3.block_count", {"int": "4"}]
+   ],
+   "tensors": [
+    {"name": "blk.0.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.attn_q.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.attn_k.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.attn_k.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.attn_k.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.attn_k.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.0.ffn_up.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.1.ffn_up.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.2.ffn_up.weight", "shape": [8, 8], "type": "Q4_K"},
+    {"name": "blk.3.ffn_up.weight", "shape": [8, 8], "type": "Q4_K"}
+   ]
+  }
+ },
+ "expected": {
+  "morphometry": {
+   "schema_version": "alelyon.lattice.model-morphometry/0.1",
+   "model": "x",
+   "source": "TENSOR_INVENTORY",
+   "architecture": "qwen3",
+   "family": "",
+   "quantization": "",
+   "declared_parameters": null,
+   "context_length": null,
+   "embedding_length": null,
+   "block_count": 4,
+   "expert_count": null,
+   "expert_used_count": null,
+   "routing_metadata_error": "",
+   "refusal": "",
+   "gaps": [],
+   "native_axis_order": [
+    "module",
+    "block"
+   ],
+   "tensors": [
+    {"name": "blk.0.attn_q.weight", "module": "attn_q", "block": 0, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.1.attn_q.weight", "module": "attn_q", "block": 1, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.2.attn_q.weight", "module": "attn_q", "block": 2, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.3.attn_q.weight", "module": "attn_q", "block": 3, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 0, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.0.attn_k.weight", "module": "attn_k", "block": 0, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.1.attn_k.weight", "module": "attn_k", "block": 1, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.2.attn_k.weight", "module": "attn_k", "block": 2, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.3.attn_k.weight", "module": "attn_k", "block": 3, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "attention", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.0.ffn_up.weight", "module": "ffn_up", "block": 0, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "feed-forward", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.1.ffn_up.weight", "module": "ffn_up", "block": 1, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "feed-forward", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.2.ffn_up.weight", "module": "ffn_up", "block": 2, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "feed-forward", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36},
+    {"name": "blk.3.ffn_up.weight", "module": "ffn_up", "block": 3, "shape": [8, 8], "element_type": "Q4_K", "parameters": 64, "family": "feed-forward", "stage": 1, "bits_per_weight": [9, 2], "nominal_bytes": 36}
+   ],
+   "cells": [
+    {"block": 0, "module": "attn_k", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 1, "label": "Key projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 0, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 0, "module": "ffn_up", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "feed-forward", "stage": 1, "label": "Feed-forward up", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 1, "module": "attn_k", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 1, "label": "Key projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 1, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 1, "module": "ffn_up", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "feed-forward", "stage": 1, "label": "Feed-forward up", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 2, "module": "attn_k", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 1, "label": "Key projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 2, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 2, "module": "ffn_up", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "feed-forward", "stage": 1, "label": "Feed-forward up", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 3, "module": "attn_k", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 1, "label": "Key projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 3, "module": "attn_q", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "attention", "stage": 0, "label": "Query projection", "mean_bits_per_weight": [9, 2], "active_parameters": 64},
+    {"block": 3, "module": "ffn_up", "parameters": 64, "tensors": 1, "element_types": ["Q4_K"], "nominal_bytes": 36, "routed_parameters": 0, "family": "feed-forward", "stage": 1, "label": "Feed-forward up", "mean_bits_per_weight": [9, 2], "active_parameters": 64}
+   ],
+   "derived": {
+    "ok": true,
+    "counted_parameters": 768,
+    "nominal_bytes": 432,
+    "coverage": null,
+    "is_mixture_of_experts": false,
+    "routed_expert_parameters": 0,
+    "always_active_parameters": 768,
+    "active_path_gap": null,
+    "active_parameters": 768,
+    "active_fraction": 1.0,
+    "blocks": [{"block": 0, "parameters": 192, "nominal_bytes": 108, "modules": 3, "mean_bits_per_weight": [9, 2]}, {"block": 1, "parameters": 192, "nominal_bytes": 108, "modules": 3, "mean_bits_per_weight": [9, 2]}, {"block": 2, "parameters": 192, "nominal_bytes": 108, "modules": 3, "mean_bits_per_weight": [9, 2]}, {"block": 3, "parameters": 192, "nominal_bytes": 108, "modules": 3, "mean_bits_per_weight": [9, 2]}],
+    "by_family": [["embedding", 0], ["normalisation", 0], ["attention", 512], ["feed-forward", 256], ["output", 0]],
+    "block_dispersion": {"relative": 0.0, "outliers": []}
+   }
+  },
+  "voxel_field": {
+   "width": 4,
+   "height": 5,
+   "depth": 5,
+   "max_parameters": 64,
+   "has_stack_external": false,
+   "source": "TENSOR_INVENTORY",
+   "max_active_parameters": 64,
+   "has_active_path": true,
+   "occupied": 12,
+   "capacity": 100,
+   "voxels": [
+    {"x": 0, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 0, "y": 2, "z": 1, "module": "attn_k", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 0, "y": 3, "z": 1, "module": "ffn_up", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 1, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 1, "y": 2, "z": 1, "module": "attn_k", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 1, "y": 3, "z": 1, "module": "ffn_up", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 2, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 2, "y": 2, "z": 1, "module": "attn_k", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 2, "y": 3, "z": 1, "module": "ffn_up", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 3, "y": 2, "z": 0, "module": "attn_q", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 3, "y": 2, "z": 1, "module": "attn_k", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0},
+    {"x": 3, "y": 3, "z": 1, "module": "ffn_up", "parameters": 64, "intensity": 1.0, "bits_per_weight": 4.5, "active_parameters": 64, "active_intensity": 1.0}
+   ]
+  },
+  "native_space": {
+   "axis_order": [
+    "module",
+    "block"
+   ],
+   "ref": "sha256:a637ec1154003be0e1c5237fe93542d59e67ce26cabfddb2f9e254c70e5af6d3"
+  }
+ }
+}

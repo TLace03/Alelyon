@@ -1,0 +1,55 @@
+{
+ "input": {
+  "backend": "mps",
+  "torch_version": "2.7.1",
+  "gpu": null,
+  "ram_total_bytes": 68719476736,
+  "disk_free_bytes": 536870912000,
+  "bf16": null,
+  "gaps": [
+   "Metal reports available; per-device memory is not published by this backend, so VRAM is UNMEASURED"
+  ]
+ },
+ "expected": {
+  "rows": [
+   [
+    "Compute backend",
+    "mps",
+    "OBSERVED"
+   ],
+   [
+    "Accelerator",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Accelerator memory free now",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "System memory",
+    "64.00 GiB",
+    "OBSERVED"
+   ],
+   [
+    "bfloat16",
+    "UNMEASURED",
+    "UNMEASURED"
+   ],
+   [
+    "Free disk",
+    "500.00 GiB",
+    "OBSERVED"
+   ]
+  ],
+  "gaps": [
+   "Metal reports available; per-device memory is not published by this backend, so VRAM is UNMEASURED"
+  ]
+ }
+}

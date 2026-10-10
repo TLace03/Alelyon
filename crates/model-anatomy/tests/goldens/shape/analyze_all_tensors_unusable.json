@@ -1,0 +1,34 @@
+{
+ "input": {
+  "analyze_case": "all_tensors_unusable"
+ },
+ "expected": {
+  "model": "x",
+  "layers": 2,
+  "kv_heads": 2,
+  "key_length": 4,
+  "value_length": 4,
+  "context_max": null,
+  "weight_bytes": null,
+  "weight_provenance": "UNMEASURED",
+  "parameters": null,
+  "quantization": "",
+  "architecture": "llama",
+  "mixture_of_experts": false,
+  "active_parameters": null,
+  "requires_backends": [],
+  "gaps": [
+   "the inventory contains an element type with no published bits per weight, so stored size is UNMEASURED rather than partial",
+   "2 tensor entries had no usable name or shape and were dropped rather than counted as zero",
+   "counted from declared dimensions, not from a tensor inventory: the figures are the dense-decoder shape this runtime declares, and any tensor the architecture adds beyond it is not represented",
+   "per-cell storage is UNMEASURED without an inventory \u2014 a file's headline quantisation is not applied uniformly across tensors",
+   "the runtime declares no vocabulary size, so the embedding and output projections are absent from the breakdown",
+   "no declared attention.key_length; head dimension taken as embedding_length / head_count",
+   "the runtime declares no separate key/value head count; the cache is sized as multi-head attention, which OVERSTATES it on a grouped-query model",
+   "per-head key length was not declared; it is DERIVED as embedding_length / head_count, which is wrong on an architecture whose head dimension is not that ratio",
+   "per-head value length was not declared; it is assumed equal to the key length, which is false on a latent-attention architecture"
+  ],
+  "kv_established": true,
+  "kv_bytes_per_token": 32
+ }
+}
