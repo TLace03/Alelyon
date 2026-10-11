@@ -138,6 +138,9 @@ pub fn view<'a>(state: &'a State, phase: f32) -> El<'a> {
     if let Some(q) = &state.ide.quick {
         layers.push(quick_open(state, q));
     }
+    if let Some(j) = &state.ide.jump {
+        layers.push(super::jump::overlay(state, j));
+    }
     if let Some(typed) = &state.ide.goto {
         layers.push(goto_box(state, typed));
     }

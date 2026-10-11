@@ -2,7 +2,7 @@
 //! opened from the account menu, so the page behind it stays on show and live. A list of its parts on the left with a search above it, the part chosen on the right; Esc, a click beside
 //! the panel or its close button closes it.
 //!
-//! Only what works is here: who is signed in and their account pages; whether this PC keeps a session, and
+//! Only what works is here: who is signed in, their plan (Upgrade, Manage billing) and their account pages; whether this PC keeps a session, and
 //! forgetting it, and which sign-in service Alelyon uses and what it says now (its state, ways of signing in,
 //! notices); where web pages open (Lattice's own browser or yours, `web`); appearance (whether the sign-in background
 //! moves, the same switch as the sign-in screen's Motion button); and about Alelyon (the version, What's New, the
@@ -18,6 +18,8 @@ use super::{El, Gate, Msg, State, client, words, yours};
 
 const TERMS_URL: &str = "https://www.alelyon.com/legal/terms/";
 const PRIVACY_URL: &str = "https://www.alelyon.com/legal/privacy/";
+/// The plans and their prices; buying one happens on the website and Stripe's page, never in this window.
+pub const PRICING_URL: &str = "https://www.alelyon.com/pricing/";
 
 /// The panel's size, when the window has room for it.
 const WIDTH: f32 = 940.0;
@@ -49,7 +51,7 @@ impl Pane {
     /// One line under the part's title.
     pub fn description(self) -> &'static str {
         match self {
-            Pane::Account => "Who is signed in, and your account's pages.",
+            Pane::Account => "Who is signed in, your plan, and your account's pages.",
             Pane::Security => "Staying signed in on this PC, and the sign-in service Alelyon uses.",
             Pane::WebPages => "Where the account pages, the Terms and the Privacy Notice open.",
             Pane::Appearance => "How the sign-in screen looks.",
@@ -60,7 +62,9 @@ impl Pane {
     /// Every word the part's settings say about themselves, for the search.
     fn says(self) -> &'static str {
         match self {
-            Pane::Account => "account signed in sign out name email ways to sign in account details account security offline",
+            Pane::Account => {
+                "account signed in sign out name email ways to sign in account details account security offline plan                  upgrade manage billing subscription payment pricing seats paid through pro team max ultra"
+            }
             Pane::Security => {
                 "stay signed in kept session forget session sealed windows user sign-in service address state notice \
                  providers security password"
@@ -127,6 +131,53 @@ fn action<'a>(label: &'a str, msg: Option<Msg>) -> El<'a> {
     button(words(label, 12.5, theme::TEXT)).padding([6.0, 12.0]).on_press_maybe(msg).style(theme::ghost_button).into()
 }
 
+/// The plan in words: its name, seats on Team, and the paid-through day when the service gave one; or why it could
+/// not be read; or that it is being asked for.
+pub fn plan_words(s: &State) -> (String, iced::Color) {
+    match &s.plan {
+        Some(Ok(p)) => {
+            let mut said = p.name.clone();
+            if p.key == "team" {
+                said.push_str(&format!(" · {} {}", p.seats, if p.seats == 1 { "seat" } else { "seats" }));
+            }
+            if let Some(day) = p.paid_through_day() {
+                said.push_str(&format!(" · Paid through {day}"));
+            }
+            (said, theme::TEXT)
+        }
+        Some(Err(why)) => (why.clone(), theme::CAUTION),
+        None if s.plan_asking => ("Asking…".into(), theme::TEXT_DIM),
+        None => ("—".into(), theme::TEXT_DIM),
+    }
+}
+
+/// The plan's line and its buttons: Upgrade (the pricing page) on Free or Beta, Manage billing (Stripe's portal, in
+/// your own browser) when the account has billing to manage. No card is entered here.
+fn plan<'a>(s: &'a State) -> El<'a> {
+    let (said, color) = plan_words(s);
+    let mut col = column![line("Plan", said, color)].spacing(6);
+    let mut buttons = row![].spacing(4).align_y(Alignment::Center);
+    let mut any = false;
+    if let Some(Ok(p)) = &s.plan {
+        if p.upgradable() {
+            buttons = buttons.push(action("Upgrade ↗", Some(Msg::Open(PRICING_URL.into())))).push(yours(PRICING_URL));
+            any = true;
+        }
+        if p.manage_available {
+            let label = if s.billing_busy { "Opening billing…" } else { "Manage billing ⇗" };
+            buttons = buttons.push(action(label, (!s.billing_busy).then_some(Msg::ManageBilling)));
+            any = true;
+        }
+    }
+    if any {
+        col = col.push(row![Space::new().width(192), buttons]);
+    }
+    if let Some(why) = &s.billing_said {
+        col = col.push(row![Space::new().width(192), words(why.as_str(), 12.0, theme::CAUTION)]);
+    }
+    col.into()
+}
+
 fn account<'a>(s: &'a State) -> El<'a> {
     let urls = s.status.clone().unwrap_or_default();
     let open = |u: &str| (!u.is_empty()).then(|| Msg::Open(u.to_string()));
@@ -138,6 +189,7 @@ fn account<'a>(s: &'a State) -> El<'a> {
                 line("Signed in as", a.name().to_string(), theme::TEXT),
                 line("Email", if a.email.is_empty() { "none on the account".to_string() } else { a.email.clone() }, theme::TEXT),
                 line("Ways to sign in", ways, theme::TEXT),
+                plan(s),
                 row![
                     action("Account details ↗", open(&urls.account_url)),
                     yours(&urls.account_url),

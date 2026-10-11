@@ -4,7 +4,7 @@
 //! bottom panel's list of the agent's commands.
 
 use iced::widget::{
-    Column, Row, button, column, container, markdown, pick_list, rich_text, row, scrollable, space, span, text,
+    Column, Row, button, checkbox, column, container, markdown, pick_list, rich_text, row, scrollable, space, span, text,
     text_editor, text_input,
 };
 use iced::{Alignment, Background, Border, Color, Element, Length, Padding, padding};
@@ -71,6 +71,12 @@ pub fn panel<'a>(state: &'a State, phase: f32) -> El<'a> {
             .into(),
     };
     col = col.push(container(body).height(Length::Fill));
+    for bar in steps_bars(state) {
+        col = col.push(bar);
+    }
+    for bar in super::outside_steps::bars(state) {
+        col = col.push(bar);
+    }
     if let Some(bar) = todos_bar(state) {
         col = col.push(bar);
     }
@@ -101,6 +107,8 @@ fn header<'a>(state: &'a State) -> El<'a> {
         None => line = line.push(strong("New chat", 13.5, theme::TEXT)),
     }
     line = line.push(space().width(Length::Fill));
+    // Where the chat leads: one menu, not a row of buttons.
+    line = line.push(super::jump::button_for(None));
     // The grid: chats side by side, shown in the editor's place.
     let grid = &state.ide.grid;
     let grid_tip = if grid.shown { "Back to the editor" } else { "Chats side by side" };
@@ -865,6 +873,54 @@ fn todos_bar<'a>(state: &'a State) -> Option<El<'a>> {
             .padding(Padding { top: 8.0, bottom: 0.0, left: 12.0, right: 12.0 })
             .into(),
     )
+}
+
+/// The checklists the agent gave the reader and not yet told done, pinned above the composer: each step a box
+/// to check, the switch that tells the agent when all are, and Done.
+fn steps_bars<'a>(state: &'a State) -> Vec<El<'a>> {
+    let Some(c) = state.conversation() else { return Vec::new() };
+    c.checklists
+        .iter()
+        .filter(|list| !list.told)
+        .map(|list| {
+            let checked = list.steps.iter().filter(|(_, done)| *done).count();
+            let head = row![
+                label(list.title.as_str(), 12.5, theme::TEXT),
+                label(format!("{checked} of {} done", list.steps.len()), 11.5, theme::TEXT_DIM),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            let foot = row![
+                checkbox(list.notify)
+                    .label("Tell the agent when all are done")
+                    .on_toggle({
+                        let id = list.id.clone();
+                        move |on| go(IdeMsg::StepsNotify(id.clone(), on))
+                    })
+                    .size(13)
+                    .text_size(11.0),
+                space().width(Length::Fill),
+                ui::secondary("Done", Some(go(IdeMsg::StepsDone(list.id.clone())))),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center);
+            let mut col = Column::new().spacing(4).push(head);
+            for (n, (text, done)) in list.steps.iter().enumerate() {
+                let id = list.id.clone();
+                col = col.push(
+                    checkbox(*done)
+                        .label(format!("{}. {text}", n + 1))
+                        .on_toggle(move |on| go(IdeMsg::StepCheck(id.clone(), n as u32, on)))
+                        .size(14)
+                        .text_size(12.0),
+                );
+            }
+            col = col.push(foot);
+            container(container(col).padding([7.0, 10.0]).width(Length::Fill).style(theme::notice(theme::TEXT_FAINT)))
+                .padding(Padding { top: 8.0, bottom: 0.0, left: 12.0, right: 12.0 })
+                .into()
+        })
+        .collect()
 }
 
 /// The agent's changes waiting for review, as one bar above the composer.

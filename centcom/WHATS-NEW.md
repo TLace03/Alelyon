@@ -3,6 +3,63 @@
 Shown by the account menu's "What's New" (src/signin/mod.rs reads this file at build time). Newest first. Each
 release is a `## ` heading (a date, then an optional title after " — "), followed by `- ` lines in plain words.
 
+## 2026-10-10 — Free cloud models for Sinai's parts
+
+- Each of Sinai's parts can now use a free cloud model on your own account: OpenRouter's free open models for its mind, Groq for its ears, Cloudflare Workers AI for its embeddings and voice, and Cloudflare for its eyes once you turn them on.
+- Press "Use a free cloud model" in a part's picker, connect your own account, choose a model and read what will be sent, to whom and the free limit. Nothing is sent until you agree, part by part.
+- A cloud part's card names its provider, and Sinai's page shows an "in the cloud" mark while one is used.
+- At a free limit the part pauses and says when it is back, even after Alelyon restarts. Alelyon never switches to another provider or pays on its own.
+- On Cloudflare, Alelyon counts each call and stops at 9,000 of the 10,000 free Neurons a day, whatever your plan, so it never runs into paid use. Your eyes, embeddings and voice share that count.
+- Sinai's eyes on Cloudflare ask you to tick "I accept the Llama 3.2 licence" before you can agree.
+- Gemini is offered as a labelled choice only: its free tier uses what you send to improve Google's products.
+- In this app the mind's cloud model answers on Sinai's page, and the ears' runs the speech engine. The cloud choices for the eyes, embeddings and voice are kept for Sinai's own loop.
+
+## 2026-10-10 — Research that remembers
+
+- Agents can ask your research archive a question and get what was already worked out first: facts from papers, how ideas relate, and earlier answers, before reading papers again.
+- What they learn is kept beside your archive, so the next question on the same ground is quick and costs nothing.
+- When nothing has the answer, an agent can ask you for a new gathering; nothing is searched (and no credits are spent) until you approve it.
+- Research's "Add to Lattice" gives Lattice's agents the same questions (Lattice asks once before running it).
+- The Research hub shows what agents kept, with Forget on each, and the gatherings they asked for: Approve opens one as a new subject, and it starts only when you press Gather.
+
+## 2026-10-10 — Checklists from every agent
+
+- Agents working outside Lattice's chats (in a terminal, or in other apps) can give you checklists too: they appear pinned above the composer with the agent's name, and you tick them off the same way.
+- When you finish a list, the agent that asked is told, whichever agent it is.
+
+## 2026-10-10 — Window buttons on the right
+
+- Minimise, maximise and close are back in the window's top right corner.
+- Drag the window by the empty space along its top, beside Lattice's tabs or above a page's heading, as well as by the Alelyon mark. Double-click there to maximise or restore.
+
+## 2026-10-10 — Checklists for what you need to do
+
+- When you need to do something yourself, Lattice's agent gives it to you as a checklist pinned above the composer, instead of directions that scroll away.
+- Check each step as you go: the agent sees your checks as it works, and when every step is checked it is told, so you do not need to write to it.
+- Prefer to tell it yourself? Switch off "Tell the agent when all are done" and press Done when you are.
+
+## 2026-10-10 — More moments for hooks
+
+- Hooks now also run when the agent waits for you, when a helper starts or stops, when earlier turns are left out of what the model sees, after an answer, after a tool fails, when a folder is attached, when Lattice closes, and around Tab completions (a hook can keep a file's text from them).
+- Antigravity's hooks are read in its own format.
+- Hooks for moments you are typing or away run only once you allow them: the Tools page's Hooks card has Allow.
+
+## 2026-10-10 — /review
+
+- Type /review in the composer for a careful review of your changes: the uncommitted ones by default, `/review branch` for everything since the branch left main, `/review against <branch>`, or `/review <commit>`.
+- The agent reads the change and the code around it and lists what would go wrong, most severe first, each with its file and line. It changes nothing.
+
+## 2026-10-10 — Jump from a chat
+
+- Each chat has one Jump menu (⌄ on its header): its changes, its folder and its model; every Lattice tab and view; and every Fleet tab. Type to narrow it, Enter takes the first, Esc closes.
+
+## 2026-10-10 — Choose a model for each of Sinai's parts
+
+- The cards for Sinai's mind, eyes, ears, embeddings and voice, on the Overview and in the Machine list on Sinai's page, are buttons now. Each opens that part's picker, with the part's model, where it runs and its state at the top.
+- Choose a GGUF file on this PC or an endpoint you set up; for the ears, a speech model file. The ears use it the next time Alelyon starts the speech engine.
+- Where Sinai's own mind is installed, it still answers unless you choose another model. Sinai's eyes stay off until you choose a model for them.
+- Each card says what uses its choice. The choices for the eyes, embeddings and voice are kept for Sinai's own loop, which does not read them yet.
+
 ## 2026-10-10 — Start the speech engine from the Words page
 
 - Every build of Alelyon can now start the speech engine from the Words page, when `angel-ears.exe` is beside Alelyon's program. The engine is open source.

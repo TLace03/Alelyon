@@ -246,6 +246,9 @@ pub enum ToolsMsg {
     HooksRead(Vec<HookRow>, Vec<String>),
     /// Take back a hook's allowance (by its digest).
     RevokeHook(String),
+    /// Allow a hook before it first runs (the core's dialog asks).
+    AllowHook(String),
+    HookAllowed(Result<bool, String>),
     HookRevoked(Result<bool, String>),
     Forget(String, String),
     Forgot(Result<bool, String>),
@@ -556,6 +559,21 @@ impl State {
             ToolsMsg::CloseModels => self.ide.tools.choosing = None,
             ToolsMsg::MemoryRead(workspace, notes) => self.ide.tools.memory = Some((workspace, notes)),
             ToolsMsg::HooksRead(rows, problems) => self.ide.tools.hooks = Some((rows, problems)),
+            ToolsMsg::AllowHook(digest) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let allowing = services.chat.allow_hook(self.chat_workspace(), digest);
+                return Task::perform(on(&services, allowing), |r| {
+                    go(ToolsMsg::HookAllowed(r.unwrap_or_else(|| Err(STOPPED.to_string()))))
+                });
+            }
+            ToolsMsg::HookAllowed(result) => {
+                match result {
+                    Ok(true) => self.ide.tools.said = Some(("Allowed: it runs at its event until its text changes.".to_string(), false)),
+                    Ok(false) => self.ide.tools.said = Some(("Not allowed.".to_string(), false)),
+                    Err(why) => self.ide.tools.said = Some((why, true)),
+                }
+                return self.read_browser();
+            }
             ToolsMsg::RevokeHook(digest) => {
                 let Some(services) = self.services.clone() else { return Task::none() };
                 let chat = services.chat.clone();
@@ -1334,7 +1352,7 @@ fn memory_card<'a>(t: &'a Tools) -> El<'a> {
 }
 
 /// What the Hooks card says under its title.
-const HOOKS_ABOUT: &str = "Commands you set to run when Lattice's agent does something: before a tool runs (they can stop it or change its arguments), after it ran, when you send a message, when it stops, and when a chat starts. Lattice reads yours (below), your plugins', Claude Code's, Cursor's, Gemini CLI's and Antigravity's, and a trusted folder's own. Each asks you once, showing its exact command; any change asks again.";
+const HOOKS_ABOUT: &str = "Commands you set to run when Lattice's agent does something: before a tool runs (they can stop it or change its arguments), after it ran, when you send a message, when it stops, and when a chat starts. Lattice reads yours (below), your plugins', Claude Code's, Cursor's, Gemini CLI's and Antigravity's, and a trusted folder's own. Each asks you once, showing its exact command; any change asks again. Hooks for moments you are typing or away (Tab completions, a waiting agent, a folder attached, Lattice closing) run only once allowed here.";
 
 /// The reader's hooks: each with where it is from, its event, which tools, its command, and its allowance.
 fn hooks_card<'a>(state: &'a State) -> El<'a> {
@@ -1361,7 +1379,7 @@ fn hooks_card<'a>(state: &'a State) -> El<'a> {
                 let action: El<'a> = if row.allowed {
                     small("Take back", Some(go(ToolsMsg::RevokeHook(row.digest.clone()))))
                 } else {
-                    label("asks before it first runs", 11.5, theme::TEXT_FAINT).into()
+                    small("Allow\u{2026}", Some(go(ToolsMsg::AllowHook(row.digest.clone()))))
                 };
                 col = col.push(
                     Row::new()

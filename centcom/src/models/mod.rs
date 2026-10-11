@@ -17,7 +17,8 @@
 //!   With nothing chosen here the chat keeps its own choice (Auto), as before;
 //! - **Sinai**: kept in Alelyon's preferences (`"sinai_model"`); with nothing kept, it is Local's model, so nothing
 //!   changes for a person who never chose. Where the build carries Sinai's mind (`sinai-mind`), the mind answers;
-//!   the person's own model answers only when they pick it on the page for this session ([`answering`]).
+//!   the person's own model answers only when they pick it on the page, or in the mind's part picker (`sinai_parts`), for
+//!   this session ([`answering`]). The part picker keeps its choice in the same `"sinai_model"` key, and its own entry.
 //!
 //! **Readiness** is said on every row, live and change-only: the models folder, the registry, Local's choice and the
 //! preferences are watched (`live`), and an endpoint on this PC is knocked on (a connection opened and closed, as
@@ -111,6 +112,8 @@ pub enum Answering {
     Mind,
     /// The person's own model.
     Own(Pick),
+    /// A free cloud model on the person's own account, chosen and agreed in the mind's picker (`sinai_parts::cloud`).
+    Cloud(crate::sinai_parts::cloud::CloudPick),
     /// Nobody: no mind in this build and no model chosen.
     Nobody,
 }
@@ -729,6 +732,8 @@ pub struct State {
     pub own: byo::Strip,
     /// The hosted providers' part of the panel.
     pub hosted: hosted::Hosted,
+    /// The mind's free cloud model, when it is the one answering on Sinai's page: the strip's messages go there.
+    pub cloud_mind: Option<crate::sinai_parts::cloud::CloudPick>,
 }
 
 impl Default for State {
@@ -746,6 +751,7 @@ impl Default for State {
             instead: false,
             own: byo::Strip::default(),
             hosted: hosted::Hosted::default(),
+            cloud_mind: None,
         }
     }
 }
@@ -959,8 +965,9 @@ impl State {
             }
             Msg::Own(msg) => {
                 let sources = self.sources().clone();
-                let route = match (self.sinai(), &self.catalog) {
-                    (Some(pick), Some(c)) => c.route(&pick, &sources),
+                let route = match (&self.cloud_mind, self.sinai(), &self.catalog) {
+                    (Some(cloud), _, _) => crate::sinai_parts::cloud::mind_route(cloud),
+                    (None, Some(pick), Some(c)) => c.route(&pick, &sources),
                     _ => Err("Choose a model of your own first: Models… on this page.".into()),
                 };
                 return self.own.update(msg, route, move || byo::engine(sources.env.clone(), &sources.state)).map(Msg::Own);
@@ -996,10 +1003,12 @@ impl State {
         Task::none()
     }
 
-    /// While the panel shows (or Sinai's page talks to a model of the person's own, `own_on_show`): the watch over
-    /// what it shows, and the knock on endpoints on this PC it shows. Nothing while neither is on show.
-    pub fn subscription(&self, own_on_show: bool) -> Subscription<Msg> {
-        if !(self.open || own_on_show) {
+    /// While something shows the catalog (`watch`: the panel, Sinai's page talking to a model of the person's own, a
+    /// part's card or picker): the watch over what it shows, and the knock on endpoints on this PC, every one when
+    /// `knock_all` (the panel or a picker lists them all), else only the one Sinai's page talks to. Nothing while
+    /// nothing shows it.
+    pub fn subscription_with(&self, watch: bool, knock_all: bool) -> Subscription<Msg> {
+        if !watch {
             return Subscription::none();
         }
         let mut subs = Vec::new();
@@ -1007,7 +1016,7 @@ impl State {
             subs.push(Watch::new("models", sources.watched()).subscription().map(Msg::Live));
         }
         if let Some(c) = &self.catalog {
-            let wanted: Vec<&Endpoint> = if self.open {
+            let wanted: Vec<&Endpoint> = if knock_all {
                 c.endpoints.iter().collect()
             } else {
                 match self.sinai() {

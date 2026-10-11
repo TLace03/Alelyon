@@ -88,8 +88,22 @@ pub struct Conversation {
     pub running: bool,
     /// The agent's to-do list as it last wrote it (empty when it has none, or cleared it).
     pub todos: Vec<TodoItem>,
+    /// The checklists the agent gave the reader, oldest first, as they stand.
+    pub checklists: Vec<Checklist>,
     /// How many images the reader attached to each user turn, by the turn's id.
     pub images: std::collections::HashMap<String, u32>,
+}
+
+/// A checklist the agent gave the reader: its steps and what is checked.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Checklist {
+    pub id: String,
+    pub title: String,
+    pub steps: Vec<(String, bool)>,
+    /// Finishing it tells the agent by itself.
+    pub notify: bool,
+    /// The agent was told it is done.
+    pub told: bool,
 }
 
 impl std::fmt::Debug for Conversation {
@@ -125,6 +139,7 @@ impl Conversation {
             elsewhere: answering_elsewhere,
             running,
             todos: Vec::new(),
+            checklists: Vec::new(),
             images: std::collections::HashMap::new(),
         };
         // The snapshot's record is applied like a batch, so a follow from `last_seq` continues exactly where it ends.
@@ -316,6 +331,30 @@ impl Conversation {
             }
             // The whole list each time: the latest replaces the one before.
             Ev::TodosUpdated { items } => self.todos = items.clone(),
+            Ev::StepsGiven { list, title, steps, notify } => self.checklists.push(Checklist {
+                id: list.clone(),
+                title: title.clone(),
+                steps: steps.iter().map(|s| (s.clone(), false)).collect(),
+                notify: *notify,
+                told: false,
+            }),
+            Ev::StepChecked { list, step, done } => {
+                if let Some(c) = self.checklists.iter_mut().find(|c| &c.id == list)
+                    && let Some(entry) = c.steps.get_mut(*step as usize)
+                {
+                    entry.1 = *done;
+                }
+            }
+            Ev::StepsNotify { list, notify } => {
+                if let Some(c) = self.checklists.iter_mut().find(|c| &c.id == list) {
+                    c.notify = *notify;
+                }
+            }
+            Ev::StepsDone { list } => {
+                if let Some(c) = self.checklists.iter_mut().find(|c| &c.id == list) {
+                    c.told = true;
+                }
+            }
             Ev::TaskSettled { task: id, outcome: settled } => {
                 // A task settles once: the first outcome stands.
                 for a in self.activity.iter_mut() {
@@ -658,6 +697,28 @@ mod tests {
         assert_eq!(c.todos, [step("Read", TodoStatus::Done), step("Fix", TodoStatus::InProgress)]);
         c.apply(&[ev(4, Ev::TodosUpdated { items: vec![] })]);
         assert!(c.todos.is_empty(), "an empty list clears it");
+    }
+
+    #[test]
+    fn a_checklist_is_shown_checked_switched_and_told_as_its_events_say() {
+        let mut c = Conversation::from_snapshot(snapshot(vec![started(1)]));
+        let list = "steps_0011223344556677";
+        c.apply(&[ev(2, Ev::StepsGiven {
+            list: list.into(),
+            title: "Connect OpenRouter".into(),
+            steps: vec!["Open the Models page.".into(), "Sign in.".into()],
+            notify: true,
+        })]);
+        c.apply(&[
+            ev(3, Ev::StepChecked { list: list.into(), step: 1, done: true }),
+            ev(4, Ev::StepChecked { list: list.into(), step: 9, done: true }),
+            ev(5, Ev::StepsNotify { list: list.into(), notify: false }),
+        ]);
+        let shown = &c.checklists[0];
+        assert_eq!(shown.steps, [("Open the Models page.".to_string(), false), ("Sign in.".to_string(), true)]);
+        assert!(!shown.notify && !shown.told, "a step past the end changes nothing");
+        c.apply(&[ev(6, Ev::StepsDone { list: list.into() })]);
+        assert!(c.checklists[0].told, "told done: it leaves the pinned bars");
     }
 
     #[test]

@@ -32,6 +32,7 @@ pub enum IdeMsg {
     /// The projects' messages.
     Projects(super::projects::ProjectsMsg),
     Notes(super::notes::NotesMsg),
+    Jump(super::jump::JumpMsg),
     Grid(super::grid::GridMsg),
     /// The composer's commands list.
     Slash(super::slash::SlashMsg),
@@ -66,6 +67,8 @@ pub enum IdeMsg {
     Edit(u64, text_editor::Action),
     /// The editor's Tab completions.
     Complete(super::complete::CompleteMsg),
+    /// The checklists agents outside the chats gave the reader.
+    Outside(super::outside_steps::OutsideMsg),
     Scrolled(u64, scrollable::Viewport),
     Undo,
     Redo,
@@ -138,6 +141,12 @@ pub enum IdeMsg {
     Unattach(usize),
     /// Approve the plan: the chat goes on in Agent mode.
     PlanApprove(String),
+    /// The reader checked (or unchecked) a checklist's step: list, step (from 0), checked.
+    StepCheck(String, u32, bool),
+    /// Whether finishing a checklist tells the agent by itself.
+    StepsNotify(String, bool),
+    /// The reader's Done on a checklist.
+    StepsDone(String),
     /// Set the plan aside for more planning.
     PlanKeep(String),
     TaskDismiss(String),
@@ -384,9 +393,11 @@ impl State {
             IdeMsg::Tools(msg) => return self.tools(msg),
             IdeMsg::Projects(msg) => return self.projects(msg),
             IdeMsg::Notes(msg) => return self.notes(msg),
+            IdeMsg::Jump(msg) => return self.jump(msg),
             IdeMsg::Grid(msg) => return self.grid(msg),
             IdeMsg::Slash(msg) => return self.slash(msg),
             IdeMsg::Complete(msg) => return self.complete(msg),
+            IdeMsg::Outside(msg) => return self.outside(msg),
             IdeMsg::MentionList(msg) => return self.mention(msg),
             IdeMsg::TogglePanel => return self.toggle_panel(),
             IdeMsg::Panel(PanelTab::Terminal) => return self.show_terminals(),
@@ -969,6 +980,26 @@ impl State {
                 let (chat, choice, shown) = (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice));
                 let work = async move { chat.approve_plan(&id, &plan, choice, shown).await.map_err(|r| r.message) };
                 return Task::perform(on(&services, work), |r| Msg::Sent(r.unwrap_or_else(|| Err(STOPPED.to_string()))));
+            }
+            IdeMsg::StepCheck(list, step, done) => {
+                let (Some(c), Some(services)) = (&self.open, self.services.clone()) else { return Task::none() };
+                let id = c.id().to_string();
+                let (chat, choice, shown) = (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice));
+                let work = async move { chat.check_step(&id, &list, step, done, choice, shown).await.map_err(|r| r.message) };
+                return Task::perform(on(&services, work), crate::lattice::done);
+            }
+            IdeMsg::StepsNotify(list, notify) => {
+                let (Some(c), Some(services)) = (&self.open, self.services.clone()) else { return Task::none() };
+                let (id, chat) = (c.id().to_string(), services.chat.clone());
+                let work = async move { chat.set_steps_notify(&id, &list, notify).await.map_err(|r| r.message) };
+                return Task::perform(on(&services, work), crate::lattice::done);
+            }
+            IdeMsg::StepsDone(list) => {
+                let (Some(c), Some(services)) = (&self.open, self.services.clone()) else { return Task::none() };
+                let id = c.id().to_string();
+                let (chat, choice, shown) = (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice));
+                let work = async move { chat.steps_done(&id, &list, choice, shown).await.map(|_| ()).map_err(|r| r.message) };
+                return Task::perform(on(&services, work), crate::lattice::done);
             }
             IdeMsg::PlanKeep(plan) => {
                 let (Some(c), Some(services)) = (&self.open, self.services.clone()) else { return Task::none() };
@@ -2258,7 +2289,9 @@ impl State {
             Key::FindNext => return self.ide_update(IdeMsg::FindStep(true)),
             Key::FindPrevious => return self.ide_update(IdeMsg::FindStep(false)),
             Key::Escape => {
-                if self.ide.quick.is_some() {
+                if self.ide.jump.is_some() {
+                    self.ide.jump = None;
+                } else if self.ide.quick.is_some() {
                     self.ide.quick = None;
                 } else if self.ide.confirm.is_some() {
                     self.ide.confirm = None;

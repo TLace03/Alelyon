@@ -289,6 +289,10 @@ pub struct State {
     pub web_waiting: Vec<String>,
     /// A web page that opened in the person's own browser instead, and why (app.rs shows it as its notice).
     pub web_said: Option<String>,
+    /// The Fleet page's tabs (name, title), as the build's Fleet plug-in names them, for the jump menu; none without one.
+    pub fleet_tabs: Vec<(&'static str, &'static str)>,
+    /// A Fleet tab the jump menu picked: the window takes it and shows that tab of the Fleet page.
+    pub jump_out: Option<&'static str>,
 
     pub list: Option<ChatList>,
     pub listing: bool,
@@ -451,6 +455,8 @@ impl State {
             failed: None,
             web_waiting: Vec::new(),
             web_said: None,
+            fleet_tabs: Vec::new(),
+            jump_out: None,
             list: None,
             listing: false,
             status: None,
@@ -700,8 +706,13 @@ impl State {
                 self.services = Some(services);
                 #[cfg(debug_assertions)]
                 self.load_fixture();
+                // A debug build's photograph (`CENTCOM_LATTICE_JUMP=<filter>`): the jump menu open, filtered.
+                #[cfg(debug_assertions)]
+                if let Ok(filter) = std::env::var("CENTCOM_LATTICE_JUMP") {
+                    self.ide.jump = Some(ide::jump::Jump { chat: None, filter });
+                }
                 // The agent's browser: on or off, for the composer and the Tools view.
-                let mut tasks = vec![self.refresh(), self.read_browser(), self.read_completion()];
+                let mut tasks = vec![self.refresh(), self.read_browser(), self.read_completion(), ide::outside_steps::read_outside()];
                 // A folder named on the command line opens once the services run.
                 if let Some((folder, _)) = &self.ide.startup {
                     self.ide.folder_path = folder.clone();
@@ -1616,6 +1627,15 @@ impl State {
             subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Msg::DialogTick));
         }
         if self.tab == Tab::Chat {
+            // Agents outside the chats add checklists to the local store: watched while the chat shows.
+            subs.push(
+                crate::live::Watch::new(
+                    "user-steps",
+                    vec![("checklists".into(), crate::live::Source::Folder { path: ide::outside_steps::store(), subtree: false })],
+                )
+                .subscription()
+                .map(|_| Msg::Ide(ide::IdeMsg::Outside(ide::outside_steps::OutsideMsg::Changed))),
+            );
             subs.push(iced::event::listen_with(ide::update::keys));
             if self.ide.drag.is_some() {
                 subs.push(iced::event::listen_with(ide::update::drags));

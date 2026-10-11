@@ -249,17 +249,30 @@ fn main(state: &State, phase: f32) -> El<'_> {
 fn agents(state: &State) -> El<'_> {
     let body = Column::new()
         .push(label(
-            "Models and agents can research with the same subjects, papers and maps through a read-only MCP server that this \
-             program runs (`centcom --research-mcp`): list the subjects, read a subject's threads, foundations, bridges and \
-             frontier, look up a paper's connections, or find how two papers connect. Add it in Lattice's Tools page, Claude \
-             Code or any MCP client with the entry below. It reads the archive only; it fetches nothing.",
+            "Models and agents can research with the same subjects, papers and maps through an MCP server that this program \
+             runs (`centcom --research-mcp`): ask a question and get what agents already worked out (facts from papers, \
+             concepts and how they relate, earlier answers) before the papers themselves, read a subject's threads, \
+             foundations, bridges and frontier, look up a paper's connections, or find how two papers connect. What they \
+             learn is kept beside the archive, so the next question is cheaper; a new gathering they ask for waits for you. \
+             Add it to Lattice (it asks once, on its Tools page, before running it), or to Claude Code or any MCP client \
+             with the entry below. It never changes the archive and fetches nothing.",
             12.5,
             theme::TEXT_DIM,
         ))
         .push(
             row![
+                ui::secondary("Add to Lattice", Some(Msg::AddToLattice)),
                 ui::secondary("Copy MCP setup", Some(Msg::CopyMcp)),
-                label(if state.copied { "Copied." } else { "" }, 12.0, theme::TEXT_FAINT),
+                label(
+                    match &state.lattice_added {
+                        Some(Ok(())) => "Added to Lattice: enable it once on Lattice's Tools page, then its agents ask your archive.".to_string(),
+                        Some(Err(why)) => why.clone(),
+                        None if state.copied => "Copied.".to_string(),
+                        None => String::new(),
+                    },
+                    12.0,
+                    theme::TEXT_FAINT,
+                ),
             ]
             .spacing(10)
             .align_y(Alignment::Center),

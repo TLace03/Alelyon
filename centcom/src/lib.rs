@@ -63,7 +63,9 @@ mod memory_map;
 // Sinai's page talking to the person's own model (Windows' file picker is unsafe code, allowed in its own file).
 mod models;
 mod pages;
-// Alelyon's own preferences on this PC (preferences.json): today, whether the sign-in backdrop moves.
+// Sinai's parts (mind, eyes, ears, embeddings, voice) and the model each uses: the part picker and its choices.
+mod sinai_parts;
+// Alelyon's own preferences on this PC (preferences.json): the backdrop, web pages, Sinai's model and its parts.
 mod prefs;
 mod probe;
 // The research archive: papers on a subject, followed through citations (crates/alelyon-research).
@@ -103,13 +105,16 @@ pub fn run(registry: Registry) -> ExitCode {
         return if alelyon_research::jobs::run(std::path::Path::new(&spec)) { ExitCode::SUCCESS } else { ExitCode::FAILURE };
     }
     installed::install(&registry);
-    // `--research-mcp`: the research archive as a read-only MCP server on stdin and stdout, for models and agents
-    // (the research crate's MCP module); `--research-mcp --allow-findings` also offers `save_finding`, as Sinai's
-    // loop starts it. Checked first: no console is joined and no window opens.
+    // `--research-mcp`: the research archive and what agents keep from it as an MCP server on stdin and stdout, for
+    // models and agents (the research crate's MCP module); `--read-only` offers only the tools that read, and
+    // `--allow-findings` also offers `save_finding`, as Sinai's loop starts it. Checked first: no console is joined
+    // and no window opens.
     if std::env::args().nth(1).as_deref() == Some("--research-mcp") {
         let db = alelyon_research::mcp::default_db();
-        let findings = std::env::args().nth(2).as_deref() == Some("--allow-findings");
-        return match alelyon_research::mcp::serve_with(&db, findings, std::io::stdin().lock(), std::io::stdout().lock()) {
+        let flags: Vec<String> = std::env::args().skip(2).collect();
+        let findings = flags.iter().any(|f| f == "--allow-findings");
+        let knowledge = !flags.iter().any(|f| f == "--read-only");
+        return match alelyon_research::mcp::serve_options(&db, findings, knowledge, std::io::stdin().lock(), std::io::stdout().lock()) {
             Ok(()) => ExitCode::SUCCESS,
             Err(_) => ExitCode::FAILURE,
         };

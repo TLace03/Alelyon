@@ -183,12 +183,14 @@ pub struct Plugin {
     pub feature: Option<Feature>,
     /// The tabs of its page that `--tab` may name (see [`Section::select`]).
     pub tabs: &'static [&'static str],
+    /// Their titles as its page shows them, in the same order (empty: the names are shown).
+    pub tab_titles: &'static [&'static str],
     make: Arc<dyn Fn() -> Box<dyn Section> + Send + Sync>,
 }
 
 impl Plugin {
     pub fn new(id: &'static str, title: &'static str, slot: Slot, make: impl Fn() -> Box<dyn Section> + Send + Sync + 'static) -> Plugin {
-        Plugin { id, title, slot, feature: None, tabs: &[], make: Arc::new(make) }
+        Plugin { id, title, slot, feature: None, tabs: &[], tab_titles: &[], make: Arc::new(make) }
     }
 
     pub fn with_feature(mut self, feature: Feature) -> Plugin {
@@ -200,6 +202,17 @@ impl Plugin {
     pub fn with_tabs(mut self, tabs: &'static [&'static str]) -> Plugin {
         self.tabs = tabs;
         self
+    }
+
+    /// The titles of the tabs [`with_tabs`](Plugin::with_tabs) names, in the same order.
+    pub fn with_tab_titles(mut self, titles: &'static [&'static str]) -> Plugin {
+        self.tab_titles = titles;
+        self
+    }
+
+    /// Each tab's name and title: the title given, else the name.
+    pub fn tab_list(&self) -> Vec<(&'static str, &'static str)> {
+        self.tabs.iter().enumerate().map(|(i, name)| (*name, self.tab_titles.get(i).copied().unwrap_or(name))).collect()
     }
 
     /// A new page for this plug-in (the app makes one when it starts).
@@ -521,6 +534,9 @@ mod tests {
     fn a_section_page_names_its_tabs_and_is_started_and_told_its_tab() {
         let plugin = Plugin::new("fleet", "Fleet", Slot::SectionPage, || Box::new(Tabbed::default())).with_tabs(&["one", "two"]);
         assert_eq!(plugin.tabs, ["one", "two"]);
+        assert_eq!(plugin.tab_list(), [("one", "one"), ("two", "two")], "with no titles, the names");
+        let titled = plugin.clone().with_tab_titles(&["The first"]);
+        assert_eq!(titled.tab_list(), [("one", "The first"), ("two", "two")]);
         let r = Registry::new().with(plugin);
         assert_eq!(r.in_slot(Slot::SectionPage).map(|p| p.id).collect::<Vec<_>>(), ["fleet"]);
         assert!(r.in_slot(Slot::ComputeTab).next().is_none());

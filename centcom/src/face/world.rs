@@ -112,7 +112,7 @@ pub fn latitude() -> f32 {
 /// The machine's own offset from UTC now, in seconds, from what Windows already knows (as the Angel window reads it).
 #[cfg(windows)]
 #[allow(unsafe_code)]
-fn local_offset_seconds() -> i32 {
+pub(crate) fn local_offset_seconds() -> i32 {
     #[repr(C)]
     struct Tzi {
         bias: i32,
@@ -148,7 +148,7 @@ fn local_offset_seconds() -> i32 {
 }
 
 #[cfg(not(windows))]
-fn local_offset_seconds() -> i32 {
+pub(crate) fn local_offset_seconds() -> i32 {
     0
 }
 

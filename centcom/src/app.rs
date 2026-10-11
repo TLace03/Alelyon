@@ -354,6 +354,8 @@ pub struct App {
     pub lattice: lattice::State,
     /// The Models panel, and Sinai's page talking to a model of the person's own (models/).
     pub models: crate::models::State,
+    /// Sinai's parts: the model each uses, and the picker a part's card opens (parts/).
+    pub parts: crate::sinai_parts::State,
     /// A message for Sinai's page to send to the person's own model once it is known (a debug build's
     /// `CENTCOM_SINAI_SAY`, so the screenshot mode can photograph an answer).
     say_once: Option<String>,
@@ -483,6 +485,8 @@ pub enum Message {
     Lattice(lattice::Msg),
     /// The Models panel, and Sinai's page talking to a model of the person's own (`models`).
     Models(crate::models::Msg),
+    /// A part's picker, opened from its card (`sinai_parts`).
+    Parts(crate::sinai_parts::Msg),
     /// The sign-in screen and the account menu (`signin`).
     SignIn(crate::signin::Msg),
     /// The window's own title bar and edges.
@@ -516,6 +520,10 @@ impl App {
                 Some(Pane::ALL.into_iter().find(|p| p.title().eq_ignore_ascii_case(&part)).unwrap_or(Pane::Account));
             // `CENTCOM_SETTINGS_SEARCH`: something typed in its search.
             signin_state.settings_query = std::env::var("CENTCOM_SETTINGS_SEARCH").unwrap_or_default();
+            // `CENTCOM_SETTINGS_PLAN=<plan key>`: a made-up account on that plan, with no service, for the Account part.
+            if let Ok(key) = std::env::var("CENTCOM_SETTINGS_PLAN") {
+                signin_state.demo_plan(&key);
+            }
         }
         let (layout, layout_note) = dock::load();
         // Sinai as the person shaped it, read from where the Angel window keeps it, without the move the Angel window's
@@ -618,8 +626,14 @@ impl App {
             data: data::State::new(),
             research: research::State::new(),
             compute,
-            lattice: lattice::State::new(),
+            lattice: {
+                // The jump menu lists the Fleet page's tabs, as the build's Fleet plug-in names them.
+                let mut lattice = lattice::State::new();
+                lattice.fleet_tabs = shown.iter().find(|p| p.slot == Slot::SectionPage && p.id == FLEET).map(|p| p.tab_list()).unwrap_or_default();
+                lattice
+            },
             models: crate::models::State::default(),
+            parts: crate::sinai_parts::State::default(),
             say_once: None,
             options,
             shot_taken: false,
@@ -631,6 +645,29 @@ impl App {
         // Alelyon's own window: the Stage never captures it, and the loop is told which it is.
         first.push(window::latest().and_then(window::raw_id::<Message>).map(Message::OwnWindow));
         first.push(window::latest().map(Message::WindowId));
+        if matches!(app.section, Section::Overview | Section::Sinai) {
+            // the parts' cards: each part's choice, and the models they name
+            first.push(app.parts.read().map(Message::Parts));
+            // A debug build's CENTCOM_PART=<mind|eyes|ears|embeddings|voice>: that part's picker opens, to be photographed.
+            #[cfg(debug_assertions)]
+            if let Some(part) = std::env::var("CENTCOM_PART").ok().and_then(|k| crate::sinai_parts::Part::ALL.into_iter().find(|p| p.key() == k.trim())) {
+                first.push(Task::done(Message::Parts(crate::sinai_parts::Msg::Open(part))));
+                // and CENTCOM_PART_CLOUD=<provider>[ <model>]: its free cloud model's steps, at Agree when a model is named
+                if let Some(given) = std::env::var("CENTCOM_PART_CLOUD").ok() {
+                    use crate::sinai_parts::{Msg as P, cloud::Step};
+                    let mut words = given.split_whitespace();
+                    if let Some(cloud) = words.next().and_then(lattice_core::hosted::parts::cloud) {
+                        first.push(Task::done(Message::Parts(P::Cloud(Step::Start(part, cloud.id)))));
+                        if let Some(model) = words.next() {
+                            first.push(Task::done(Message::Parts(P::Cloud(Step::Pick(model.to_string())))));
+                        }
+                    }
+                }
+            }
+        }
+        if app.section == Section::Overview {
+            first.push(app.models.read().map(Message::Models));
+        }
         if app.section == Section::Sinai {
             app.voice.refresh();
             // which model of the person's own Sinai's page would talk to, and whether it is ready
@@ -763,6 +800,7 @@ impl App {
             Section::Lattice => self.lattice.busy(),
             Section::Account => self.signin.busy.is_some(),
         } || (self.models.open && self.models.busy())
+            || (self.parts.open.is_some() && (self.parts.busy() || self.models.busy()))
     }
 
     /// A research gap for Sinai: where its loop works gaps itself, it is asked to (it reads the archive, looks for newer
@@ -794,7 +832,7 @@ impl App {
                 }
                 Task::none()
             }
-            Answering::Own(_) => {
+            Answering::Own(_) | Answering::Cloud(_) => {
                 let typed = self.models.update(M::Own(B::Typed(text)), &mut self.lattice.choice);
                 let sent = self.models.update(M::Own(B::Send), &mut self.lattice.choice);
                 Task::batch([typed.map(Message::Models), sent.map(Message::Models)])
@@ -810,7 +848,104 @@ impl App {
     /// Who answers on Sinai's page: its mind where the build carries it, unless the person picked their own model
     /// instead for this session; else the person's own model, if they chose one (`models::answering`).
     pub fn answering(&self) -> crate::models::Answering {
-        crate::models::answering(self.can(Capability::SinaiMind), self.models.instead, self.models.sinai().as_ref())
+        let mind = self.can(Capability::SinaiMind);
+        // a free cloud model agreed in the mind's picker is the person's own pick, under the same rule
+        if let Some(pick) = crate::sinai_parts::cloud::CloudPick::of(self.parts.choices().used(crate::sinai_parts::Part::Mind)) {
+            return if !mind || self.models.instead { crate::models::Answering::Cloud(pick) } else { crate::models::Answering::Mind };
+        }
+        crate::models::answering(mind, self.models.instead, self.models.sinai().as_ref())
+    }
+
+    /// The strip on Sinai's page sends to the mind's cloud model while it is the one answering.
+    fn sync_cloud_mind(&mut self) {
+        self.models.cloud_mind = match self.answering() {
+            crate::models::Answering::Cloud(pick) => Some(pick),
+            _ => None,
+        };
+    }
+
+    /// Sinai's parts that run in the cloud now, by name with their provider: the mind while its cloud model answers,
+    /// the ears while the speech engine reads in the cloud, and the loop's parts set to a cloud model while Sinai's loop
+    /// runs. Sinai's page shows these as its "in the cloud" mark.
+    pub fn parts_in_the_cloud(&self) -> Vec<String> {
+        use crate::sinai_parts::{Choice, Part, cloud};
+        let mut out = Vec::new();
+        if let crate::models::Answering::Cloud(pick) = self.answering() {
+            out.push(format!("mind ({})", cloud::provider_label(&pick.provider)));
+        }
+        if let Some(provider) = self.state.as_ref().map(|s| s.cloud.clone()).filter(|c| !c.is_empty() && self.connected()) {
+            out.push(format!("ears ({})", cloud::provider_label(&provider)));
+        }
+        if self.sinai_up == Some(true) {
+            let choices = self.parts.choices();
+            for part in [Part::Eyes, Part::Embeddings, Part::Voice] {
+                if let Some(Choice::Cloud { provider, .. }) = choices.used(part) {
+                    out.push(format!("{} ({})", part.title().to_lowercase(), cloud::provider_label(provider)));
+                }
+            }
+        }
+        out
+    }
+
+    /// `part`'s card: its model, where it runs, its state and what uses it, from what the window knows now.
+    pub fn part_card(&self, part: crate::sinai_parts::Part) -> crate::sinai_parts::Card {
+        use crate::sinai_parts::EarsNow;
+        let answering = self.answering();
+        let port = |p: u16| probe::SERVICES.iter().position(|s| s.port == p).and_then(|i| self.probes.get(i)).map(|r| *r == probe::Reading::Up);
+        let ears = match &self.link {
+            Link::Connected => EarsNow::Running {
+                recognizer: self.state.as_ref().map(|s| s.recognizer.clone()).unwrap_or_default(),
+                model: self.state.as_ref().map(|s| s.model.clone()).unwrap_or_default(),
+            },
+            Link::Connecting | Link::Lost(_) => EarsNow::Looking,
+            Link::Unavailable(_) if self.starting => EarsNow::Starting,
+            Link::Unavailable(_) => EarsNow::NotRunning,
+        };
+        let facts = crate::sinai_parts::Facts {
+            mind: self.can(Capability::SinaiMind),
+            answering: &answering,
+            catalog: self.models.catalog.as_ref(),
+            knocked: &self.models.knocked,
+            port: &port,
+            ears,
+        };
+        crate::sinai_parts::card(part, &self.parts.choices(), &facts)
+    }
+
+    /// The model `part` uses now, as its picker marks it: for the mind, the one that answers on Sinai's page.
+    pub fn part_current(&self, part: crate::sinai_parts::Part) -> Option<crate::sinai_parts::Choice> {
+        use crate::sinai_parts::{Choice, Part};
+        match part {
+            Part::Mind => match self.answering() {
+                crate::models::Answering::Mind => Some(Choice::SinaiMind),
+                crate::models::Answering::Own(pick) => Some(Choice::from_pick(&pick)),
+                crate::models::Answering::Cloud(_) => self.parts.choices().used(Part::Mind).cloned(),
+                crate::models::Answering::Nobody => None,
+            },
+            _ => self.parts.choices().used(part).cloned(),
+        }
+    }
+
+    /// A part's choice was kept: what it changes now. The mind's decides who answers on Sinai's page (a model of the
+    /// person's own picked here answers over Sinai's mind until Alelyon closes; Sinai's mind picked gives the page back
+    /// to it); the ears' applies when the speech engine next starts; the others are kept for Sinai's own loop.
+    fn part_chosen(&mut self, part: crate::sinai_parts::Part, choice: Option<crate::sinai_parts::Choice>) -> Task<Message> {
+        use crate::sinai_parts::{Choice, Part};
+        if part != Part::Mind {
+            return Task::none();
+        }
+        let mind = self.can(Capability::SinaiMind);
+        match choice {
+            Some(Choice::SinaiMind) => self.models.update(crate::models::Msg::Instead(false), &mut self.lattice.choice).map(Message::Models),
+            Some(c) => {
+                if let (Some(pick), Some(catalog)) = (c.pick(), self.models.catalog.as_mut()) {
+                    catalog.sinai_kept = Some(pick);
+                }
+                let instead = if mind { self.models.update(crate::models::Msg::Instead(true), &mut self.lattice.choice) } else { Task::none() };
+                Task::batch([instead.map(Message::Models), self.models.read().map(Message::Models)])
+            }
+            None => Task::none(),
+        }
     }
 
     /// The window's own timers, as the page on show and the work under way need them (`subscription` holds these).
@@ -942,7 +1077,9 @@ impl App {
 
     pub fn update(&mut self, message: Message) -> Task<Message> {
         crate::frame_stats::message(&message);
+        self.sync_cloud_mind();
         let task = self.handle(message);
+        self.sync_cloud_mind();
         crate::frame_stats::section(self.section.short());
         task
     }
@@ -963,10 +1100,20 @@ impl App {
                 self.section = section;
                 self.tell_loop_which_window();
                 // The services are looked at by `probe::watch` while these pages are open; Sinai's slow facts are read now.
+                // the parts' cards show each part's choice and the models they name
+                let cards = if matches!(section, Section::Overview | Section::Sinai) {
+                    let parts = if self.parts.snapshot.is_none() { self.parts.read().map(Message::Parts) } else { Task::none() };
+                    let models = if self.models.catalog.is_none() { self.models.read().map(Message::Models) } else { Task::none() };
+                    Task::batch([parts, models])
+                } else {
+                    Task::none()
+                };
                 if section == Section::Sinai {
                     self.voice.refresh();
-                    let models = if self.models.catalog.is_none() { self.models.read().map(Message::Models) } else { Task::none() };
-                    return Task::batch([self.read_listening(), models]);
+                    return Task::batch([self.read_listening(), cards]);
+                }
+                if section == Section::Overview {
+                    return cards;
                 }
                 if section == Section::Fleet {
                     return self.fleet.as_mut().map_or_else(Task::none, |f| f.open().map(Message::Fleet));
@@ -1081,7 +1228,7 @@ impl App {
             Message::Models(msg) => {
                 let task = self.models.update(msg, &mut self.lattice.choice).map(Message::Models);
                 if let Some(say) = self.say_once.clone()
-                    && matches!(self.answering(), crate::models::Answering::Own(_))
+                    && matches!(self.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_))
                 {
                     self.say_once = None;
                     let typed = self.models.update(crate::models::Msg::Own(crate::models::byo::Msg::Typed(say)), &mut self.lattice.choice);
@@ -1090,10 +1237,27 @@ impl App {
                 }
                 return task;
             }
+            Message::Parts(msg) => {
+                use crate::sinai_parts::Then;
+                let mind = self.can(Capability::SinaiMind);
+                match self.parts.update(msg, self.models.catalog.as_ref(), mind) {
+                    Then::Nothing => {}
+                    Then::Task(task) => return task.map(Message::Parts),
+                    Then::OpenModels => return self.update(Message::Models(crate::models::Msg::Open)),
+                    Then::Chosen(part, choice) => return self.part_chosen(part, choice),
+                }
+            }
             Message::Lattice(msg) => {
                 let task = self.lattice.update(msg).map(Message::Lattice);
                 self.put_brain_in_sinai();
                 self.take_web_said();
+                // The jump menu picked a Fleet tab: that tab, on the Fleet page.
+                if let Some(tab) = self.lattice.jump_out.take() {
+                    if let Some(fleet) = self.fleet.as_mut() {
+                        fleet.select(tab);
+                    }
+                    return Task::batch([task, self.update(Message::Go(Section::Fleet))]);
+                }
                 return task;
             }
             Message::Ears(feed) => self.ears(feed),
@@ -1790,7 +1954,12 @@ impl App {
         let words = |key: &str| v.get(key).and_then(|t| t.as_str()).unwrap_or("").to_string();
         match kind {
             "ears.state" => {
-                self.state = Some(ears::parse_state(v));
+                let state = ears::parse_state(v);
+                // the speech engine paused at its cloud provider's free limit: the ears' card says until when
+                if let Some(until) = state.back_at.filter(|_| state.recognizer == "paused") {
+                    crate::sinai_parts::cloud::pause(crate::sinai_parts::Part::Ears, &state.cloud, until);
+                }
+                self.state = Some(state);
                 for entry in v.get("jobs").and_then(|j| j.as_array()).into_iter().flatten() {
                     if let Some(id) = entry.get("job").and_then(|j| j.as_str()) {
                         self.job(id).absorb(entry);
@@ -1949,8 +2118,16 @@ impl App {
         }
         // The Models panel's watch and knocks, while it shows, or while Sinai's page talks to a model of the person's own.
         let own_on_show =
-            self.signin.through() && self.section == Section::Sinai && matches!(self.answering(), crate::models::Answering::Own(_));
-        subscriptions.push(self.models.subscription(own_on_show).map(Message::Models));
+            self.signin.through() && self.section == Section::Sinai && matches!(self.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_));
+        // The parts' cards (the Overview, the Machine list) and a part's picker: their choices and the models they name.
+        let cards_on_show = self.signin.through() && matches!(self.section, Section::Overview | Section::Sinai);
+        let picker = self.parts.open.is_some();
+        subscriptions.push(
+            self.models
+                .subscription_with(self.models.open || own_on_show || cards_on_show || picker, self.models.open || picker)
+                .map(Message::Models),
+        );
+        subscriptions.push(self.parts.subscription(cards_on_show).map(Message::Parts));
         // A harvest's progress is polled while it runs, whichever page is shown.
         subscriptions.push(self.research.subscription().map(Message::Research));
         // The dialogs Lattice's core asks for are answered whichever page is shown.
@@ -2132,6 +2309,9 @@ mod tests {
         let mut a = App::boot(Options { screenshot: Some("x.png".into()), ..Options::default() }).0;
         a.link = Link::Unavailable("not running".into());
         a.probes = vec![probe::Reading::Down; probe::SERVICES.len()];
+        // the reads the Overview's part cards start at boot have ended
+        let _ = a.update(Message::Models(crate::models::Msg::Dismiss));
+        let _ = a.update(Message::Parts(crate::sinai_parts::Msg::Read(Box::default())));
         a
     }
 
@@ -2631,6 +2811,49 @@ mod tests {
         assert_eq!(b.compute.tab, compute::Tab::Plugin(0));
     }
 
+    /// A Fleet page that remembers the tab it was told to show.
+    struct Picks(std::sync::Arc<std::sync::Mutex<Option<String>>>);
+
+    impl plugin::Page for Picks {
+        type Msg = Bump;
+
+        fn select(&mut self, tab: &str) -> bool {
+            *self.0.lock().unwrap() = Some(tab.to_string());
+            true
+        }
+
+        fn update(&mut self, _: Bump) -> Task<Bump> {
+            Task::none()
+        }
+
+        fn view(&self, _: f32) -> iced::Element<'_, Bump> {
+            iced::widget::space().into()
+        }
+    }
+
+    /// The jump menu lists the Fleet plug-in's tabs by their titles, and a pick shows that tab on the Fleet page; the
+    /// public window, with no Fleet page, lists none.
+    #[test]
+    fn a_fleet_tab_picked_in_the_jump_menu_opens_on_the_fleet_page() {
+        use crate::lattice::ide::{IdeMsg, jump::{JumpMsg, Target}};
+        assert!(app().lattice.fleet_tabs.is_empty());
+        let told = std::sync::Arc::new(std::sync::Mutex::new(None));
+        let page = told.clone();
+        let registry = Registry::new().with(
+            plugin::Plugin::new(FLEET, "Fleet", Slot::SectionPage, move || Box::new(Picks(page.clone())))
+                .with_tabs(&["worktrees", "bus"])
+                .with_tab_titles(&["Worktrees", "The bus"]),
+        );
+        let o = Options::parse_with(["--section", "lattice"].map(String::from), &registry).unwrap();
+        let (mut a, _) = App::boot_with(o, &registry);
+        assert_eq!(a.lattice.fleet_tabs, [("worktrees", "Worktrees"), ("bus", "The bus")]);
+        let pick = crate::lattice::Msg::Ide(IdeMsg::Jump(JumpMsg::Pick(None, Target::Fleet("bus"))));
+        let _ = a.update(Message::Lattice(pick));
+        assert_eq!(a.section, Section::Fleet);
+        assert_eq!(told.lock().unwrap().as_deref(), Some("bus"));
+        assert!(a.lattice.jump_out.is_none(), "taken once");
+    }
+
     /// One click on a gap hands it to Sinai: the page opens and, with nobody answering yet, the brief waits in the
     /// message box (the public build's case); the Research page marks the gap at once.
     #[test]
@@ -2658,6 +2881,88 @@ mod tests {
         assert_eq!(a.models.own.typed, crate::research::pursue::brief(&gap));
         assert!(a.notice.as_deref().is_some_and(|n| n.contains("Nobody answers")));
         assert!(matches!(&a.research.gaps, Some(Ok(g)) if g[0].pursued.is_some()));
+    }
+
+    /// A part's card opens its picker; the mind's pick decides who answers on Sinai's page: without Sinai's mind the
+    /// chosen model answers; with it, the person's pick answers (for this session), and picking Sinai's mind gives the
+    /// page back to it. The other parts' choices change nobody who answers.
+    #[test]
+    fn the_minds_pick_decides_who_answers_by_the_rule_of_sinais_mind() {
+        use crate::models::{Answering, Pick};
+        use crate::sinai_parts::{Choice, Msg as P, Part};
+        let mut a = quiet();
+        let _ = a.update(Message::Parts(P::Open(Part::Mind)));
+        assert_eq!(a.parts.open, Some(Part::Mind));
+        a.models.catalog = Some(crate::models::Catalog {
+            models_dir: "m".into(),
+            server: Err("no server".into()),
+            ggufs: vec![crate::models::Gguf { name: "qwen".into(), path: "m/qwen.gguf".into(), size: 1 }],
+            endpoints: Vec::new(),
+            not_listed: 0,
+            registry_issue: None,
+            local: String::new(),
+            sinai_kept: None,
+            hosted: Vec::new(),
+        });
+        assert_eq!(a.answering(), Answering::Nobody);
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(Choice::Gguf("qwen".into())), Ok(()))));
+        assert_eq!(a.answering(), Answering::Own(Pick::Gguf("qwen".into())), "the public build: the pick answers");
+        assert_eq!(a.part_current(Part::Mind), Some(Choice::Gguf("qwen".into())));
+        // the official build: Sinai's mind answers until the person picks their own model here
+        a.plugin_ids = vec![alelyon_plugin_api::SINAI_MIND];
+        a.models.instead = false;
+        assert_eq!(a.answering(), Answering::Mind);
+        assert_eq!(a.part_card(Part::Mind).model, "Sinai's mind");
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(Choice::Gguf("qwen".into())), Ok(()))));
+        assert_eq!(a.answering(), Answering::Own(Pick::Gguf("qwen".into())), "an explicit pick answers over the mind");
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(Choice::SinaiMind), Ok(()))));
+        assert_eq!(a.answering(), Answering::Mind, "Sinai's mind picked: the page is its again");
+        assert_eq!(a.part_current(Part::Mind), Some(Choice::SinaiMind));
+        // a choice for another part changes nobody who answers
+        let _ = a.update(Message::Parts(P::Chosen(Part::Eyes, Some(Choice::Gguf("qwen".into())), Ok(()))));
+        assert_eq!(a.answering(), Answering::Mind);
+        let _ = a.update(Message::Parts(P::Close));
+        assert_eq!(a.parts.open, None);
+    }
+
+    /// A free cloud model agreed in the mind's picker answers on Sinai's page under the same rule as a model of the
+    /// person's own, the strip sends to it, Sinai's page marks it as in the cloud, and the ears' engine reading in the
+    /// cloud adds to the mark.
+    #[test]
+    fn an_agreed_cloud_mind_answers_by_the_same_rule_and_is_marked_in_the_cloud() {
+        use crate::models::Answering;
+        use crate::sinai_parts::cloud::CloudPick;
+        use crate::sinai_parts::{Choice, Msg as P, Part};
+        let mut a = quiet();
+        let _ = a.update(Message::Parts(P::Read(Box::default())));
+        let cloud = Choice::Cloud { provider: "openrouter".into(), model: "qwen/qwen3-8b:free".into(), agreed: Some("2026-10-10T12:00:00Z".into()) };
+        let pick = CloudPick { provider: "openrouter".into(), model: "qwen/qwen3-8b:free".into() };
+        // kept without an agreement: nobody answers from the cloud
+        let unagreed = Choice::Cloud { provider: "openrouter".into(), model: "qwen/qwen3-8b:free".into(), agreed: None };
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(unagreed), Ok(()))));
+        assert_ne!(a.answering(), Answering::Cloud(pick.clone()));
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(cloud.clone()), Ok(()))));
+        assert_eq!(a.answering(), Answering::Cloud(pick.clone()), "the public build: the agreed cloud model answers");
+        assert_eq!(a.models.cloud_mind, Some(pick.clone()), "the strip sends to it");
+        assert_eq!(a.part_current(Part::Mind), Some(cloud.clone()));
+        assert_eq!(a.parts_in_the_cloud(), ["mind (OpenRouter)"]);
+        assert_eq!(a.part_card(Part::Mind).runs, "in the cloud (OpenRouter)");
+        // the official build: Sinai's mind answers until the person picks the cloud model in the picker
+        a.plugin_ids = vec![alelyon_plugin_api::SINAI_MIND];
+        a.models.instead = false;
+        let _ = a.update(Message::Parts(P::Close));
+        assert_eq!(a.answering(), Answering::Mind);
+        assert_eq!(a.models.cloud_mind, None);
+        assert!(a.parts_in_the_cloud().is_empty());
+        let _ = a.update(Message::Parts(P::Chosen(Part::Mind, Some(cloud), Ok(()))));
+        assert_eq!(a.answering(), Answering::Cloud(pick), "an explicit pick answers over the mind");
+        // the speech engine reading in the cloud joins the mark
+        a.link = Link::Connected;
+        a.event(&json!({"type": "ears.state", "mic": {"on": false}, "pc": {"on": false},
+            "recognizer": {"state": "paused", "model": "whisper-large-v3-turbo (Groq, in the cloud)", "cloud": "groq", "back_at": 1_000_000_000i64}}));
+        assert_eq!(a.parts_in_the_cloud(), ["mind (OpenRouter)", "ears (Groq)"]);
+        // a back_at already past, so no other test sees the ears paused; the window read it from the engine
+        assert_eq!(a.state.as_ref().and_then(|s| s.back_at), Some(1_000_000_000));
     }
 
     /// Where Sinai's loop says it works gaps itself, the gap goes as a `research_gap` request, not as words; an older
