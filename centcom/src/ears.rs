@@ -3,7 +3,8 @@
 //! Every build can start the engine: its program is `angel-ears.exe` beside this window's program, or the one
 //! `CENTCOM_EARS` names (a build may register its own rule instead, `installed.rs`). Before it is started, the
 //! engine's own rule (`alelyon_ears::setup`) says whether its recogniser program and speech model are in place;
-//! what is missing is shown as a step to take, never downloaded.
+//! what is missing is shown as a step to take, never downloaded. The speech model is the one chosen in the ears'
+//! picker (`sinai_parts`, passed as `--model`), else the engine's own rule; an engine already running keeps its model.
 //!
 //! The service writes its address and a fresh token to `~/.alelyon/angel/ears.json` each time it starts. The
 //! link reads them, connects (loopback, no TLS, no `Origin` header, which the ears refuse), hands the window a
@@ -215,9 +216,13 @@ pub struct State {
     pub dictating: bool,
     pub pc_on: bool,
     pub pc_device: String,
-    /// "ready", or what the recogniser is doing.
+    /// "ready", or what the recogniser is doing ("paused" at a cloud provider's free limit).
     pub recognizer: String,
     pub model: String,
+    /// The cloud provider the engine reads with (`--cloud`), or empty on this PC.
+    pub cloud: String,
+    /// While paused at a free limit: when it is back (seconds since 1970).
+    pub back_at: Option<i64>,
 }
 
 pub fn parse_state(v: &Value) -> State {
@@ -232,6 +237,8 @@ pub fn parse_state(v: &Value) -> State {
         pc_device: s(&v["pc"]["device"]),
         recognizer: s(&v["recognizer"]["state"]),
         model: s(&v["recognizer"]["model"]),
+        cloud: s(&v["recognizer"]["cloud"]),
+        back_at: v["recognizer"]["back_at"].as_i64(),
     }
 }
 
@@ -334,9 +341,12 @@ pub fn engine_exe() -> Result<PathBuf, String> {
     crate::installed::ears().unwrap_or_else(locate)
 }
 
-/// The options the window adds to `serve`: `CENTCOM_EARS_ARGS`, split at spaces.
+/// The options the window adds to `serve`: the speech model chosen in the ears' picker (`sinai_parts`, `--model`), then
+/// `CENTCOM_EARS_ARGS`, split at spaces, which has the last word (the engine reads the last `--model` it is given).
 fn extra_args() -> Vec<String> {
-    std::env::var("CENTCOM_EARS_ARGS").map(|a| a.split_whitespace().map(str::to_string).collect()).unwrap_or_default()
+    let mut args = crate::sinai_parts::chosen_ears_args();
+    args.extend(std::env::var("CENTCOM_EARS_ARGS").map(|a| a.split_whitespace().map(str::to_string).collect::<Vec<_>>()).unwrap_or_default());
+    args
 }
 
 /// Whether the window can start the engine now.
@@ -395,6 +405,9 @@ impl Engine {
             Start::Missing(steps) => return Err(steps.join(" ")),
         };
         let extra = extra_args();
+        // the ears in the cloud: the provider's key goes to the engine's environment only, read now (never its
+        // command line or log); no key, no start
+        let key = crate::sinai_parts::chosen_ears_env()?;
         let log_path = connection_file().map(|p| p.with_file_name("centcom-ears.log"));
         let (out, err) = match log_path.as_ref().and_then(|p| std::fs::File::create(p).ok()) {
             Some(log) => match log.try_clone() {
@@ -405,6 +418,9 @@ impl Engine {
         };
         let mut command = Command::new(&exe);
         command.arg("serve").args(&extra).stdin(Stdio::null()).stdout(out).stderr(err);
+        if let Some((name, value)) = &key {
+            command.env(name, value.expose());
+        }
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;

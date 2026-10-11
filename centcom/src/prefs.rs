@@ -1,9 +1,10 @@
 //! Alelyon's own preferences on this PC: a small JSON object in `~/.alelyon/alelyon/preferences.json`
-//! (`CENTCOM_PREFERENCES_FILE` names another file). Today it holds three choices: whether the sign-in backdrop moves
+//! (`CENTCOM_PREFERENCES_FILE` names another file). Today it holds four choices: whether the sign-in backdrop moves
 //! (`"backdrop_motion": true | false`), where the account panel's web pages open (`"web_pages": "lattice" |
-//! "yours"`, `signin::web`), and the model of the person's own that Sinai's page talks to (`"sinai_model":
-//! "gguf:<name>" | "endpoint:<id>"`, `models`; never a key, which is Credential Manager's); each is absent when the
-//! person never chose, and each is written on its own, keeping the others.
+//! "yours"`, `signin::web`), the model of the person's own that Sinai's page talks to (`"sinai_model":
+//! "gguf:<name>" | "endpoint:<id>"`, `models`; never a key, which is Credential Manager's), and the model chosen for
+//! each of Sinai's parts (`"parts"`, a versioned object whose shape `sinai_parts` documents); each is absent when the person
+//! never chose, and each is written on its own, keeping the others.
 //!
 //! Read once at start. A missing, unreadable or malformed file is no preference at all (never an error on screen);
 //! keys this version does not know are kept when it writes. Each write is a whole new file moved over the old one,
@@ -20,6 +21,11 @@ pub const FILE_VAR: &str = "CENTCOM_PREFERENCES_FILE";
 const MOTION: &str = "backdrop_motion";
 const WEB_PAGES: &str = "web_pages";
 const SINAI_MODEL: &str = "sinai_model";
+const PARTS: &str = "parts";
+
+/// The version of the `"parts"` object this build writes. A file from a newer build keeps its higher number and every
+/// entry this build does not know; an object without a number is read as version 1.
+pub const PARTS_VERSION: u64 = 1;
 
 /// The preferences this version reads.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -85,6 +91,40 @@ pub fn save_sinai_model(at: &Path, key: &str) -> Result<(), String> {
     write(at, map)
 }
 
+/// The choices kept for Sinai's parts at `at`: the `"parts"` object without its `"version"`, each entry by the part's
+/// key (`"mind"`, `"eyes"`, `"ears"`, `"embeddings"`, `"voice"`), as written; empty when none is kept or the file
+/// cannot be made sense of. What an entry means is `sinai_parts`' to say.
+pub fn load_parts(at: &Path) -> Map<String, Value> {
+    match object(at).remove(PARTS) {
+        Some(Value::Object(mut parts)) => {
+            parts.remove("version");
+            parts
+        }
+        _ => Map::new(),
+    }
+}
+
+/// Keep one part's choice (`entry`; None forgets it) at `at`, with every other part's and whatever else the file held.
+/// `sinai_model`, when given, is written in the same write: the mind's own model is also the key older builds read.
+pub fn save_part(at: &Path, part: &str, entry: Option<Value>, sinai_model: Option<&str>) -> Result<(), String> {
+    let mut map = object(at);
+    let mut parts = match map.remove(PARTS) {
+        Some(Value::Object(parts)) => parts,
+        _ => Map::new(),
+    };
+    let version = parts.get("version").and_then(Value::as_u64).unwrap_or(1).max(PARTS_VERSION);
+    parts.insert("version".into(), Value::from(version));
+    match entry {
+        Some(entry) => parts.insert(part.into(), entry),
+        None => parts.remove(part),
+    };
+    map.insert(PARTS.into(), Value::Object(parts));
+    if let Some(key) = sinai_model {
+        map.insert(SINAI_MODEL.into(), Value::String(key.into()));
+    }
+    write(at, map)
+}
+
 /// `map` as the whole new file at `at`, moved over the old one.
 fn write(at: &Path, map: Map<String, Value>) -> Result<(), String> {
     let text = serde_json::to_string_pretty(&Value::Object(map)).map_err(|e| e.to_string())?;
@@ -147,6 +187,36 @@ mod tests {
         save_web_pages(&at, "lattice").unwrap();
         let value: Value = serde_json::from_str(&fs::read_to_string(&at).unwrap()).unwrap();
         assert_eq!(value, serde_json::json!({"backdrop_motion": true, "web_pages": "lattice"}));
+    }
+
+    /// Each part's choice is written on its own, in a versioned object, beside the other preferences; a newer build's
+    /// version and entries are kept, and the mind's own model goes to `sinai_model` in the same write.
+    #[test]
+    fn a_parts_choice_is_kept_beside_the_others_and_a_newer_version_is_kept() {
+        let dir = crate::sqlite_ro::tests::scratch("prefs-parts");
+        let at = dir.join("preferences.json");
+        assert!(load_parts(&at).is_empty());
+        save_web_pages(&at, "yours").unwrap();
+        save_part(&at, "eyes", Some(serde_json::json!({"kind": "gguf", "name": "vision"})), None).unwrap();
+        save_part(&at, "mind", Some(serde_json::json!({"kind": "gguf", "name": "qwen"})), Some("gguf:qwen")).unwrap();
+        let value: Value = serde_json::from_str(&fs::read_to_string(&at).unwrap()).unwrap();
+        assert_eq!(
+            value,
+            serde_json::json!({"web_pages": "yours", "sinai_model": "gguf:qwen", "parts": {"version": 1,
+                "eyes": {"kind": "gguf", "name": "vision"}, "mind": {"kind": "gguf", "name": "qwen"}}})
+        );
+        assert_eq!(load_sinai_model(&at).as_deref(), Some("gguf:qwen"), "older builds read the mind's model here");
+        assert_eq!(load_parts(&at).len(), 2, "the version is not a part");
+        save_part(&at, "eyes", None, None).unwrap();
+        assert!(!load_parts(&at).contains_key("eyes"), "forgotten");
+        fs::write(&at, r#"{"parts": {"version": 7, "smell": {"kind": "nose"}}, "sinai_model": "endpoint:x"}"#).unwrap();
+        save_part(&at, "voice", Some(serde_json::json!({"kind": "endpoint", "id": "tts"})), None).unwrap();
+        let value: Value = serde_json::from_str(&fs::read_to_string(&at).unwrap()).unwrap();
+        assert_eq!(value["parts"]["version"], 7, "a newer build's version is kept");
+        assert_eq!(value["parts"]["smell"]["kind"], "nose", "an entry this build does not know is kept");
+        assert_eq!(value["sinai_model"], "endpoint:x", "untouched when not given");
+        fs::write(&at, r#"{"parts": "garbage"}"#).unwrap();
+        assert!(load_parts(&at).is_empty(), "a parts value that is not an object is no choice");
     }
 
     #[test]

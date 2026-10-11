@@ -15,9 +15,11 @@
 //!
 //! Each subject has a knowledge graph (built by the `alelyon-research` crate), rebuilt after every run: its threads of
 //! related work, influence, foundations, bridges and frontier. The Map draws it; a paper chosen there shows its
-//! citations and nearest neighbours. Models and agents read the same graphs through `centcom --research-mcp`, a
-//! read-only MCP server (so the knowledge graph is usable by humans and AI models and
-//! agents alike); the page copies the entry an MCP client needs.
+//! citations and nearest neighbours. Models and agents read the same graphs through `centcom --research-mcp`, an MCP
+//! server (so the knowledge graph is usable by humans and AI models and agents alike) that never changes the archive
+//! and fetches nothing; what agents learn from it (facts, concepts and their relations, answers, notes) is kept in
+//! `knowledge.sqlite` beside the archive, and `ask` answers from that first. The page copies the entry an MCP client
+//! needs.
 //!
 //! The page opens on a hub (personalised to the person from their prior queries, to give them ideas of what to work
 //! on): the gaps of every subject (gaps.rs: threads that rarely
@@ -26,6 +28,7 @@
 //! activity it learns from stays in the archive on this PC.
 
 mod hub_view;
+pub mod kept;
 mod map;
 pub mod pursue;
 mod view;
@@ -169,11 +172,15 @@ pub struct State {
     graph_asked: u64,
     /// The MCP entry was just copied.
     pub copied: bool,
+    /// Whether the server was added to Lattice's tools, or why not.
+    pub lattice_added: Option<Result<(), String>>,
     /// The hub is shown instead of a subject (the page's landing view).
     pub hub_open: bool,
     pub hub: Option<Result<Hub, String>>,
     /// The chosen subject's gaps.
     pub gaps: Option<Result<Vec<StoredGap>, String>>,
+    /// What agents kept from the archive, as the hub shows it.
+    pub kept: Option<Result<kept::Kept, String>>,
     /// Papers the person saved.
     pub saved_ids: std::collections::HashSet<i64>,
     /// The last harvest's outcome, or why it could not run.
@@ -229,6 +236,9 @@ pub enum Msg {
     /// From the papers list: show this paper on the Map.
     ShowOnMap(i64),
     CopyMcp,
+    /// Add the server to Lattice's own MCP servers, so Lattice's agents can ask the archive (Lattice asks once to enable it).
+    AddToLattice,
+    AddedToLattice(Result<(), String>),
     OpenHub,
     HubRead(Result<Hub, String>),
     GapsRead(String, Result<Vec<StoredGap>, String>),
@@ -255,6 +265,21 @@ pub enum Msg {
     /// Time to look for watched subjects that are due.
     WatchTick,
     Due(Vec<String>),
+    KeptRead(Result<kept::Kept, String>),
+    /// Open a gathering an agent asked for as a new subject (it starts only at Gather), and mark it approved.
+    ApproveRequest(alelyon_research::knowledge::Request),
+    DismissRequest(i64),
+    ForgetKept(alelyon_research::knowledge::Kind, i64),
+    KeptActed(Result<(), String>),
+}
+
+/// The server's name in an MCP client's settings.
+pub const MCP_NAME: &str = "alelyon-research";
+
+/// Add (or refresh) the server in Lattice's own MCP settings. Lattice runs it only after the person enables it there, as
+/// it does every server.
+pub fn add_to_lattice(lattice: &lattice_core::StateRoot) -> Result<(), String> {
+    lattice_core::mcp::config::put_user_server(lattice, MCP_NAME, &State::mcp_server())
 }
 
 /// The archive's file: `CENTCOM_RESEARCH_DB`, else `~/.alelyon/research/archive.sqlite`.
@@ -353,9 +378,11 @@ impl State {
             thread: None,
             graph_asked: 0,
             copied: false,
+            lattice_added: None,
             hub_open: true,
             hub: None,
             gaps: None,
+            kept: None,
             saved_ids: std::collections::HashSet::new(),
             outcome: None,
             error: None,
@@ -376,7 +403,8 @@ impl State {
 
     fn read_hub(&self) -> Task<Msg> {
         let db = self.db.clone();
-        Task::perform(
+        let kept = self.read_kept();
+        let hub = Task::perform(
             off_thread(move || {
                 if !db.is_file() {
                     return Ok(Hub::default());
@@ -384,7 +412,8 @@ impl State {
                 Store::open(&db).and_then(|s| alelyon_research::hub::build(&s, crate::utc::now() as i64)).map_err(|e| e.to_string())
             }),
             |r| Msg::HubRead(r.unwrap_or_else(|| Err("the reading thread ended without an answer".into()))),
-        )
+        );
+        Task::batch([hub, kept])
     }
 
     fn read_gaps(&mut self) -> Task<Msg> {
@@ -453,11 +482,16 @@ impl State {
 
     /// The entry an MCP client (Lattice's Tools page, Claude Code, …) needs to read the archive through this program.
     pub fn mcp_entry() -> String {
-        let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "centcom".into());
         serde_json::to_string_pretty(&serde_json::json!({
-            "mcpServers": {"alelyon-research": {"command": exe, "args": ["--research-mcp"]}}
+            "mcpServers": {MCP_NAME: State::mcp_server()}
         }))
         .unwrap_or_default()
+    }
+
+    /// The server's entry in an MCP client's settings: this program, serving the archive and the kept knowledge.
+    fn mcp_server() -> serde_json::Value {
+        let exe = std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "centcom".into());
+        serde_json::json!({"command": exe, "args": ["--research-mcp"]})
     }
 
     pub fn subscription(&self) -> Subscription<Msg> {
@@ -774,6 +808,12 @@ impl State {
                 self.copied = true;
                 return iced::clipboard::write(State::mcp_entry());
             }
+            Msg::AddToLattice => {
+                return Task::perform(off_thread(|| add_to_lattice(&lattice_core::state::resolve())), |r| {
+                    Msg::AddedToLattice(r.unwrap_or_else(|| Err("the writing thread ended without an answer".into())))
+                });
+            }
+            Msg::AddedToLattice(r) => self.lattice_added = Some(r),
             Msg::Members(asked, r) => {
                 if asked == self.asked {
                     self.loading = false;
@@ -882,6 +922,16 @@ impl State {
             Msg::Save(work, subject) => {
                 self.saved_ids.insert(work);
                 return self.log("save", (!subject.is_empty()).then_some(subject), Some(work), None);
+            }
+            Msg::KeptRead(r) => self.kept = Some(r),
+            Msg::ApproveRequest(r) => return self.approve(r),
+            Msg::DismissRequest(id) => return self.act_on_kept(move |k, at| k.decide(id, "dismissed", at)),
+            Msg::ForgetKept(kind, id) => return self.act_on_kept(move |k, _| k.forget(kind, id)),
+            Msg::KeptActed(r) => {
+                if let Err(why) = r {
+                    self.error = Some(why);
+                }
+                return self.read_kept();
             }
             Msg::Unsave(work) => {
                 self.saved_ids.remove(&work);
@@ -1225,6 +1275,59 @@ mod tests {
         assert!(matches!(&s.gaps, Some(Ok(g)) if g[0].pursued.is_some()), "marked as handed to Sinai at once");
         let _ = s.update(Msg::Dismiss("x".into(), "h".into()));
         assert!(matches!(&s.gaps, Some(Ok(g)) if g[0].dismissed));
+    }
+
+    #[test]
+    fn a_gathering_an_agent_asked_for_opens_as_a_subject_and_waits_for_gather() {
+        let dir = std::env::temp_dir().join(format!("centcom-kept-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut s = State::at(dir.join("archive.sqlite"));
+        let mut k = alelyon_research::knowledge::Knowledge::open(&s.knowledge_path()).unwrap();
+        let (id, _) = k.request_gathering("adapter merging methods", Some("Low-rank adapters"), "nothing kept on merging adapters", "an agent", "t").unwrap();
+        let request = k.requests(Some("waiting")).unwrap().remove(0);
+        let _ = s.update(Msg::ApproveRequest(request));
+        assert!(s.creating && !s.hub_open, "the new-subject form opens");
+        assert_eq!(s.form.queries, "adapter merging methods");
+        assert_eq!(s.form.concepts, "adapter; merging; methods");
+        assert!(s.form.name.starts_with("Low-rank adapters: "));
+        assert!(s.running.is_none(), "nothing is gathered until Gather");
+        // The decision is written off the window's thread; here it is written directly as that work would.
+        k.decide(id, "approved", "t2").unwrap();
+        assert!(k.requests(Some("waiting")).unwrap().is_empty());
+        let _ = s.update(Msg::KeptActed(Err("That request was already decided.".into())));
+        assert_eq!(s.error.as_deref(), Some("That request was already decided."));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_hub_shows_what_agents_kept_only_when_something_is() {
+        let mut s = State::at(PathBuf::from("unused.sqlite"));
+        let _ = s.update(Msg::KeptRead(Ok(kept::Kept::default())));
+        assert!(kept::card_of(&s).is_none());
+        let mut k = kept::Kept::default();
+        k.counts.facts = 2;
+        let _ = s.update(Msg::KeptRead(Ok(k)));
+        assert!(kept::card_of(&s).is_some());
+        let _ = s.update(Msg::KeptRead(Err("unreadable".into())));
+        assert!(kept::card_of(&s).is_some(), "a failed read is said");
+    }
+
+    #[test]
+    fn the_server_is_added_to_lattices_tools_for_lattice_to_enable() {
+        let dir = std::env::temp_dir().join(format!("centcom-research-lattice-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let lattice = lattice_core::StateRoot::at(&dir);
+        add_to_lattice(&lattice).unwrap();
+        add_to_lattice(&lattice).unwrap();
+        let text = std::fs::read_to_string(lattice_core::mcp::config::user_file(&lattice)).unwrap();
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(v["mcpServers"][MCP_NAME]["args"][0], "--research-mcp");
+        assert_eq!(v["mcpServers"].as_object().unwrap().len(), 1, "added once");
+        let mut s = State::at(PathBuf::from("unused.sqlite"));
+        let _ = s.update(Msg::AddedToLattice(Err("Your MCP settings could not be saved.".into())));
+        assert!(matches!(&s.lattice_added, Some(Err(_))));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

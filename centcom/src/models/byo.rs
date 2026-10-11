@@ -7,7 +7,11 @@
 //!   its settings' idle time without a message. The model is fixed at launch; another model restarts it;
 //! - **an OpenAI-compatible endpoint** from lattice-core's registry, reached through lattice-core's own client
 //!   (`models::build`: the key read at that moment from where lattice-core finds keys, no proxy for an address on this
-//!   PC, errors worded without the response, the key or the address's credentials).
+//!   PC, errors worded without the response, the key or the address's credentials);
+//! - **a free cloud model** on the person's own provider account, chosen and agreed in the mind's picker
+//!   (`sinai_parts::cloud`), asked through lattice-core's parts routes (`hosted::parts::chat`, a free model only).
+//!   Its answer comes whole, not in pieces. At the provider's free limit the mind pauses until the time the provider
+//!   gives, and the page says when it is back; nothing is retried, switched or paid.
 //!
 //! The reply streams in as it is written. Sinai's face follows it: its expression thinks while the model loads and
 //! reads the message, its mouth moves with each piece of the answer, and it is at rest again when the answer ends; it
@@ -47,6 +51,8 @@ pub enum Target {
     Gguf { name: String, models_dir: PathBuf },
     /// An OpenAI-compatible endpoint of the registry, by its id.
     Endpoint { id: String, registry: PathBuf },
+    /// A free cloud model of a provider (`hosted::parts`), on the person's own account.
+    Cloud { provider: String, model: String },
 }
 
 /// What the engine says while a message is answered.
@@ -149,9 +155,60 @@ struct Parts {
     state: StateRoot,
 }
 
+/// The request as OpenAI's chat messages: the system's words, then each line (text only).
+pub fn cloud_messages(request: &ModelRequest) -> Vec<serde_json::Value> {
+    let mut messages = vec![json!({"role": "system", "content": request.system})];
+    for item in &request.input {
+        match item {
+            InputItem::User(text) | InputItem::UserImages { text, .. } => messages.push(json!({"role": "user", "content": text})),
+            InputItem::Assistant { text: Some(text), .. } => messages.push(json!({"role": "assistant", "content": text})),
+            _ => {}
+        }
+    }
+    messages
+}
+
+/// One answer from a free cloud model: the whole of it, or why there is none. A free limit pauses the mind
+/// (`sinai_parts::cloud::pause`) until the provider's time, and says when it is back.
+pub async fn ask_cloud(reach: &lattice_core::hosted::parts::Reach, model: &str, request: &ModelRequest, now: i64) -> Event {
+    use lattice_core::hosted::parts::{self as routes, Failure};
+    let client = match routes::Client::new(reach) {
+        Ok(client) => client,
+        Err(why) => return Event::Failed(why),
+    };
+    match routes::chat(&client, reach, model, cloud_messages(request), request.settings.max_tokens.unwrap_or(MAX_TOKENS), now).await {
+        Ok(answer) if answer.value.trim().is_empty() => Event::Failed("The model answered with nothing.".into()),
+        Ok(answer) => Event::Done(answer.value),
+        Err(Failure::Limited { back_at }) => {
+            crate::sinai_parts::cloud::pause(crate::sinai_parts::Part::Mind, reach.cloud.id, back_at);
+            Event::Failed(crate::sinai_parts::cloud::back_words(back_at, now))
+        }
+        Err(other) => Event::Failed(other.sentence()),
+    }
+}
+
 async fn answer(engine: Parts, target: Target, request: ModelRequest, tx: futures::channel::mpsc::UnboundedSender<Event>) {
     let send = |event: Event| tx.unbounded_send(event).is_ok();
     let (built, _lease) = match target {
+        Target::Cloud { provider, model } => {
+            let Some(cloud) = lattice_core::hosted::parts::cloud(&provider) else {
+                send(Event::Failed("That provider is not one this version knows.".into()));
+                return;
+            };
+            let keys = KeyStore::new(engine.env.clone(), &engine.state);
+            let reach = match lattice_core::hosted::parts::Reach::found(cloud, &|name| keys.get(name)) {
+                Ok(reach) => reach,
+                Err(why) => {
+                    send(Event::Failed(why));
+                    return;
+                }
+            };
+            if !send(Event::Thinking) {
+                return;
+            }
+            send(ask_cloud(&reach, &model, &request, crate::sinai_parts::cloud::now()).await);
+            return;
+        }
         Target::Gguf { name, models_dir } => {
             let Some(llama) = engine.llama.as_ref() else {
                 send(Event::Failed("This window cannot start llama.cpp's server.".into()));
@@ -550,6 +607,78 @@ mod tests {
         assert!(s.partial.is_empty() && s.problem.is_none());
         assert_eq!(s.phase, Phase::Listening, "the box still holds text");
         assert!(mouth_for(1) > 0.1 && mouth_for(2) > 0.1 && mouth_for(0) == 0.0);
+    }
+
+    /// A provider on this machine that answers one request with `reply` and hands back the request's body.
+    fn stub(reply: &'static str) -> (String, std::thread::JoinHandle<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let handle = std::thread::spawn(move || {
+            let (mut s, _) = listener.accept().unwrap();
+            let mut got = Vec::new();
+            let mut buf = [0u8; 8192];
+            let body_start = loop {
+                let n = s.read(&mut buf).unwrap();
+                got.extend_from_slice(&buf[..n]);
+                if let Some(i) = got.windows(4).position(|w| w == b"\r\n\r\n") {
+                    break i + 4;
+                }
+            };
+            let head = String::from_utf8_lossy(&got[..body_start]).to_lowercase();
+            let length: usize = head.lines().find_map(|l| l.strip_prefix("content-length:")).map_or(0, |v| v.trim().parse().unwrap());
+            while got.len() < body_start + length {
+                let n = s.read(&mut buf).unwrap();
+                got.extend_from_slice(&buf[..n]);
+            }
+            let _ = s.write_all(reply.as_bytes());
+            String::from_utf8_lossy(&got[body_start..]).to_string()
+        });
+        (origin, handle)
+    }
+
+    fn cloud_reach(origin: &str) -> lattice_core::hosted::parts::Reach {
+        let cloud = lattice_core::hosted::parts::cloud("openrouter").unwrap();
+        lattice_core::hosted::parts::Reach::new(cloud, "stub-key-for-tests".into(), None, Some(origin)).unwrap()
+    }
+
+    fn rt() -> tokio::runtime::Runtime {
+        tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap()
+    }
+
+    #[test]
+    fn a_cloud_model_answers_the_conversation_whole() {
+        let body = r#"{"choices":[{"message":{"content":"Hello from the cloud."}}]}"#;
+        let reply: &'static str = Box::leak(format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).into_boxed_str());
+        let (origin, server) = stub(reply);
+        let r = request(&[(Who::You, "hi".into()), (Who::Model, "hello".into())], "and now?");
+        let event = rt().block_on(ask_cloud(&cloud_reach(&origin), "qwen/qwen3-8b:free", &r, 1_791_633_600));
+        assert_eq!(event, Event::Done("Hello from the cloud.".into()));
+        let sent: serde_json::Value = serde_json::from_str(&server.join().unwrap()).unwrap();
+        assert_eq!(sent["model"], "qwen/qwen3-8b:free");
+        assert_eq!(sent["messages"][0]["role"], "system");
+        assert_eq!(sent["messages"][3]["content"], "and now?");
+        assert_eq!(sent["messages"].as_array().unwrap().len(), 4);
+    }
+
+    #[test]
+    fn a_cloud_models_free_limit_pauses_the_mind_until_its_time() {
+        let now = 1_000_000_000;
+        let (origin, server) = stub("HTTP/1.1 429 Too Many Requests\r\nRetry-After: 300\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}");
+        let r = request(&[], "hi");
+        let event = rt().block_on(ask_cloud(&cloud_reach(&origin), "qwen/qwen3-8b:free", &r, now));
+        server.join().unwrap();
+        assert!(matches!(&event, Event::Failed(w) if w.starts_with("Free limit reached, back at")), "{event:?}");
+        assert_eq!(crate::sinai_parts::cloud::paused(crate::sinai_parts::Part::Mind, now), Some(now + 300));
+        // while paused, the route refuses before anything is sent
+        let pick = crate::sinai_parts::cloud::CloudPick { provider: "openrouter".into(), model: "qwen/qwen3-8b:free".into() };
+        if crate::sinai_parts::cloud::now() < now + 300 {
+            let refused = crate::sinai_parts::cloud::mind_route(&pick).unwrap_err();
+            assert!(refused.starts_with("Free limit reached"), "{refused}");
+        }
+        // a model that is not free is never asked
+        let event = rt().block_on(ask_cloud(&cloud_reach("http://127.0.0.1:9"), "openai/gpt-4o", &r, now));
+        assert!(matches!(&event, Event::Failed(w) if w.contains("free models only")), "{event:?}");
     }
 
     #[test]

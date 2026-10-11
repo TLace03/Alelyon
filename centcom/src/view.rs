@@ -31,12 +31,18 @@ type El<'a> = Element<'a, Message>;
 const RAIL_W: f32 = 84.0;
 
 /// The window, with its resize edges (it has no Windows frame) around what it shows. Signed in, the title bar's
-/// features are in the main window: the buttons at the top of the rail, the rail's mark and empty space to drag it;
+/// features are in the main window: the buttons small in its top right corner, over the page, and a strip along its
+/// top, under the page, whose every press the page does not take drags it (as do the rail's mark and empty space);
 /// on the sign-in screen they are a bar, transparent over the backdrop.
 pub fn view(app: &App) -> El<'_> {
     crate::frame_stats::view();
     let framed: El<'_> = if app.signin.through() {
-        content(app)
+        stack![
+            crate::chrome::under(Message::Chrome),
+            content(app),
+            crate::chrome::corner(app.maximised, Message::Chrome),
+        ]
+        .into()
     } else {
         let bar = crate::chrome::bar(false, app.maximised, Message::Chrome);
         stack![content(app), column![bar]].into()
@@ -85,8 +91,8 @@ fn content(app: &App) -> El<'_> {
         // Lattice's page is its IDE and tabs: it fills the window to its edges and keeps its own margins.
         El::from(container(page).width(Length::Fill).height(Length::Fill))
     } else if app.section == Section::Sinai {
-        // Sinai's page is its docks: they fill the window and scroll inside themselves.
-        El::from(container(page).padding([20.0, 24.0]).width(Length::Fill).height(Length::Fill))
+        // Sinai's page is its docks: they fill the window and scroll inside themselves, from below the window's buttons.
+        El::from(container(page).padding(iced::padding::top(32).bottom(20).left(24).right(24)).width(Length::Fill).height(Length::Fill))
     } else {
         scrollable(container(page).padding([24.0, 32.0]).max_width(1180.0).width(Length::Fill))
             .style(theme::scrollbars)
@@ -100,6 +106,22 @@ fn content(app: &App) -> El<'_> {
         // the Models panel, over the window; a press beside it closes it
         let panel = crate::models::view::panel(&app.models, &app.lattice.choice, app.can(Capability::SinaiMind), app.phase).map(Message::Models);
         return stack![main, crate::models::view::scrim().map(Message::Models), panel].into();
+    }
+    if let Some(part) = app.parts.open {
+        // a part's picker, over the window; a press beside it closes it
+        let mind_up = probe::SERVICES.iter().position(|s| s.port == 8179).and_then(|i| app.probes.get(i)).map(|r| *r == Reading::Up);
+        let panel = crate::sinai_parts::view::panel(
+            &app.parts,
+            app.part_card(part),
+            app.part_current(part),
+            app.models.catalog.as_ref(),
+            &app.models.knocked,
+            app.can(Capability::SinaiMind),
+            mind_up,
+            app.phase,
+        )
+        .map(Message::Parts);
+        return stack![main, crate::sinai_parts::view::scrim().map(Message::Parts), panel].into();
     }
     if app.hovering {
         stack![main, drop_overlay(app.section)].into()
@@ -198,9 +220,11 @@ fn rail(app: &App) -> El<'_> {
             .into(),
         None => ui::caps("Alelyon", 10.5, theme::GOLD),
     };
-    // The window's buttons at the top of the rail; the mark under them drags the window.
-    items = items.push(container(crate::chrome::compact(app.maximised, Message::Chrome)).padding(iced::padding::top(6)));
-    items = items.push(crate::chrome::drag(container(brand).padding([8.0, 0.0]).width(Length::Fill).center_x(Length::Fill), Message::Chrome));
+    // The mark drags the window (its buttons are in the window's top right corner).
+    items = items.push(crate::chrome::drag(
+        container(brand).padding(iced::padding::top(18).bottom(8)).width(Length::Fill).center_x(Length::Fill),
+        Message::Chrome,
+    ));
     for section in Section::ALL {
         let selected = app.section == section;
         let color = if selected { theme::GOLD } else { theme::TEXT_DIM };
@@ -367,8 +391,23 @@ fn overview(app: &App) -> El<'_> {
     page.into()
 }
 
-/// The local services, as tiles, each saying whether it is running (a spinner until the first look is in).
+/// A part's model on its card: the model, and where it runs.
+fn part_model_line<'a>(card: &crate::sinai_parts::Card) -> El<'a> {
+    let words = if card.runs.is_empty() { card.model.clone() } else { format!("{} \u{b7} {}", card.model, card.runs) };
+    row![label("Model", 11.5, theme::TEXT_FAINT), label(ui::cut(&words, 70), 12.0, theme::GOLD)].spacing(6).align_y(Alignment::Center).into()
+}
+
+fn tile_style(t: &Theme, s: button::Status) -> button::Style {
+    let mut style = theme::secondary_button(t, s);
+    style.border.radius = 12.0.into();
+    style
+}
+
+/// The local services, as tiles, each saying whether it is running (a spinner until the first look is in). A tile
+/// for one of Sinai's parts also names the part's model and where it runs, and opens the part's picker; Sinai's voice,
+/// which has no service of its own, has a tile too. The other services' tiles open their page.
 fn services<'a>(app: &'a App, title: &'a str, keep: impl Fn(&probe::Service) -> bool) -> El<'a> {
+    use crate::sinai_parts::Part;
     let mut tiles: Vec<El<'a>> = Vec::new();
     for (i, service) in probe::SERVICES.iter().enumerate().filter(|(_, s)| keep(s)) {
         let status: El<'a> = match app.probes.get(i) {
@@ -376,26 +415,53 @@ fn services<'a>(app: &'a App, title: &'a str, keep: impl Fn(&probe::Service) -> 
             Some(Reading::Up) => row![dot(theme::POSITIVE), label("Running", 13.0, theme::TEXT)].spacing(8).align_y(Alignment::Center).into(),
             Some(Reading::Down) => row![dot(theme::TEXT_FAINT), label("Not running", 13.0, theme::TEXT_DIM)].spacing(8).align_y(Alignment::Center).into(),
         };
+        let part = Part::of_port(service.port);
+        let mut body = column![strong(service.name, 14.0, theme::TEXT), label(service.what, 12.5, theme::TEXT_DIM)].spacing(6);
+        let card = part.map(|p| app.part_card(p));
+        if let Some(card) = &card {
+            body = body.push(part_model_line(card));
+        }
+        // a part on a cloud model: its provider and the cloud's state, not this PC's service on its port
+        body = body.push(match card.as_ref().filter(|c| c.runs.starts_with("in the cloud")) {
+            Some(c) => row![
+                dot(crate::sinai_parts::view::color(c.level)),
+                label(ui::cut(&c.state, 60), 13.0, theme::TEXT_DIM).width(Length::Fill),
+                mono(c.runs.trim_start_matches("in the cloud (").trim_end_matches(')').to_string(), 11.5, theme::TEXT_FAINT),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            None => row![status, space().width(Length::Fill), mono(format!(":{}", service.port), 11.5, theme::TEXT_FAINT)].align_y(Alignment::Center),
+        });
         tiles.push(
-            button(
-                column![
-                    strong(service.name, 14.0, theme::TEXT),
-                    label(service.what, 12.5, theme::TEXT_DIM),
-                    row![status, space().width(Length::Fill), mono(format!(":{}", service.port), 11.5, theme::TEXT_FAINT)].align_y(Alignment::Center),
-                ]
-                .spacing(6),
-            )
-            .width(Length::FillPortion(1))
-            .padding(14)
-            .on_press(Message::Go(service.section))
-            .style(|t: &Theme, s| {
-                let mut style = theme::secondary_button(t, s);
-                style.border.radius = 12.0.into();
-                style
-            })
-            .into(),
+            button(body)
+                .width(Length::FillPortion(1))
+                .padding(14)
+                .on_press(match part {
+                    Some(part) => Message::Parts(crate::sinai_parts::Msg::Open(part)),
+                    None => Message::Go(service.section),
+                })
+                .style(tile_style)
+                .into(),
         );
     }
+    // Sinai's voice: a part with no service of its own (it speaks through its loop)
+    let voice = app.part_card(Part::Voice);
+    tiles.push(
+        button(
+            column![
+                strong("Sinai's voice", 14.0, theme::TEXT),
+                label("Speaks Sinai's answers", 12.5, theme::TEXT_DIM),
+                part_model_line(&voice),
+                row![dot(crate::sinai_parts::view::color(voice.level)), label(ui::cut(&voice.state, 60), 13.0, theme::TEXT_DIM)].spacing(8).align_y(Alignment::Center),
+            ]
+            .spacing(6),
+        )
+        .width(Length::FillPortion(1))
+        .padding(14)
+        .on_press(Message::Parts(crate::sinai_parts::Msg::Open(Part::Voice)))
+        .style(tile_style)
+        .into(),
+    );
     let mut grid = Column::new().spacing(12);
     let mut tiles = tiles.into_iter();
     loop {
@@ -939,11 +1005,21 @@ fn machine(app: &App) -> El<'_> {
             Some(Reading::Up) => dot(theme::POSITIVE),
             Some(Reading::Down) => dot(theme::TEXT_FAINT),
         };
-        list = list.push(
-            // no port column: the dock is narrow in the default layout, and the Overview shows ports
-            row![container(status).width(14), label(service.name, 13.0, theme::TEXT).width(Length::Fill)].spacing(6).align_y(Alignment::Center),
-        );
+        // no port column: the dock is narrow in the default layout, and the Overview shows ports
+        let name = row![container(status).width(14), label(service.name, 13.0, theme::TEXT).width(Length::Fill)].spacing(6).align_y(Alignment::Center);
+        list = list.push(match crate::sinai_parts::Part::of_port(service.port) {
+            // a part's row names its model and opens its picker
+            Some(part) => machine_part(app, name, part),
+            None => name.into(),
+        });
     }
+    let voice = row![
+        container(dot(crate::sinai_parts::view::color(app.part_card(crate::sinai_parts::Part::Voice).level))).width(14),
+        label("Sinai's voice", 13.0, theme::TEXT).width(Length::Fill)
+    ]
+    .spacing(6)
+    .align_y(Alignment::Center);
+    list = list.push(machine_part(app, voice, crate::sinai_parts::Part::Voice));
     list = list.push(listening(app));
     // in the Angel window's order: what it is doing and measured, its memory map, then its memory
     list = list.push(observatory(app));
@@ -957,6 +1033,18 @@ fn machine(app: &App) -> El<'_> {
         theme::TEXT_FAINT,
     ));
     list.into()
+}
+
+/// One of Sinai's parts in the Machine list: its row, with its model under it, as a button that opens its picker.
+fn machine_part<'a>(app: &'a App, name: Row<'a, Message>, part: crate::sinai_parts::Part) -> El<'a> {
+    // the model's name only: the dock is narrow, and the picker says where it runs
+    let card = app.part_card(part);
+    button(column![name, container(label(ui::cut(&card.model, 40), 11.5, theme::GOLD)).padding(iced::padding::left(20))].spacing(2))
+        .width(Length::Fill)
+        .padding([4.0, 6.0])
+        .on_press(Message::Parts(crate::sinai_parts::Msg::Open(part)))
+        .style(theme::list_row(false))
+        .into()
 }
 
 /// How Sinai listens, from its loop's /about.
@@ -1583,7 +1671,7 @@ fn stage_view(app: &App) -> El<'_> {
 /// closes it.
 fn loop_card(app: &App) -> El<'_> {
     let c = &app.conversation;
-    if !app.can(Capability::SinaiMind) || matches!(app.answering(), crate::models::Answering::Own(_)) {
+    if !app.can(Capability::SinaiMind) || matches!(app.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_)) {
         return own_card(app);
     }
     let body: El<'_> = match app.sinai_up {
@@ -1622,7 +1710,12 @@ fn loop_card(app: &App) -> El<'_> {
     };
     // Sinai's mind answers; the person's own model is offered only as an explicit alternative, never in its place.
     let own = app.models.sinai();
-    let label_of = own.as_ref().map(|p| app.models.catalog.as_ref().map(|c| c.label(p)).unwrap_or_else(|| p.key()));
+    let cloud = crate::sinai_parts::cloud::CloudPick::of(app.parts.choices().used(crate::sinai_parts::Part::Mind));
+    let label_of = match &cloud {
+        // the mind's agreed cloud model is the alternative the person picked
+        Some(pick) => Some(pick.label()),
+        None => own.as_ref().map(|p| app.models.catalog.as_ref().map(|c| c.label(p)).unwrap_or_else(|| p.key())),
+    };
     let alternative = row![
         label("Sinai's mind is answering.", 12.5, theme::TEXT_DIM),
         space().width(Length::Fill),
@@ -1638,7 +1731,11 @@ fn loop_card(app: &App) -> El<'_> {
     ]
     .spacing(8)
     .align_y(Alignment::Center);
-    container(column![body, alternative].spacing(10)).padding(16).width(Length::Fill).style(theme::panel).into()
+    let mut col = column![body, alternative].spacing(10);
+    if let Some(mark) = in_the_cloud(app) {
+        col = col.push(mark);
+    }
+    container(col).padding(16).width(Length::Fill).style(theme::panel).into()
 }
 
 /// The card above the conversation when the person's own model is the one answering (or none is, in a build with no
@@ -1653,6 +1750,24 @@ fn own_card(app: &App) -> El<'_> {
         );
     }
     let models = secondary("Models…", Some(Message::Models(crate::models::Msg::Open)));
+    if let Some(mark) = in_the_cloud(app) {
+        col = col.push(mark);
+    }
+    if let crate::models::Answering::Cloud(pick) = app.answering() {
+        let card = app.part_card(crate::sinai_parts::Part::Mind);
+        let who = if mind {
+            format!("A free cloud model, {}, is answering, not Sinai's mind.", pick.label())
+        } else {
+            format!("A free cloud model, {}, is answering. It is not Sinai's mind.", pick.label())
+        };
+        let mind_part = secondary("Mind…", Some(Message::Parts(crate::sinai_parts::Msg::Open(crate::sinai_parts::Part::Mind))));
+        let mut top = row![dot(crate::sinai_parts::view::color(card.level)), strong(who, 13.5, theme::TEXT).width(Length::Fill), mind_part].spacing(10).align_y(Alignment::Center);
+        if mind {
+            top = top.push(primary("Back to Sinai's mind", Message::Models(crate::models::Msg::Instead(false))));
+        }
+        col = col.push(top).push(label(card.state, 12.5, theme::TEXT_FAINT));
+        return container(col).padding(16).width(Length::Fill).style(theme::panel).into();
+    }
     match (m.sinai(), &m.catalog) {
         (_, None) => col = col.push(working(app, "Looking for a model of your own")),
         (None, Some(_)) => {
@@ -1692,6 +1807,14 @@ fn own_card(app: &App) -> El<'_> {
     container(col).padding(16).width(Length::Fill).style(theme::panel).into()
 }
 
+/// Sinai's "in the cloud" mark: the parts that run on a provider now, by name; None when every part runs on this PC.
+fn in_the_cloud(app: &App) -> Option<El<'_>> {
+    let parts = app.parts_in_the_cloud();
+    (!parts.is_empty()).then(|| {
+        row![chip("in the cloud", theme::GOLD), label(parts.join(", "), 12.5, theme::TEXT_DIM)].spacing(8).align_y(Alignment::Center).into()
+    })
+}
+
 /// Sinai's tab: its face above, drawn by the graphics card only while it is on show, and the conversation below.
 fn angel(app: &App) -> El<'_> {
     let face: El<'_> = if app.face_visible() {
@@ -1711,7 +1834,10 @@ fn own_conversation(app: &App) -> El<'_> {
     use crate::models::byo::{Msg as Own, Phase, Who};
     let s = &app.models.own;
     let say = |m: Own| Message::Models(crate::models::Msg::Own(m));
-    let name = app.models.sinai().map(|p| app.models.catalog.as_ref().map(|c| c.label(&p)).unwrap_or_else(|| p.key()));
+    let name = match &app.models.cloud_mind {
+        Some(pick) => Some(pick.label()),
+        None => app.models.sinai().map(|p| app.models.catalog.as_ref().map(|c| c.label(&p)).unwrap_or_else(|| p.key())),
+    };
     let mut lines = Column::new().spacing(10);
     if s.lines.is_empty() && s.partial.is_empty() {
         lines = lines.push(label(
@@ -1786,7 +1912,7 @@ fn own_conversation(app: &App) -> El<'_> {
 }
 
 fn conversation(app: &App) -> El<'_> {
-    if !app.can(Capability::SinaiMind) || matches!(app.answering(), crate::models::Answering::Own(_)) {
+    if !app.can(Capability::SinaiMind) || matches!(app.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_)) {
         return own_conversation(app);
     }
     let c = &app.conversation;

@@ -36,7 +36,9 @@ pub mod files;
 pub mod find;
 pub mod grid;
 pub mod highlight;
+pub mod jump;
 pub mod mention;
+pub mod outside_steps;
 pub mod notes;
 // Windows' folder picker (IFileOpenDialog, through COM), so it may use unsafe code, as the job object does.
 #[allow(unsafe_code)]
@@ -427,6 +429,8 @@ pub struct Ide {
     pub terms: Vec<term::Term>,
     /// The chats side by side, shown in the editor's place when on.
     pub grid: grid::Grid,
+    /// The jump menu, while it is open.
+    pub jump: Option<jump::Jump>,
     pub term_active: Option<u64>,
     pub term_focus: bool,
     next_term: u64,
@@ -465,6 +469,8 @@ pub struct Ide {
     pub mention: mention::Mentioning,
     /// The editor's Tab completions.
     pub completion: complete::Completion,
+    /// The checklists agents outside the chats gave the reader, not yet done (`outside_steps`).
+    pub outside_steps: Vec<lattice_core::user_steps::ExternalList>,
 }
 
 impl Default for Ide {
@@ -510,6 +516,7 @@ impl Default for Ide {
             startup: None,
             terms: Vec::new(),
             grid: grid::Grid::default(),
+            jump: None,
             term_active: None,
             term_focus: false,
             next_term: 1,
@@ -531,6 +538,7 @@ impl Default for Ide {
             slash: slash::Slash::default(),
             mention: mention::Mentioning::default(),
             completion: complete::Completion::default(),
+            outside_steps: Vec::new(),
         }
     }
 }
@@ -705,6 +713,7 @@ pub fn verb(tool: &str) -> &'static str {
         "ask_question" => "Asked",
         "spawn_agent" => "Sent a helper",
         "git_status" => "Read the git status",
+        "git_diff" => "Read the changes",
         "git_branch" => "Made a branch",
         "git_commit" => "Committed",
         "git_push_pr" => "Pushed",
@@ -715,6 +724,8 @@ pub fn verb(tool: &str) -> &'static str {
         "write_artifact" => "Saved",
         "read_artifact" => "Read the artifact",
         "update_todos" => "Updated the to-do list",
+        "give_steps" => "Gave you a checklist",
+        "read_steps" => "Read your checklist",
         "propose_plan" => "Proposed a plan",
         "browser_open" => "Opened",
         "browser_look" => "Looked at the page",

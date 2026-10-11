@@ -2,8 +2,9 @@
 //! what the frame did: the minimise, maximise and close buttons, an area that drags the window (double-click
 //! maximises or restores; Windows' snapping works, since a drag is Windows' own move), and thin edges that resize
 //! it. On the sign-in screen these are a bar, transparent over the backdrop. In the main window they take no row of
-//! their own: the buttons sit at the top of the rail ([`compact`]), and the rail's mark and empty space drag it
-//! ([`drag`]).
+//! their own: the buttons sit small in the window's top right corner, over the page ([`corner`]), and a strip along
+//! the window's top lies under the page ([`under`]), so a press there that the page does not take (beside Lattice's
+//! tabs, the margin above a page's heading) drags the window; the rail's mark and empty space drag it too ([`drag`]).
 
 use std::time::{Duration, Instant};
 
@@ -77,7 +78,7 @@ pub fn bar<'a, M: Clone + 'a>(solid: bool, maximised: bool, act: impl Fn(Act) ->
         .into()
 }
 
-/// The three buttons, small, for the top of the rail: minimise, maximise (restore when maximised) and close.
+/// The three buttons, small: minimise, maximise (restore when maximised) and close.
 pub fn compact<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
     let small = |s: &'a str, msg: M, danger: bool| -> Element<'a, M> {
         button(container(text(s).size(11).font(fonts().ui).color(theme::TEXT_DIM)).center_x(24).center_y(22))
@@ -102,6 +103,19 @@ pub fn compact<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) 
     ]
     .spacing(2)
     .into()
+}
+
+/// The [`compact`] buttons in the window's top right corner, for a layer over the page: the rest of the layer is
+/// empty, so it takes no press but the buttons'.
+pub fn corner<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+    container(compact(maximised, act)).align_right(Length::Fill).padding(iced::padding::top(5).right(14)).into()
+}
+
+/// A strip as tall as the bar along the window's top, that drags it, for a layer under the page: a press the page
+/// takes (a button, a tab, a field) stays the page's, and one on its empty space falls through to the strip. The
+/// layer fills the window, since a stack is as large as its first layer.
+pub fn under<'a, M: Clone + 'a>(act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+    column![drag(Space::new().width(Length::Fill).height(BAR_H), act)].height(Length::Fill).into()
 }
 
 /// `inside`, as an area that drags the window (a press drags, a quick second one maximises or restores).

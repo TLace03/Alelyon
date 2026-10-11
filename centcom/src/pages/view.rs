@@ -1,11 +1,12 @@
 //! What the Pages page draws: its tabs and finder, the feeds with their composer, a post as a card, a person's and an
 //! organization's page, a thread, the reader's own page and organizations, and an organization's members.
 
-use alelyon_identity_client::pages::{self, Kind, Member, Membership, Org, Person, Post, Reason, Target};
+use alelyon_identity_client::pages::{self, Kind, Member, Membership, ModAct, ModAction, ModReport, ModTarget, Org, Person, Post, Reason, Target};
+use alelyon_identity_client::social;
 use iced::widget::{Column, Row, button, checkbox, column, container, pick_list, row, space, text_editor, text_input};
 use iced::{Alignment, Element, Length};
 
-use super::{AsWho, Msg, Screen, State, TitleOrg};
+use super::{AsWho, ModView, Msg, Screen, State, TitleOrg};
 use crate::catalogue::Section;
 use crate::theme::{self, fonts};
 use crate::ui::{self, chip, heading, label, note, strong, subheading};
@@ -29,7 +30,11 @@ pub fn view(s: &State, phase: f32) -> El<'_> {
     let mut page = Column::new().spacing(16).push(heading("Pages", Section::Pages.purpose()));
 
     let mut tabs = Row::new().spacing(8);
-    for tab in Screen::TABS {
+    let mut shown_tabs = Screen::TABS.to_vec();
+    if moderator(s) {
+        shown_tabs.push(Screen::Moderation);
+    }
+    for tab in shown_tabs {
         let on = tab == screen;
         tabs = tabs.push(
             button(label(tab.title(), 13.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
@@ -59,7 +64,7 @@ pub fn view(s: &State, phase: f32) -> El<'_> {
     } else if let Some(n) = &s.note {
         page = page.push(row![label(n.as_str(), 12.5, theme::TEXT_DIM), small("Dismiss", Some(Msg::Dismiss))].spacing(8).align_y(Alignment::Center));
     }
-    if !Screen::TABS.contains(&screen) {
+    if !screen.is_tab() {
         page = page.push(row![small("\u{2039} Back", Some(Msg::Back)), strong(screen.title(), 15.0, theme::TEXT)].spacing(10).align_y(Alignment::Center));
     }
     if s.loading {
@@ -74,6 +79,8 @@ pub fn view(s: &State, phase: f32) -> El<'_> {
         Screen::Org(_) => org(s),
         Screen::Thread(_) => thread(s),
         Screen::Members(_) => members(s),
+        Screen::Flagged(_) => flagged(s),
+        Screen::Moderation => moderation(s),
     };
     page.push(body).into()
 }
@@ -117,27 +124,49 @@ fn me_id(s: &State) -> &str {
     s.me.as_ref().map(|m| m.me.id.as_str()).unwrap_or("")
 }
 
+/// Who a post is by, in a few words: its author, else the organization it was posted as (whose author is gone).
+fn by_name(p: &Post) -> &str {
+    match (&p.author, &p.org) {
+        (Some(a), _) => a.name(),
+        (None, Some(o)) => o.name.as_str(),
+        (None, None) => "someone",
+    }
+}
+
+/// The reader is an active owner or admin of the organization.
+fn admin_of(s: &State, ticker: &str) -> bool {
+    s.me.as_ref().is_some_and(|m| {
+        m.memberships.iter().any(|ms| ms.org.ticker == ticker && ms.state == "active" && matches!(ms.role.as_str(), "owner" | "admin"))
+    })
+}
+
+fn org_button<'a>(o: &'a Org) -> El<'a> {
+    button(strong(format!("{} ({})", o.name, o.ticker), 14.0, theme::GOLD)).padding(0).on_press(Msg::Go(Screen::Org(o.ticker.clone()))).style(theme::ghost_button).into()
+}
+
 fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
     if p.is_plain_repost() {
-        let by = column![label(format!("\u{21BB} {} reposted", p.author.name()), 12.0, theme::TEXT_FAINT)];
+        let by = column![label(format!("\u{21BB} {} reposted", by_name(p)), 12.0, theme::TEXT_FAINT)];
         return match p.repost_of.as_deref() {
             Some(inner) => by.push(post_card(s, inner)).spacing(4).into(),
             None => by.push(note("The post it reposted is not there any more.")).spacing(4).into(),
         };
     }
-    let mine = p.author.id == me_id(s);
+    let mine = p.author.as_ref().is_some_and(|a| a.id == me_id(s));
+    let admin = p.org.as_ref().is_some_and(|o| admin_of(s, &o.ticker));
     let mut col = Column::new().spacing(8);
     if let Some(o) = &p.org {
-        col = col.push(
-            row![
-                button(strong(format!("{} ({})", o.name, o.ticker), 14.0, theme::GOLD)).padding(0).on_press(Msg::Go(Screen::Org(o.ticker.clone()))).style(theme::ghost_button),
-                label(format!("posted by {}", p.author.name()), 12.0, theme::TEXT_FAINT),
-            ]
-            .spacing(8)
-            .align_y(Alignment::Center),
-        );
-    } else {
-        col = col.push(name_line(&p.author));
+        let mut head = Row::new().spacing(8).align_y(Alignment::Center).push(org_button(o));
+        if let Some(a) = &p.author {
+            head = head.push(label(format!("posted by {}", a.name()), 12.0, theme::TEXT_FAINT));
+        }
+        col = col.push(head);
+        // Only the organization's owners and admins are told why a post has no author.
+        if let Some(flag) = p.author_flag {
+            col = col.push(label(flag.words(), 12.0, theme::CAUTION));
+        }
+    } else if let Some(a) = &p.author {
+        col = col.push(name_line(a));
     }
     let mut stamp = when(&p.created_at);
     if p.edited_at.is_some() {
@@ -171,6 +200,12 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
     if mine {
         actions = actions.push(small("Delete", Some(Msg::Delete(p.id.clone()))));
     } else {
+        if admin {
+            actions = actions.push(small("Delete (admin)", Some(Msg::Delete(p.id.clone()))));
+        }
+        if moderator(s) {
+            actions = actions.push(small("Hide (moderator)", Some(Msg::ModAct(ModAct::HidePost, Some(Target::Post(p.id.clone())), None))));
+        }
         actions = actions.push(small("Report", Some(Msg::Reporting(Some(Target::Post(p.id.clone()))))));
     }
     col = col.push(actions.align_y(Alignment::Center));
@@ -182,7 +217,12 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
 
 /// A quoted post, small and inside the card that quotes it.
 fn quoted<'a>(p: &'a Post) -> El<'a> {
-    let mut col = column![name_line(&p.author)].spacing(6);
+    let by: El<'a> = match (&p.author, &p.org) {
+        (Some(a), _) => name_line(a),
+        (None, Some(o)) => org_button(o),
+        (None, None) => note("Posted by someone no longer here."),
+    };
+    let mut col = column![by].spacing(6);
     if let Some(title) = &p.title {
         col = col.push(strong(title.as_str(), 14.0, theme::TEXT));
     }
@@ -228,7 +268,9 @@ fn feed<'a>(s: &'a State, page: Option<&'a pages::Posts>, empty: &'a str) -> El<
 fn home(s: &State) -> El<'_> {
     let Some(me) = &s.me else { return space().into() };
     let mut col = Column::new().spacing(14);
-    if !me.me.has_page {
+    if me.suspended {
+        col = col.push(ui::notice(SUSPENDED, theme::CAUTION));
+    } else if !me.me.has_page {
         col = col.push(ui::notice("Open your page to post: My page, above.", theme::GOLD));
     } else {
         col = col.push(composer(s));
@@ -317,6 +359,9 @@ fn person(s: &State) -> El<'_> {
             ui::primary("Follow", (!page.you_block).then(|| Msg::FollowPerson(u.clone(), true)))
         });
         acts = acts.push(small(if page.you_block { "Unblock" } else { "Block" }, Some(Msg::Block(u.clone(), !page.you_block))));
+        if moderator(s) {
+            acts = acts.push(small("Suspend page (moderator)", Some(Msg::ModAct(ModAct::SuspendPage, Some(Target::Person(u.clone())), None))));
+        }
         acts = acts.push(small("Report", Some(Msg::Reporting(Some(Target::Person(u.clone()))))));
         head = head.push(acts.align_y(Alignment::Center));
         if s.reporting == Some(Target::Person(u.clone())) {
@@ -356,6 +401,10 @@ fn org(s: &State) -> El<'_> {
     });
     if page.you_admin() {
         acts = acts.push(small("Members", Some(Msg::Go(Screen::Members(ticker.clone())))));
+        acts = acts.push(small("Flagged posts", Some(Msg::Go(Screen::Flagged(ticker.clone())))));
+    }
+    if moderator(s) {
+        acts = acts.push(small("Suspend organization (moderator)", Some(Msg::ModAct(ModAct::SuspendOrg, Some(Target::Org(ticker.clone())), None))));
     }
     acts = acts.push(small("Report", Some(Msg::Reporting(Some(Target::Org(ticker.clone()))))));
     head = head.push(acts);
@@ -375,6 +424,17 @@ fn org(s: &State) -> El<'_> {
     ]
     .spacing(14)
     .into()
+}
+
+// ------------------------------------------------------------------- an organization's flagged posts (owners and admins)
+
+/// What its owners and admins read above the list.
+const FLAGGED: &str = "Posts made as this organization whose author's account no longer exists, or whose author's page a \
+    moderator suspended. Everyone else sees them as the organization's, without an author. Keep each one, or delete it.";
+
+fn flagged(s: &State) -> El<'_> {
+    let Some((_, page)) = &s.flagged else { return space().into() };
+    column![note(FLAGGED), posts_list(s, &page.posts, page.more, "No posts by a gone author.")].spacing(10).into()
 }
 
 // ------------------------------------------------------------------- a thread
@@ -410,6 +470,9 @@ fn thread(s: &State) -> El<'_> {
 
 fn mine(s: &State) -> El<'_> {
     let Some(me) = &s.me else { return space().into() };
+    if me.suspended {
+        return ui::notice(SUSPENDED, theme::CAUTION);
+    }
     if !me.me.has_page {
         return container(
             column![
@@ -436,7 +499,14 @@ fn mine(s: &State) -> El<'_> {
     if let Some(n) = verified_note(&me.me) {
         card = card.push(n);
     }
+    let current = me.me.display_name.as_str();
+    let name_ok = social::tidy_display_name(&m.name) == current || social::valid_display_name(&m.name);
     card = card
+        .push(ui::fact(
+            "Name",
+            text_input("Your name", &m.name).on_input(Msg::MineName).padding(8).size(13).width(320).style(ui::input_style),
+        ))
+        .push(if name_ok { note(NAME_RULE) } else { ui::notice(NAME_RULE, theme::CAUTION) })
         .push(ui::fact(
             "Title",
             text_input("Founder | CEO", &m.title).on_input(Msg::MineTitle).padding(8).size(13).width(320).style(ui::input_style),
@@ -459,7 +529,7 @@ fn mine(s: &State) -> El<'_> {
         .push(text_editor(&m.bio).placeholder("A few words about you").on_action(Msg::MineBio).height(Length::Fixed(110.0)).padding(10).size(13.5).font(fonts().ui).style(theme::editor))
         .push(
             row![
-                ui::primary(if m.saving { "Saving\u{2026}" } else { "Save" }, (m.dirty && !m.saving).then_some(Msg::SaveMine)),
+                ui::primary(if m.saving { "Saving\u{2026}" } else { "Save" }, (m.dirty && !m.saving && name_ok).then_some(Msg::SaveMine)),
                 space().width(Length::Fill),
                 small(if m.confirm_close { "Close it: yes" } else { "Close my page" }, Some(Msg::ClosePage)),
             ]
@@ -470,11 +540,32 @@ fn mine(s: &State) -> El<'_> {
     }
     let mut col = column![container(card).padding(16).width(Length::Fill).style(theme::panel)].spacing(14);
     col = col.push(tickers_card(me.active().collect(), &me.me.tickers));
+    col = col.push(
+        container(
+            column![
+                subheading("Your posts and AI"),
+                checkbox(me.ai_training).label("Let Alelyon use my public posts to improve its services, including training AI models").on_toggle(Msg::AiTraining),
+                note(AI_TRAINING),
+            ]
+            .spacing(8),
+        )
+        .padding(16)
+        .width(Length::Fill)
+        .style(theme::panel),
+    );
     if let Some(u) = &me.me.username {
         col = col.push(ui::secondary("See my page as others do", Some(Msg::Go(Screen::Person(u.clone())))));
     }
     col.into()
 }
+
+/// What the form says about a name: what it holds, and where a title goes instead.
+const NAME_RULE: &str = "Your name only: 1-64 characters, without [ ] ( ). Your title goes below, and the organizations \
+    after your name further down.";
+
+/// What the form says about the AI-training choice.
+const AI_TRAINING: &str = "On unless you turn it off. Turning it off keeps your public posts out of anything Alelyon builds \
+    from then on; what was built before stays as it is.";
 
 /// The organizations after the reader's name: each membership with whether it shows, and the order of those that do.
 fn tickers_card<'a>(active: Vec<&'a Membership>, shown: &'a [Org]) -> El<'a> {
@@ -637,4 +728,170 @@ fn member_row<'a>(ticker: &'a str, m: &'a Member, mine: &'a str, my_role: &'a st
         .width(Length::Fill)
         .style(theme::panel)
         .into()
+}
+
+// ------------------------------------------------------------------- moderation (moderators only)
+
+/// What a suspended person reads where the page's own controls would be.
+const SUSPENDED: &str =
+    "A moderator suspended your page: it shows nothing, and you cannot post, like or follow until it is restored.";
+
+fn moderator(s: &State) -> bool {
+    s.me.as_ref().is_some_and(|m| m.moderator)
+}
+
+fn moderation(s: &State) -> El<'_> {
+    let mut views = Row::new().spacing(8);
+    for view in ModView::ALL {
+        let on = view == s.mod_view;
+        views = views.push(
+            button(label(view.title(), 12.5, if on { theme::GOLD } else { theme::TEXT_DIM }))
+                .padding([5.0, 12.0])
+                .on_press(Msg::ModView(view))
+                .style(theme::segment_button(on)),
+        );
+    }
+    let mut col = Column::new().spacing(12).push(views.wrap());
+    if s.mod_view != ModView::Log {
+        col = col
+            .push(text_input("A note for the log (optional)", &s.mod_note).on_input(Msg::ModNote).padding(8).size(13).style(ui::input_style))
+            .push(note(
+                "Hiding or suspending closes every open report on the same post, page or organization. Every act is kept in \
+                 the moderation log.",
+            ));
+    }
+    let more = match s.mod_view {
+        ModView::Log => {
+            let Some((actions, more)) = &s.mod_log else { return col.into() };
+            if actions.is_empty() {
+                col = col.push(note("Nothing has been done yet."));
+            }
+            for a in actions {
+                col = col.push(log_row(a));
+            }
+            *more
+        }
+        view => {
+            let Some((reports, more)) = &s.mod_reports else { return col.into() };
+            if reports.is_empty() {
+                col = col.push(note(if view == ModView::Open { "No open reports." } else { "No closed reports." }));
+            }
+            for r in reports {
+                col = col.push(report_card(r));
+            }
+            *more
+        }
+    };
+    if more {
+        col = col.push(ui::secondary("Load more", Some(Msg::More)));
+    }
+    col.into()
+}
+
+fn reason_words(reason: &str) -> &str {
+    Reason::ALL.into_iter().find(|r| r.as_str() == reason).map(|r| r.label()).unwrap_or(reason)
+}
+
+fn report_card(r: &ModReport) -> El<'_> {
+    let mut head = Row::new().spacing(8).align_y(Alignment::Center).push(chip(reason_words(&r.reason), theme::CAUTION));
+    if !r.open() {
+        head = head.push(chip(if r.state == "actioned" { "Acted on" } else { "Dismissed" }, theme::TEXT_DIM));
+    }
+    let by = r.reporter.as_ref().map(|p| p.name().to_string()).unwrap_or_else(|| "an unavailable account".into());
+    head = head.push(label(format!("reported {} by {by}", when(&r.at)), 12.0, theme::TEXT_FAINT));
+    if r.open() && r.open_on_target > 1 {
+        head = head.push(label(format!("{} open reports on this", r.open_on_target), 12.0, theme::GOLD));
+    }
+    let mut col = Column::new().spacing(8).push(head.wrap());
+    if !r.note.is_empty() {
+        col = col.push(label(format!("\u{201C}{}\u{201D}", r.note), 13.0, theme::TEXT));
+    }
+    col = col.push(target_box(&r.target));
+    let mut acts = Row::new().spacing(6).align_y(Alignment::Center);
+    if let Some(act) = ModAct::for_target(&r.target) {
+        // an open report offers the act; a closed one only the undo
+        let undo = matches!(act, ModAct::RestorePost | ModAct::RestorePage | ModAct::RestoreOrg);
+        if r.open() || undo {
+            acts = acts.push(ui::primary(act.label(), Some(Msg::ModAct(act, None, Some(r.id.clone())))));
+        }
+    }
+    if r.open() {
+        acts = acts.push(ui::secondary("Dismiss", Some(Msg::ModDismiss(r.id.clone()))));
+    }
+    col = col.push(acts);
+    container(col).padding([12.0, 16.0]).width(Length::Fill).style(theme::panel).into()
+}
+
+/// What a report names, as a moderator sees it: hidden and suspended things included.
+fn target_box(t: &ModTarget) -> El<'_> {
+    let mut col = Column::new().spacing(6);
+    match t.kind.as_str() {
+        "post" => {
+            col = col.push(ui::subheading("Post"));
+            if let Some(p) = &t.person {
+                col = col.push(name_line(p));
+            }
+            match &t.post {
+                Some(post) => {
+                    if let Some(title) = &post.title {
+                        col = col.push(strong(title.as_str(), 14.0, theme::TEXT));
+                    }
+                    col = col.push(label(ui::cut(&post.text, 600), 13.5, theme::TEXT));
+                    if post.deleted {
+                        col = col.push(note("Deleted by its author; kept because others replied or quoted."));
+                    }
+                }
+                None => col = col.push(label(ui::cut(&t.text, 600), 13.5, theme::TEXT)),
+            }
+        }
+        "person" => {
+            col = col.push(ui::subheading("Person"));
+            col = col.push(match &t.person {
+                Some(p) => name_line(p),
+                None => note("An account that is no longer available."),
+            });
+            if !t.text.is_empty() {
+                col = col.push(label(ui::cut(&t.text, 400), 13.0, theme::TEXT_DIM));
+            }
+        }
+        "org" => {
+            col = col.push(ui::subheading("Organization"));
+            if let Some(o) = &t.org {
+                col = col.push(strong(format!("{} ({})", o.name, o.ticker), 14.0, theme::TEXT));
+            }
+            if !t.text.is_empty() {
+                col = col.push(label(ui::cut(&t.text, 400), 13.0, theme::TEXT_DIM));
+            }
+        }
+        _ => col = col.push(note("What this report named is not there any more.")),
+    }
+    let mut chips = Row::new().spacing(6);
+    if t.hidden {
+        chips = chips.push(chip("Hidden", theme::CAUTION));
+    }
+    if t.suspended {
+        chips = chips.push(chip(if t.kind == "post" { "Its author's page is suspended" } else { "Suspended" }, theme::CAUTION));
+    }
+    container(col.push(chips)).padding([10.0, 12.0]).width(Length::Fill).style(theme::well).into()
+}
+
+fn log_row(a: &ModAction) -> El<'_> {
+    let who = if a.by_host {
+        "On the identity host,".to_string()
+    } else {
+        a.moderator.as_ref().map(|p| p.name().to_string()).unwrap_or_else(|| "A moderator".into())
+    };
+    let mut col = Column::new().spacing(4).push(
+        row![
+            label(when(&a.at), 11.5, theme::TEXT_FAINT),
+            label(format!("{who} {}", a.words()), 13.0, theme::TEXT),
+            label(format!("{} {}", a.target_kind, ui::cut(&a.target_id, 20)), 11.5, theme::TEXT_FAINT),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center),
+    );
+    if !a.note.is_empty() {
+        col = col.push(label(format!("\u{201C}{}\u{201D}", a.note), 12.5, theme::TEXT_DIM));
+    }
+    container(col).padding([8.0, 12.0]).width(Length::Fill).style(theme::panel).into()
 }

@@ -34,6 +34,9 @@ use crate::theme::{self, fonts};
 
 use client::{Client, Failure, Pairing, Session, Status};
 
+/// The identity service's billing routes (the account's plan, the billing portal), from the identity client crate.
+pub use alelyon_identity_client::billing;
+
 /// The seven ways to sign in with another account, in the order shown: (id, name, tile colour, text colour).
 pub const PROVIDERS: [(&str, &str, Color, Color); 7] = [
     ("github", "GitHub", Color::from_rgb8(0x24, 0x29, 0x2f), Color::WHITE),
@@ -104,6 +107,18 @@ pub struct State {
     pub web_said: Option<String>,
     /// Whether the backdrop moves (the sign-in screen's Motion button and Settings' Appearance line).
     pub motion: crate::backdrop::Motion,
+    /// The signed-in account's plan, as last asked (Settings > Account), or why it could not be read; None before the
+    /// first answer.
+    pub plan: Option<Result<billing::Plan, String>>,
+    /// The plan is being asked for now.
+    pub plan_asking: bool,
+    /// Manage billing is getting the billing portal's address now.
+    pub billing_busy: bool,
+    /// Why Manage billing did not open, when it did not.
+    pub billing_said: Option<String>,
+    /// Which account's billing calls are current: it moves on at every sign-in and sign-out, and an answer from an
+    /// earlier one is dropped.
+    billing_round: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -145,6 +160,12 @@ pub enum Msg {
     Exit,
     /// The backdrop's motion on or off (the sign-in screen's corner button, or Settings), kept in preferences.json.
     Motion(bool),
+    /// The account's plan, as the service answered (asked when Settings' Account part opens).
+    Plan(u64, Result<billing::Plan, billing::Problem>),
+    /// Settings' Manage billing: ask the service for the billing portal's address.
+    ManageBilling,
+    /// The billing portal's address, opened in the person's own browser.
+    Portal(u64, Result<String, billing::Problem>),
 }
 
 impl State {
@@ -187,6 +208,11 @@ impl State {
             web: crate::prefs::path().map(|file| web::load(&file)).unwrap_or_default(),
             web_said: None,
             motion: crate::backdrop::Motion::at_start(),
+            plan: None,
+            plan_asking: false,
+            billing_busy: false,
+            billing_said: None,
+            billing_round: 0,
         };
         let mut tasks = Vec::new();
         if let Some(c) = state.client.clone() {
@@ -198,6 +224,36 @@ impl State {
             }
         }
         (state, Task::batch(tasks))
+    }
+
+    /// A debug build's demonstration for photographing Settings (`CENTCOM_SETTINGS_PLAN=<plan key>`): a made-up account
+    /// signed in with that plan, and no service, so nothing is sent anywhere.
+    #[cfg(debug_assertions)]
+    pub fn demo_plan(&mut self, key: &str) {
+        let key = key.trim().to_ascii_lowercase();
+        let paid = !matches!(key.as_str(), "free" | "beta");
+        let mut name = key.clone();
+        if let Some(first) = name.get_mut(..1) {
+            first.make_ascii_uppercase();
+        }
+        self.client = None;
+        self.gate = Gate::SignedIn(Session {
+            refresh_token: String::new(),
+            expires_at: String::new(),
+            account: client::Account {
+                id: "demo".into(),
+                email: "demo@example.com".into(),
+                display_name: "Demo Account".into(),
+                username: None,
+                providers: vec!["password".into()],
+            },
+        });
+        self.plan = Some(Ok(billing::Plan::from_json(&serde_json::json!({
+            "key": key, "name": name, "hosted_access": key != "free",
+            "seats": if key == "team" { 3 } else { 1 },
+            "paid_through": if paid { serde_json::json!("2026-11-10T00:00:00Z") } else { serde_json::Value::Null },
+            "manage_available": paid, "purchase_available": true,
+        }))));
     }
 
     /// The main window is open: signed in, or offline.
@@ -239,7 +295,29 @@ impl State {
         self.password.clear();
         self.busy = None;
         self.pairing = None;
+        self.forget_plan();
         self.gate = Gate::SignedIn(session);
+    }
+
+    /// The plan belongs to the account signed in: a new sign-in or a sign-out forgets it.
+    fn forget_plan(&mut self) {
+        self.plan = None;
+        self.plan_asking = false;
+        self.billing_busy = false;
+        self.billing_said = None;
+        self.billing_round += 1;
+    }
+
+    /// Ask the service for the account's plan, on a task of its own (never on the window's thread), while signed in and
+    /// not already asking. What was shown stays on show until the answer comes.
+    fn ask_plan(&mut self) -> Task<Msg> {
+        let Some((c, token)) = self.session() else { return Task::none() };
+        if self.plan_asking {
+            return Task::none();
+        }
+        self.plan_asking = true;
+        let round = self.billing_round;
+        Task::perform(async move { billing::plan(&c, &token).await }, move |answer| Msg::Plan(round, answer))
     }
 
     fn failed(&mut self, f: Failure) {
@@ -389,8 +467,43 @@ impl State {
             Msg::Settings => {
                 self.menu_open = false;
                 self.settings = Some(settings::Pane::Account);
+                return self.ask_plan();
             }
-            Msg::SettingsPane(pane) => self.settings = Some(pane),
+            Msg::SettingsPane(pane) => {
+                self.settings = Some(pane);
+                if pane == settings::Pane::Account {
+                    return self.ask_plan();
+                }
+            }
+            // An answer for an account that has since signed out (or another that signed in) is dropped.
+            Msg::Plan(round, answer) => {
+                if round == self.billing_round && self.plan_asking {
+                    self.plan_asking = false;
+                    self.plan = Some(answer.map_err(|p| p.words()));
+                }
+            }
+            Msg::ManageBilling => {
+                if self.billing_busy {
+                    return Task::none();
+                }
+                let Some((c, token)) = self.session() else { return Task::none() };
+                self.billing_busy = true;
+                self.billing_said = None;
+                let round = self.billing_round;
+                return Task::perform(async move { billing::portal(&c, &token).await }, move |answer| Msg::Portal(round, answer));
+            }
+            // The portal's address is a key to the account's billing: it opens in the person's own browser always, never
+            // in Lattice's browser, which the agent can reach.
+            Msg::Portal(round, answer) => {
+                if round != self.billing_round || !self.billing_busy {
+                    return Task::none();
+                }
+                self.billing_busy = false;
+                self.billing_said = match answer {
+                    Ok(url) => web::open_yours(&url).err(),
+                    Err(p) => Some(p.words()),
+                };
+            }
             Msg::SettingsQuery(query) => self.settings_query = query,
             Msg::SettingsClose => {
                 self.settings = None;
@@ -403,6 +516,7 @@ impl State {
             }
             Msg::SignOut => {
                 self.menu_open = false;
+                self.forget_plan();
                 if let Gate::SignedIn(s) = std::mem::replace(&mut self.gate, Gate::SignedOut) {
                     if let Some(p) = &self.session_file {
                         vault::forget(p);
@@ -900,6 +1014,11 @@ mod tests {
             web_file: None,
             web_said: None,
             motion: crate::backdrop::Motion { on: true, forced_still: false, file: None, note: None },
+            plan: None,
+            plan_asking: false,
+            billing_busy: false,
+            billing_said: None,
+            billing_round: 0,
         }
     }
 
@@ -1051,6 +1170,101 @@ mod tests {
         assert!(s.error.as_deref().is_some_and(|e| e.contains("already uses that email")) && s.through() == false);
         let _ = s.update(Msg::Done(Ok(Session { refresh_token: "x".into(), expires_at: String::new(), account: Default::default() })));
         assert!(s.link_ticket.is_none(), "spent once signed in");
+    }
+
+    fn signed_in_with_a_service() -> State {
+        let mut s = state(Gate::SignedOut);
+        // an address nothing answers on: the tasks are made here and never run
+        s.client = Client::new("http://127.0.0.1:9".into()).ok();
+        let _ = s.update(Msg::Done(Ok(Session {
+            refresh_token: "tok".into(),
+            expires_at: String::new(),
+            account: client::Account { id: "a1".into(), display_name: "Ada".into(), ..Default::default() },
+        })));
+        s
+    }
+
+    fn plan_of(v: serde_json::Value) -> billing::Plan {
+        billing::Plan::from_json(&v)
+    }
+
+    /// Settings' Account part asks the service for the plan off the window's thread (a task), once at a time, and only
+    /// while signed in; the answer is shown, and one for an account that has since signed out is dropped.
+    #[test]
+    fn the_account_part_asks_for_the_plan_and_drops_an_answer_for_an_earlier_account() {
+        let mut offline = state(Gate::Offline);
+        let _ = offline.update(Msg::Settings);
+        assert!(!offline.plan_asking, "offline: nothing is asked");
+        let mut s = signed_in_with_a_service();
+        let _ = s.update(Msg::Settings);
+        assert!(s.plan_asking);
+        assert_eq!(settings::plan_words(&s).0, "Asking…");
+        let round = s.billing_round;
+        let _ = s.update(Msg::SettingsPane(settings::Pane::Appearance));
+        let _ = s.update(Msg::SettingsPane(settings::Pane::Account));
+        assert_eq!(s.billing_round, round, "already asking: not asked twice");
+        let _ = s.update(Msg::Plan(round, Ok(plan_of(serde_json::json!({"key": "pro", "name": "Pro", "paid_through": "2026-11-10T00:00:00Z", "manage_available": true})))));
+        assert!(!s.plan_asking);
+        assert_eq!(settings::plan_words(&s).0, "Pro · Paid through 2026-11-10");
+        let _ = settings::panel(&s);
+        // asked again on reopening, with the last answer on show meanwhile
+        let _ = s.update(Msg::SettingsPane(settings::Pane::Account));
+        assert!(s.plan_asking && settings::plan_words(&s).0.starts_with("Pro"));
+        let stale = s.billing_round;
+        let _ = s.update(Msg::SignOut);
+        assert!(s.plan.is_none() && !s.plan_asking);
+        let _ = s.update(Msg::Plan(stale, Ok(plan_of(serde_json::json!({"key": "ultra", "name": "Ultra"})))));
+        assert!(s.plan.is_none(), "an answer for the account that signed out is dropped");
+    }
+
+    /// The plan's words: Team's seats, a paid-through day when known, and a refusal in the service's words (a 503
+    /// billing-unavailable as "Payments are not available right now.").
+    #[test]
+    fn the_plan_line_names_seats_and_the_paid_through_day_and_says_refusals() {
+        let mut s = signed_in_with_a_service();
+        let _ = s.update(Msg::Settings);
+        let round = s.billing_round;
+        let _ = s.update(Msg::Plan(round, Ok(plan_of(serde_json::json!({"key": "team", "name": "Team", "seats": 5, "paid_through": null})))));
+        assert_eq!(settings::plan_words(&s).0, "Team · 5 seats");
+        let _ = s.update(Msg::SettingsPane(settings::Pane::Account));
+        let _ = s.update(Msg::Plan(round, Ok(plan_of(serde_json::json!({"key": "free", "name": "Free"})))));
+        assert_eq!(settings::plan_words(&s).0, "Free");
+        let _ = settings::panel(&s);
+        let _ = s.update(Msg::SettingsPane(settings::Pane::Account));
+        let refused = billing::interpret(401, None, r#"{"error": "invalid-token", "message": "Your session has ended. Sign in again."}"#);
+        let _ = s.update(Msg::Plan(round, refused.map(|v| plan_of(v))));
+        assert_eq!(settings::plan_words(&s), ("Your session has ended. Sign in again.".into(), theme::CAUTION));
+        let _ = settings::panel(&s);
+    }
+
+    /// Manage billing asks for the portal's address once at a time and opens it in the person's own browser (a test
+    /// build records it); a refusal is said in the service's words, a 503 as payments not being available.
+    #[test]
+    fn manage_billing_opens_the_portal_in_your_own_browser_and_says_refusals() {
+        let mut s = signed_in_with_a_service();
+        let _ = s.update(Msg::ManageBilling);
+        assert!(s.billing_busy);
+        let round = s.billing_round;
+        let unavailable = billing::interpret(503, None, r#"{"error": "billing-unavailable", "message": "Payments are not available right now. Try again later."}"#);
+        let _ = s.update(Msg::Portal(round, unavailable.map(|_| String::new())));
+        assert!(!s.billing_busy);
+        assert_eq!(s.billing_said.as_deref(), Some("Payments are not available right now."));
+        let _ = s.update(Msg::ManageBilling);
+        let none = billing::interpret(404, None, r#"{"error": "no-billing", "message": "This account has no plan to manage yet."}"#);
+        let _ = s.update(Msg::Portal(round, none.map(|_| String::new())));
+        assert_eq!(s.billing_said.as_deref(), Some("This account has no plan to manage yet."));
+        let url = "https://billing.stripe.com/p/session/test_manage_billing_opens_the_portal";
+        let _ = s.update(Msg::ManageBilling);
+        let _ = s.update(Msg::Portal(round, Ok(url.into())));
+        assert!(web::opened(url) && s.billing_said.is_none());
+        // an answer nobody is waiting for opens nothing
+        let late = "https://billing.stripe.com/p/session/test_late_answer";
+        let _ = s.update(Msg::Portal(round, Ok(late.into())));
+        assert!(!web::opened(late));
+        // Upgrade is the pricing page, through the web-pages choice like the other site links
+        assert_eq!(settings::PRICING_URL, "https://www.alelyon.com/pricing/");
+        assert_eq!(settings::found("manage billing"), [settings::Pane::Account]);
+        assert_eq!(settings::found("upgrade"), [settings::Pane::Account]);
     }
 
     #[test]

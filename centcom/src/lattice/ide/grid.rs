@@ -413,6 +413,7 @@ fn pane_header<'a>(tile: &'a Tile, phase: f32) -> El<'a> {
         }
         None => line = line.push(container(strong("A chat", 13.5, theme::TEXT)).width(Length::Fill)),
     }
+    line = line.push(super::jump::button_for(Some(id.clone())));
     line = line.push(super::view::icon("\u{2197}", "Open it on the right", Some(go(GridMsg::Focus(id.clone())))));
     line = line.push(super::view::icon("\u{00D7}", "Take it out of the grid", Some(go(GridMsg::Remove(id)))));
     let mut col = Column::new().push(container(line).padding([8.0, 12.0]));

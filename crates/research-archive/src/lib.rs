@@ -7,6 +7,8 @@
 //! - [`graph`]: a subject's knowledge graph: citations, similarity, threads, influence, roles and a layout.
 //! - [`gaps`]: where a subject's literature may have gaps worth pursuing, read from its graph and text.
 //! - [`hub`]: what to work on next, personalised from this PC's own activity.
+//! - [`knowledge`]: what agents keep from research (facts, concepts and their relations, answers, notes), so a
+//!   question already worked out costs a lookup.
 //! - [`store`]: the archive on disk, with full-text search and each subject's graph.
 //! - [`jobs`]: a harvest or update as a process of its own, talking to the window through files.
 //! - [`mcp`]: the archive and its graphs as a read-only MCP server for models and agents.
@@ -24,6 +26,7 @@ pub mod harvest_date;
 pub mod ident;
 pub mod index;
 pub mod jobs;
+pub mod knowledge;
 pub mod mcp;
 #[cfg(feature = "net")]
 pub mod net;

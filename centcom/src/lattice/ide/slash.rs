@@ -163,6 +163,7 @@ fn from(command: &Command) -> String {
         Source::User => "yours".to_string(),
         Source::Plugin => format!("plugin {}", command.name.split(':').next().unwrap_or_default()),
         Source::Folder => command.path.rsplit_once('/').map_or(command.path.clone(), |(dir, _)| dir.to_string()),
+        Source::BuiltIn => "built in".to_string(),
     }
 }
 

@@ -50,7 +50,7 @@ pub const SLOTS: [(&str, &str, &str); 4] = [
 ];
 
 /// The views the buttons under the face turn to.
-pub const VIEWS: [(&str, f32); 4] = [("Front", 0.0), ("Three-quarter", -0.6), ("Profile", -1.5708), ("Back", 3.1416)];
+pub const VIEWS: [(&str, f32); 4] = [("Front", 0.0), ("Three-quarter", -0.6), ("Profile", -std::f32::consts::FRAC_PI_2), ("Back", std::f32::consts::PI)];
 
 /// A menu along the top, open below the bar.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

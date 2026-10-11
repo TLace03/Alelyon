@@ -14,7 +14,8 @@ tool server (`mcp`), draw their own over these calls.
 | `harvest`, `snowball`, `coverage`, `gaps` | A subject's harvest, the citation snowball, the estimate of what is missing, and the gaps worth pursuing |
 | `graph`, `hub` | The knowledge graph of a subject |
 | `store`, `jobs` | The SQLite store, and a harvest or update run as a process of its own |
-| `mcp` | The archive as a read-only Model Context Protocol server on stdio (`alelyon-research-mcp`) |
+| `knowledge` | What agents keep from research, beside the archive (`knowledge.sqlite`): facts from papers, concepts and their relations, answers to questions, notes, and gathering requests waiting for the person |
+| `mcp` | The archive and the kept knowledge as a Model Context Protocol server on stdio (`alelyon-research-mcp`; `--read-only` offers only the tools that read; `--ask "<question>"` answers one question as JSON) |
 | `net` | The live transport (with the `net` feature): HTTPS with a timeout, a gap between requests, bounded retries, and a key sent only as a bearer header |
 
 ```bash

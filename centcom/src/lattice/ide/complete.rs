@@ -188,6 +188,7 @@ impl State {
                 let Some(text) = text else { return Task::none() };
                 let take = if matches!(msg, CompleteMsg::AcceptWord) { next_word(&text).to_string() } else { text.clone() };
                 let rest = text[take.len()..].to_string();
+                self.tab_edited(id, &take);
                 let edit = self.type_text(id, take);
                 // A word taken leaves the rest on show, at the cursor's new place.
                 if !rest.is_empty()
@@ -260,12 +261,46 @@ impl State {
         }
         let request = split_at(&e.content.text(), at.0, at.1);
         let completer = services.complete.clone();
-        let task = services.handle().spawn(async move { completer.complete(&choice, &request).await });
+        // The reader's Tab hooks may keep this file's text from the model first.
+        let (chat, file, folder) = (services.chat.clone(), self.tab_file(id), self.tab_folder());
+        let task = services.handle().spawn(async move {
+            let content = format!("{}{}", request.prefix, request.suffix);
+            let read = tokio::task::spawn_blocking(move || {
+                let folder = folder.as_ref().map(|(id, path)| (id.as_str(), path.as_path()));
+                chat.tab_hook(folder, lattice_core::hooks::Event::TabRead, &file, &content)
+            })
+            .await
+            .unwrap_or_default();
+            if let Some(reason) = read.block {
+                return Err(format!("A hook kept this file from Tab completions: {reason}"));
+            }
+            completer.complete(&choice, &request).await
+        });
         self.ide.completion.waiting = Some(task.abort_handle());
         Task::perform(async move { task.await.ok() }, move |answer| match answer {
             Some(answer) => go(CompleteMsg::Answered(id, n, at, line.clone(), answer)),
             None => go(CompleteMsg::Answered(id, n, at, line.clone(), Ok(None))),
         })
+    }
+
+    /// Tab `id`'s file, as the folder names it.
+    fn tab_file(&self, id: u64) -> String {
+        self.ide.tab(id).and_then(|t| t.path()).unwrap_or_default().to_string()
+    }
+
+    /// The editor's folder: its id and its path.
+    fn tab_folder(&self) -> Option<(String, std::path::PathBuf)> {
+        self.ide.folder.as_ref().map(|f| (f.id().to_string(), std::path::PathBuf::from(f.shown_path())))
+    }
+
+    /// A completion was taken: the reader's TabEdit hooks run, not waited for.
+    fn tab_edited(&self, id: u64, taken: &str) {
+        let Some(services) = self.services.clone() else { return };
+        let (chat, file, folder, taken) = (services.chat.clone(), self.tab_file(id), self.tab_folder(), taken.to_string());
+        drop(services.handle().spawn_blocking(move || {
+            let folder = folder.as_ref().map(|(id, path)| (id.as_str(), path.as_path()));
+            chat.tab_hook(folder, lattice_core::hooks::Event::TabEdit, &file, &taken)
+        }));
     }
 
     /// The settings read once the services run.

@@ -146,6 +146,9 @@ pub fn hub(state: &State, phase: f32) -> El<'_> {
         ideas = ideas.push(gap_row(state, &i.gap, &i.because, true));
     }
     page = page.push(card("Ideas to pursue", ideas.push(note("Each idea is a lead raised by counts in your archive, not a finding: check it before relying on it."))));
+    if let Some(kept) = super::kept::card_of(state) {
+        page = page.push(kept);
+    }
 
     if !hub.new_work.is_empty() || !hub.newly_found.is_empty() {
         let mut col = Column::new().spacing(6);

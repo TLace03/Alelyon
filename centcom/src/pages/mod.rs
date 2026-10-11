@@ -13,8 +13,11 @@ mod view;
 
 use std::future::Future;
 
-use alelyon_identity_client::pages::{self, Kind, Me, Member, NewPost, Org, OrgPage, PersonPage, Post, Posts, Reason, Target, Thread};
+use alelyon_identity_client::pages::{
+    self, Kind, Me, Member, ModAct, ModAction, ModReport, NewPost, Org, OrgPage, PersonPage, Post, Posts, Reason, Target, Thread,
+};
 pub use alelyon_identity_client::pages::Problem;
+use alelyon_identity_client::social;
 use iced::Task;
 use iced::widget::text_editor;
 
@@ -33,6 +36,10 @@ pub enum Screen {
     Org(String),
     Thread(String),
     Members(String),
+    /// Owners and admins only: the posts made as the organization whose author is gone.
+    Flagged(String),
+    /// Moderators only: the reports, and the moderation log.
+    Moderation,
 }
 
 impl Screen {
@@ -48,11 +55,34 @@ impl Screen {
             Screen::Org(t) => format!("({t})"),
             Screen::Thread(_) => "Post".into(),
             Screen::Members(t) => format!("({t}) members"),
+            Screen::Flagged(t) => format!("({t}) flagged posts"),
+            Screen::Moderation => "Moderation".into(),
         }
     }
 
     fn is_tab(&self) -> bool {
-        Screen::TABS.contains(self)
+        Screen::TABS.contains(self) || *self == Screen::Moderation
+    }
+}
+
+/// Which part of the moderation screen is on show.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ModView {
+    #[default]
+    Open,
+    Closed,
+    Log,
+}
+
+impl ModView {
+    pub const ALL: [ModView; 3] = [ModView::Open, ModView::Closed, ModView::Log];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            ModView::Open => "Open reports",
+            ModView::Closed => "Closed",
+            ModView::Log => "Log",
+        }
     }
 }
 
@@ -129,6 +159,7 @@ impl Composer {
 /// The reader's own page as it is being edited.
 #[derive(Default)]
 pub struct Mine {
+    pub name: String,
     pub title: String,
     pub title_org: Option<Org>,
     pub bio: text_editor::Content,
@@ -164,6 +195,7 @@ pub struct State {
     pub org: Option<OrgPage>,
     pub thread: Option<Thread>,
     pub members: Option<(String, Vec<Member>)>,
+    pub flagged: Option<(String, Posts)>,
     pub composer: Composer,
     pub reply: String,
     pub find: String,
@@ -172,6 +204,12 @@ pub struct State {
     pub invite: String,
     /// A report whose reason is being chosen.
     pub reporting: Option<Target>,
+    /// Moderators only: the part of the moderation screen on show, the reports or the log it holds (and whether more
+    /// remain), and the note the next act carries into the log.
+    pub mod_view: ModView,
+    pub mod_reports: Option<(Vec<ModReport>, bool)>,
+    pub mod_log: Option<(Vec<ModAction>, bool)>,
+    pub mod_note: String,
 }
 
 #[derive(Clone, Debug)]
@@ -188,6 +226,7 @@ pub enum Msg {
     Org(String, bool, Result<OrgPage, Problem>),
     Thread(String, Result<Thread, Problem>),
     Members(String, Result<Vec<Member>, Problem>),
+    Flagged(String, bool, Result<Posts, Problem>),
     FindText(String),
     Find,
     // writing
@@ -217,6 +256,9 @@ pub enum Msg {
     // my page
     OpenPage,
     ClosePage,
+    MineName(String),
+    /// Allow (true) or opt out of the use of one's public posts to improve Alelyon, AI models included.
+    AiTraining(bool),
     MineTitle(String),
     MineTitleOrg(TitleOrg),
     MineBio(text_editor::Action),
@@ -237,6 +279,16 @@ pub enum Msg {
     Remove(String, String),
     Role(String, String, &'static str),
     Confirm(String, String, bool),
+    // moderation (moderators only)
+    ModView(ModView),
+    /// A page of reports for that view; `append` adds it under those on show.
+    ModReports(ModView, bool, Result<(Vec<ModReport>, bool), Problem>),
+    ModLog(bool, Result<(Vec<ModAction>, bool), Problem>),
+    ModNote(String),
+    /// Act on a target, named directly, through a report, or both.
+    ModAct(ModAct, Option<Target>, Option<String>),
+    ModDismiss(String),
+    ModDone(Result<ModAction, Problem>),
 }
 
 impl State {
@@ -313,7 +365,28 @@ impl State {
                 let key = ticker.clone();
                 self.run(move |c, t| async move { pages::org_members(&c, &t, &ticker).await }, move |r| Msg::Members(key.clone(), r))
             }
+            Screen::Flagged(ticker) => {
+                let key = ticker.clone();
+                self.run(move |c, t| async move { pages::org_flagged(&c, &t, &ticker, before.as_deref()).await }, move |r| {
+                    Msg::Flagged(key.clone(), append, r)
+                })
+            }
+            Screen::Moderation => self.read_mod(before),
         }
+    }
+
+    /// The moderation screen's view: the open or closed reports, or the log.
+    fn read_mod(&self, before: Option<String>) -> Task<Msg> {
+        let view = self.mod_view;
+        let append = before.is_some();
+        if view == ModView::Log {
+            return self.run(move |c, t| async move { pages::mod_history(&c, &t, before.as_deref()).await }, move |r| Msg::ModLog(append, r));
+        }
+        let closed = view == ModView::Closed;
+        self.run(
+            move |c, t| async move { pages::mod_queue(&c, &t, closed, before.as_deref()).await },
+            move |r| Msg::ModReports(view, append, r),
+        )
     }
 
     fn load(&mut self, screen: &Screen, keep: bool) -> Task<Msg> {
@@ -352,6 +425,15 @@ impl State {
             Screen::Explore => self.explore.as_ref()?.next(),
             Screen::Person(_) => self.person.as_ref()?.posts.next(),
             Screen::Org(_) => self.org.as_ref()?.posts.next(),
+            Screen::Flagged(_) => self.flagged.as_ref()?.1.next(),
+            Screen::Moderation if self.mod_view == ModView::Log => {
+                let (actions, more) = self.mod_log.as_ref()?;
+                more.then(|| actions.last().map(|a| a.id.clone())).flatten()
+            }
+            Screen::Moderation => {
+                let (reports, more) = self.mod_reports.as_ref()?;
+                more.then(|| reports.last().map(|r| r.id.clone())).flatten()
+            }
             _ => None,
         }
     }
@@ -364,6 +446,7 @@ impl State {
     /// The page's form, refilled from what the service said.
     fn refill_mine(&mut self) {
         let Some(me) = &self.me else { return };
+        self.mine.name = me.me.display_name.clone();
         self.mine.title = me.me.title.clone();
         self.mine.title_org = me.me.title_org.clone();
         self.mine.bio = text_editor::Content::with_text(&me.bio);
@@ -478,6 +561,25 @@ impl State {
                     Ok(thread) => self.thread = Some(thread),
                     Err(p) => {
                         self.thread = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::Flagged(ticker, append, result) => {
+                if self.screen != Some(Screen::Flagged(ticker.clone())) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.flagged.as_mut().filter(|_| append) {
+                        Some((_, shown)) => {
+                            shown.posts.extend(page.posts);
+                            shown.more = page.more;
+                        }
+                        None => self.flagged = Some((ticker, page)),
+                    },
+                    Err(p) => {
+                        self.flagged = None;
                         self.problem = Some(p);
                     }
                 }
@@ -633,7 +735,25 @@ impl State {
                 let title = self.mine.title.clone();
                 let org = self.mine.title_org.as_ref().map(|o| o.ticker.clone()).unwrap_or_default();
                 let bio = self.mine.bio.text().trim_end().to_string();
-                return self.run(move |c, t| async move { pages::update(&c, &t, Some(&title), Some(&org), Some(&bio)).await }, Msg::Saved);
+                // A changed name goes first, so the page's answer reads it.
+                let name = social::tidy_display_name(&self.mine.name);
+                let rename = (Some(name.as_str()) != self.me.as_ref().map(|m| m.me.display_name.as_str())).then_some(name);
+                return self.run(
+                    move |c, t| async move {
+                        if let Some(name) = rename {
+                            social::rename(&c, &t, &name).await?;
+                        }
+                        pages::update(&c, &t, Some(&title), Some(&org), Some(&bio)).await
+                    },
+                    Msg::Saved,
+                );
+            }
+            Msg::MineName(name) => {
+                self.mine.name = name;
+                self.mine.dirty = true;
+            }
+            Msg::AiTraining(allow) => {
+                return self.run(move |c, t| async move { pages::ai_training(&c, &t, allow).await }, Msg::Me);
             }
             Msg::Saved(result) => {
                 self.mine.saving = false;
@@ -711,6 +831,65 @@ impl State {
                     })),
                 );
             }
+            Msg::ModView(view) => {
+                self.mod_view = view;
+                self.mod_reports = None;
+                self.mod_log = None;
+                if self.screen == Some(Screen::Moderation) {
+                    self.loading = true;
+                    return self.read_mod(None);
+                }
+            }
+            Msg::ModReports(view, append, result) => {
+                if view != self.mod_view {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok((reports, more)) => match self.mod_reports.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.0.extend(reports);
+                            shown.1 = more;
+                        }
+                        None => self.mod_reports = Some((reports, more)),
+                    },
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::ModLog(append, result) => {
+                if self.mod_view != ModView::Log {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok((actions, more)) => match self.mod_log.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.0.extend(actions);
+                            shown.1 = more;
+                        }
+                        None => self.mod_log = Some((actions, more)),
+                    },
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::ModNote(s) => self.mod_note = s,
+            Msg::ModAct(act, target, report) => {
+                let note = self.mod_note.trim().to_string();
+                return self.run(
+                    move |c, t| async move { pages::mod_act(&c, &t, act, target.as_ref(), report.as_deref(), &note).await },
+                    Msg::ModDone,
+                );
+            }
+            Msg::ModDismiss(report) => {
+                let note = self.mod_note.trim().to_string();
+                return self.run(move |c, t| async move { pages::mod_dismiss(&c, &t, &report, &note).await }, Msg::ModDone);
+            }
+            Msg::ModDone(Ok(action)) => {
+                self.mod_note.clear();
+                self.note = Some(format!("You {}.", action.words()));
+                return self.reload();
+            }
+            Msg::ModDone(Err(p)) => self.problem = Some(p),
         }
         Task::none()
     }
@@ -741,6 +920,7 @@ mod tests {
                 .iter()
                 .map(|t| Membership { org: org(t), role: "member".into(), state: "active".into(), shown: tickers.contains(t), confirmed_title: None })
                 .collect(),
+            ..Me::default()
         }
     }
 
@@ -810,6 +990,36 @@ mod tests {
     }
 
     #[test]
+    fn the_flagged_posts_page_on_and_drops_an_answer_for_another_organization() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Org("LACE".into())));
+        let _ = s.update(Msg::Go(Screen::Flagged("LACE".into())));
+        assert_eq!(s.screen.as_ref().map(Screen::title).as_deref(), Some("(LACE) flagged posts"));
+        let post = |id: &str| Post { id: id.into(), ..Post::default() };
+        let _ = s.update(Msg::Flagged("ABCD".into(), false, Ok(Posts { posts: vec![post("pst_0")], more: false })));
+        assert!(s.flagged.is_none(), "an answer for another organization is dropped");
+        let _ = s.update(Msg::Flagged("LACE".into(), false, Ok(Posts { posts: vec![post("pst_1")], more: true })));
+        assert_eq!(s.next_page().as_deref(), Some("pst_1"), "load more starts after the last post");
+        let _ = s.update(Msg::Flagged("LACE".into(), true, Ok(Posts { posts: vec![post("pst_2")], more: false })));
+        assert_eq!(s.flagged.as_ref().map(|(_, p)| (p.posts.len(), p.more)), Some((2, false)));
+        assert!(!s.loading);
+        let _ = s.update(Msg::Back);
+        assert_eq!(s.screen, Some(Screen::Org("LACE".into())));
+    }
+
+    #[test]
+    fn the_my_page_form_reads_the_name_and_marks_an_edit_to_it() {
+        let mut s = State::default();
+        let mut me = me_showing(&[]);
+        me.me.display_name = "[ Founder | CEO ] Thomas Lacy".into();
+        let _ = s.update(Msg::Me(Ok(me)));
+        assert_eq!(s.mine.name, "[ Founder | CEO ] Thomas Lacy");
+        assert!(!s.mine.dirty);
+        let _ = s.update(Msg::MineName("Thomas Lacy".into()));
+        assert!(s.mine.dirty && s.mine.name == "Thomas Lacy");
+    }
+
+    #[test]
     fn a_composer_is_ready_only_within_its_limits() {
         let mut c = Composer::default();
         assert!(!c.ready(), "empty");
@@ -835,6 +1045,42 @@ mod tests {
         assert_eq!(s.mine.title, "Founder | CEO", "an edit in progress is kept");
         let _ = s.update(Msg::Saved(Ok(me_showing(&["AAA"]))));
         assert!(!s.mine.dirty && s.mine.title.is_empty(), "a save refills the form from the service");
+    }
+
+    fn report(id: &str) -> ModReport {
+        ModReport { id: id.into(), state: "open".into(), ..ModReport::default() }
+    }
+
+    #[test]
+    fn the_moderation_screen_keeps_only_the_answer_for_the_view_on_show() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Person("ada".into())));
+        let _ = s.update(Msg::Go(Screen::Moderation));
+        assert_eq!(s.screen, Some(Screen::Moderation));
+        let _ = s.update(Msg::Back);
+        assert_eq!(s.screen, Some(Screen::Moderation), "a tab: nothing to go back to");
+        let _ = s.update(Msg::ModReports(ModView::Open, false, Ok((vec![report("rpt_1")], true))));
+        assert_eq!(s.mod_reports.as_ref().map(|(r, more)| (r.len(), *more)), Some((1, true)));
+        assert_eq!(s.next_page().as_deref(), Some("rpt_1"), "load more starts after the last report");
+        let _ = s.update(Msg::ModReports(ModView::Open, true, Ok((vec![report("rpt_2")], false))));
+        assert_eq!(s.mod_reports.as_ref().map(|(r, more)| (r.len(), *more)), Some((2, false)));
+        let _ = s.update(Msg::ModView(ModView::Log));
+        assert!(s.mod_reports.is_none() && s.loading);
+        let _ = s.update(Msg::ModReports(ModView::Open, false, Ok((vec![report("rpt_3")], false))));
+        assert!(s.mod_reports.is_none(), "an answer for another view is dropped");
+        let _ = s.update(Msg::ModLog(false, Ok((vec![ModAction { id: "mod_1".into(), ..ModAction::default() }], false))));
+        assert!(!s.loading && s.mod_log.as_ref().is_some_and(|(a, _)| a.len() == 1));
+    }
+
+    #[test]
+    fn a_finished_act_clears_the_note_and_says_what_was_done() {
+        let mut s = State::default();
+        let _ = s.update(Msg::ModNote("Spam link.".into()));
+        let _ = s.update(Msg::ModDone(Ok(ModAction { action: "hide-post".into(), ..ModAction::default() })));
+        assert!(s.mod_note.is_empty());
+        assert_eq!(s.note.as_deref(), Some("You hid a post."));
+        let _ = s.update(Msg::ModDone(Err(Problem::Refused("not-a-moderator".into(), "Only moderators.".into()))));
+        assert!(s.problem.is_some());
     }
 
     #[test]
