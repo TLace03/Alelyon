@@ -55,6 +55,12 @@ pub fn voice() -> Option<Result<VoiceTools, String>> {
     processes().and_then(|p| p.voice.as_ref()).map(|locate| locate())
 }
 
+/// The one local model this build offers for Sinai's mind, eyes and voice ([`Registry::one_model`]): None when it offers
+/// none, else what it found or why not.
+pub fn one_model() -> Option<Result<alelyon_plugin_api::OneModel, String>> {
+    processes().and_then(|p| p.one_model.as_ref()).map(|locate| locate())
+}
+
 /// Tell the build whether Sinai's loop answers, where it asked to be told ([`Registry::on_sinai`]); nothing otherwise.
 pub fn tell_sinai(up: bool) {
     if let Some(told) = processes().and_then(|p| p.on_sinai.as_ref()) {
@@ -76,6 +82,7 @@ mod tests {
     fn the_public_build_carries_nothing_that_is_not_a_page() {
         assert!(replay().is_none());
         assert!(sinai_mind().is_none() && ears().is_none() && voice().is_none());
+        assert!(one_model().is_none(), "the public build offers no one model");
         // nothing asked to be told: telling is a no-op
         tell_sinai(true);
         tell_sinai(false);

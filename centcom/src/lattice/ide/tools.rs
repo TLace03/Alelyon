@@ -147,6 +147,10 @@ pub struct Tools {
     pub checking: Option<lattice_core::acp::Agent>,
     /// The open folder (its id) and the agent's notes about it; `None` before they are read.
     pub memory: Option<(Option<String>, Vec<lattice_core::convo::memory::Note>)>,
+    /// The model for topic summaries: `Some(None)` Lattice picks, `Some(Some(id))` the reader's; `None` before it is read.
+    pub summaries: Option<Option<String>>,
+    /// How many started tasks run at once; `None` before it is read.
+    pub task_limit: Option<lattice_core::convo::task_runs::Limit>,
     /// The reader's hooks, each with its allowance, and what could not be used; `None` before they are read.
     pub hooks: Option<(Vec<HookRow>, Vec<String>)>,
 }
@@ -242,6 +246,14 @@ pub enum ToolsMsg {
     CloseModels,
     // What the agent remembers about the open folder.
     MemoryRead(Option<String>, Vec<lattice_core::convo::memory::Note>),
+    // The model for topic summaries.
+    SummariesRead(Option<String>),
+    SummariesPick(Option<String>),
+    SummariesSet(Result<Option<String>, String>),
+    // How many started tasks run at once.
+    LimitRead(lattice_core::convo::task_runs::Limit),
+    LimitPick(lattice_core::convo::task_runs::Limit),
+    LimitSet(Result<lattice_core::convo::task_runs::Limit, String>),
     // The reader's hooks.
     HooksRead(Vec<HookRow>, Vec<String>),
     /// Take back a hook's allowance (by its digest).
@@ -558,6 +570,28 @@ impl State {
             }
             ToolsMsg::CloseModels => self.ide.tools.choosing = None,
             ToolsMsg::MemoryRead(workspace, notes) => self.ide.tools.memory = Some((workspace, notes)),
+            ToolsMsg::SummariesRead(choice) => self.ide.tools.summaries = Some(choice),
+            ToolsMsg::SummariesPick(choice) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                return Task::perform(
+                    on(&services, async move { chat.set_summaries_choice(choice.clone()).map(|()| choice) }),
+                    |r| go(ToolsMsg::SummariesSet(r.unwrap_or_else(|| Err(STOPPED.to_string())))),
+                );
+            }
+            ToolsMsg::SummariesSet(Ok(choice)) => self.ide.tools.summaries = Some(choice),
+            ToolsMsg::SummariesSet(Err(why)) => self.problem = Some(why),
+            ToolsMsg::LimitRead(limit) => self.ide.tools.task_limit = Some(limit),
+            ToolsMsg::LimitPick(limit) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                return Task::perform(
+                    on(&services, async move { chat.set_task_limit(limit).map(|()| limit) }),
+                    |r| go(ToolsMsg::LimitSet(r.unwrap_or_else(|| Err(STOPPED.to_string())))),
+                );
+            }
+            ToolsMsg::LimitSet(Ok(limit)) => self.ide.tools.task_limit = Some(limit),
+            ToolsMsg::LimitSet(Err(why)) => self.problem = Some(why),
             ToolsMsg::HooksRead(rows, problems) => self.ide.tools.hooks = Some((rows, problems)),
             ToolsMsg::AllowHook(digest) => {
                 let Some(services) = self.services.clone() else { return Task::none() };
@@ -860,7 +894,15 @@ impl State {
                 go(ToolsMsg::HooksRead(rows, problems))
             },
         );
-        Task::batch([browser, auto, agents, models, memory, hooks])
+        let chat = services.chat.clone();
+        let summaries = Task::perform(on(&services, async move { chat.summaries_choice() }), |read| {
+            go(ToolsMsg::SummariesRead(read.flatten()))
+        });
+        let chat = services.chat.clone();
+        let limit = Task::perform(on(&services, async move { chat.task_limit() }), |read| {
+            go(ToolsMsg::LimitRead(read.unwrap_or_default()))
+        });
+        Task::batch([browser, auto, agents, models, memory, summaries, limit, hooks])
     }
 
     /// Run one action on the plugins, the section busy until it ends.
@@ -1150,6 +1192,8 @@ pub fn page<'a>(state: &'a State, phase: f32) -> El<'a> {
     col = col.push(super::complete::card(state));
     col = col.push(agents_card(t));
     col = col.push(memory_card(t));
+    col = col.push(summaries_card(state));
+    col = col.push(tasks_card(t));
     col = col.push(hooks_card(state));
     col = col.push(browser_card(t));
     col = col.push(auto_card(t));
@@ -1320,6 +1364,71 @@ pub fn auto_words(on: bool, armed: bool) -> (iced::Color, String) {
         (true, true) => (theme::GOLD, format!("On \u{00B7} {} stops the agent", lattice_core::desktop::STOP_KEYS)),
         (true, false) => (theme::CAUTION, "On, but its stop keys are not armed: switch it off and on again".to_string()),
     }
+}
+
+/// How many tasks started from chips run at once: a number, or no limit.
+fn tasks_card<'a>(t: &'a Tools) -> El<'a> {
+    use lattice_core::convo::task_runs::{DEFAULT_PARALLEL, Limit};
+    const NO_LIMIT: &str = "No limit";
+    let mut col = Column::new()
+        .spacing(8)
+        .push(strong("Tasks at once", 14.0, theme::TEXT))
+        .push(label(
+            "A task you start from a chip runs beside the chat as a topic of its own. Each one runs its own model turns, so more at once uses more of this PC, or more of a hosted model's charges. A Start past the limit waits on its chip.",
+            12.0,
+            theme::TEXT_DIM,
+        ));
+    let Some(current) = t.task_limit else {
+        return container(col.push(note("Not read yet."))).padding(14).width(Length::Fill).style(theme::card).into();
+    };
+    let name = |limit: Limit| match limit {
+        Limit::At(n) if n == DEFAULT_PARALLEL => format!("{n} (the default)"),
+        Limit::At(n) => n.to_string(),
+        Limit::None => NO_LIMIT.to_string(),
+    };
+    let limits: Vec<Limit> = [1, 2, 3, 4, 5, 6, 8, 12, 16].into_iter().map(Limit::At).chain([Limit::None]).collect();
+    let names: Vec<String> = limits.iter().map(|l| name(*l)).collect();
+    let picked = Some(name(current));
+    col = col.push(
+        iced::widget::pick_list(names, picked, move |words: String| {
+            go(ToolsMsg::LimitPick(limits.iter().copied().find(|l| name(*l) == words).unwrap_or_default()))
+        })
+        .text_size(12.5)
+        .padding([4.0, 8.0]),
+    );
+    if current == Limit::None {
+        col = col.push(label("With no limit, every task you start runs at once.", 11.5, theme::CAUTION));
+    }
+    container(col).padding(14).width(Length::Fill).style(theme::card).into()
+}
+
+/// The model that writes the topics' summaries: Lattice's pick, or any model the reader chooses.
+fn summaries_card<'a>(state: &'a State) -> El<'a> {
+    const AUTO: &str = "Lattice picks: this PC's model when it is ready, else the chat's";
+    let mut col = Column::new()
+        .spacing(8)
+        .push(strong("Topic summaries", 14.0, theme::TEXT))
+        .push(label(
+            "After every few turns, a model keeps each topic in brief, so the agent knows the topic's earlier course and your other recent topics. A model off this PC is sent the topic's words (behind the same secret check as the chat) and may cost what its provider charges.",
+            12.0,
+            theme::TEXT_DIM,
+        ));
+    let Some(current) = &state.ide.tools.summaries else { return container(col.push(note("Not read yet."))).padding([12.0, 14.0]).width(Length::Fill).style(theme::card).into() };
+    let mut names: Vec<String> = vec![AUTO.to_string()];
+    names.extend(state.choices.iter().map(super::agent::choice_label));
+    let picked = match current {
+        None => Some(AUTO.to_string()),
+        Some(id) => Some(state.choices.iter().find(|c| c.id == *id).map(super::agent::choice_label).unwrap_or_else(|| id.clone())),
+    };
+    let ids: Vec<(String, String)> = state.choices.iter().map(|c| (super::agent::choice_label(c), c.id.clone())).collect();
+    col = col.push(
+        iced::widget::pick_list(names, picked, move |name: String| {
+            go(ToolsMsg::SummariesPick(ids.iter().find(|(n, _)| *n == name).map(|(_, id)| id.clone())))
+        })
+        .text_size(12.5)
+        .padding([4.0, 8.0]),
+    );
+    container(col).padding([12.0, 14.0]).width(Length::Fill).style(theme::card).into()
 }
 
 /// What the agent remembers about the open folder: each note, and Forget.
@@ -1769,6 +1878,31 @@ mod tests {
             problems: vec![],
             log: vec![],
         }
+    }
+
+    #[test]
+    fn the_summaries_model_is_read_shown_and_kept_and_a_refusal_is_said() {
+        let mut state = State::new();
+        let _ = state.tools(ToolsMsg::SummariesRead(None));
+        assert_eq!(state.ide.tools.summaries, Some(None), "Lattice picks until the reader does");
+        let _ = state.tools(ToolsMsg::SummariesSet(Ok(Some("endpoint:hosted".into()))));
+        assert_eq!(state.ide.tools.summaries, Some(Some("endpoint:hosted".into())));
+        let _ = state.tools(ToolsMsg::SummariesSet(Err("The topic summaries could not be saved.".into())));
+        assert_eq!(state.problem.as_deref(), Some("The topic summaries could not be saved."));
+        assert_eq!(state.ide.tools.summaries, Some(Some("endpoint:hosted".into())), "a failed save keeps the last choice");
+    }
+
+    #[test]
+    fn the_task_limit_is_read_shown_and_kept_and_a_refusal_is_said() {
+        use lattice_core::convo::task_runs::Limit;
+        let mut state = State::new();
+        let _ = state.tools(ToolsMsg::LimitRead(Limit::default()));
+        assert_eq!(state.ide.tools.task_limit, Some(Limit::At(3)), "three until the reader picks");
+        let _ = state.tools(ToolsMsg::LimitSet(Ok(Limit::None)));
+        assert_eq!(state.ide.tools.task_limit, Some(Limit::None));
+        let _ = state.tools(ToolsMsg::LimitSet(Err("The tasks' settings could not be saved.".into())));
+        assert_eq!(state.problem.as_deref(), Some("The tasks' settings could not be saved."));
+        assert_eq!(state.ide.tools.task_limit, Some(Limit::None), "a failed save keeps the last limit");
     }
 
     #[test]

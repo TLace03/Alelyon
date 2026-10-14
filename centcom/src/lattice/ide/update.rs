@@ -498,6 +498,10 @@ impl State {
                             self.problem = Some(why);
                             return Task::none();
                         }
+                        // A project's first topic works in the folder that just opened.
+                        if std::mem::take(&mut self.attach_when_open) && self.open.is_none() {
+                            return Task::batch([self.read_listing(), self.attach_open_folder()]);
+                        }
                         return self.read_listing();
                     }
                     Err(why) => {
@@ -893,8 +897,10 @@ impl State {
                     return Task::none();
                 }
                 self.sending = true;
-                // The new chat opens when the send is accepted, as any new chat does; the composer's draft stays.
+                // The new chat opens when the send is accepted, as any new chat does (on one chat surface it runs
+                // beside the chat, which stays); the composer's draft stays.
                 self.ide.inline_sending = true;
+                self.ide.task_starting = true;
                 let id = c.id().to_string();
                 let (chat, choice, shown, mode) =
                     (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice), self.mode);
@@ -1498,8 +1504,12 @@ impl State {
         let here = self.ide.folder.as_ref().map(|f| f.id().to_string());
         if here.is_none() || self.chat_workspace() != here {
             self.problem = Some(
-                "The open chat works in another folder, or in none: start a new chat in this folder for an inline edit."
-                    .to_string(),
+                if crate::lattice::ONE_SURFACE {
+                    "The chat works in another folder, or in none: pick the project of this folder in Working in, above the chat box, for an inline edit."
+                } else {
+                    "The open chat works in another folder, or in none: start a new chat in this folder for an inline edit."
+                }
+                .to_string(),
             );
             return Task::none();
         }
@@ -2331,6 +2341,8 @@ impl State {
                     return self.open_file(path);
                 }
             }
+            // On one chat surface there is no new chat to start: the stream goes on.
+            Key::NewChat if crate::lattice::ONE_SURFACE => {}
             Key::NewChat => {
                 self.ide.term_focus = false;
                 let new = self.update(Msg::New);

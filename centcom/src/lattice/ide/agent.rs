@@ -64,7 +64,7 @@ pub fn panel<'a>(state: &'a State, phase: f32) -> El<'a> {
     let body: El<'a> = match state.conversation() {
         None if state.opening.is_some() => container(ui::working(phase, "Opening the chat…")).padding(18).into(),
         None => empty_state(state),
-        Some(c) => scrollable(container(transcript(c, state, phase)).padding(Padding { top: 14.0, bottom: 14.0, left: 16.0, right: 18.0 }))
+        Some(c) => scrollable(container(stream(c, state, phase)).padding(Padding { top: 14.0, bottom: 14.0, left: 16.0, right: 18.0 }))
             .anchor_bottom()
             .height(Length::Fill)
             .style(theme::scrollbars)
@@ -83,8 +83,128 @@ pub fn panel<'a>(state: &'a State, phase: f32) -> El<'a> {
     if let Some(bar) = changes_bar(state) {
         col = col.push(bar);
     }
+    if crate::lattice::ONE_SURFACE {
+        col = col.push(working_in(state));
+    }
     col = col.push(composer(state, phase));
     col.into()
+}
+
+/// The open topic, and on one chat surface the older topics loaded above it, each under a divider that names it
+/// and can continue it.
+fn stream<'a>(c: &'a Conversation, state: &'a State, phase: f32) -> El<'a> {
+    if !crate::lattice::ONE_SURFACE {
+        return transcript(c, state, phase);
+    }
+    let mut col = Column::new().spacing(14).width(Length::Fill);
+    if state.next_earlier().is_some() {
+        let words = if state.loading_earlier { "Reading earlier…" } else { "Show earlier" };
+        col = col.push(
+            container(ghost(words, (!state.loading_earlier).then_some(Msg::Earlier))).center_x(Length::Fill),
+        );
+    }
+    for older in &state.earlier {
+        col = col.push(divider(older, true));
+        col = col.push(transcript(older, state, phase));
+    }
+    if !state.earlier.is_empty() {
+        col = col.push(divider(c, false));
+    }
+    col = col.push(transcript(c, state, phase));
+    // What the tasks wait for, as cards: answered here, on the task's tile, or by the agent on the reader's word.
+    col.push(task_prompts(state)).into()
+}
+
+/// The questions, approvals and plans the tasks wait for, each under its task's name; each action is done in that
+/// task.
+fn task_prompts<'a>(state: &'a State) -> El<'a> {
+    let mut col = Column::new().spacing(10).width(Length::Fill);
+    for tile in &state.ide.grid.tiles {
+        let Some(c) = &tile.conversation else { continue };
+        let title = if c.summary.title.is_empty() { "A task" } else { c.summary.title.as_str() };
+        for item in c.activity.iter().flat_map(|a| a.items.iter()) {
+            let card = match item {
+                Item::Approval { call, detail, allow_always, decided: None } => approval(call, detail, *allow_always, None, state),
+                Item::Question { call, text, options, answered: false } => question(call, text, options, false, state),
+                Item::Plan { plan, title: p, text, outcome: None } => plan_card(plan, p, text, None, state),
+                _ => continue,
+            };
+            let id = tile.id.clone();
+            col = col.push(
+                Column::new()
+                    .spacing(4)
+                    .push(label(format!("Task \u{201c}{}\u{201d} asks you", ui::cut(title, 48)), 11.5, theme::GOLD))
+                    .push(card.map(move |m| super::grid::go(super::grid::GridMsg::Act(id.clone(), Box::new(m))))),
+            );
+        }
+    }
+    col.into()
+}
+
+/// Where one topic begins in the stream: its title and when, and for an older one, Continue this.
+fn divider<'a>(c: &'a Conversation, older: bool) -> El<'a> {
+    let title = if c.summary.title.is_empty() { "Untitled" } else { c.summary.title.as_str() };
+    let when = super::ago(crate::utc::now() - c.summary.updated);
+    let mut line = row![
+        container(space().height(1)).width(Length::Fixed(18.0)).style(theme::line),
+        label(format!("{} \u{00B7} {when}", ui::cut(title, 48)), 11.5, theme::TEXT_FAINT),
+        container(space().height(1)).width(Length::Fill).style(theme::line),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    if older {
+        line = line.push(ghost("Continue this", Some(Msg::Open(c.id().to_string()))));
+    }
+    line.into()
+}
+
+/// Working in: the project the next message works in (its folder, instructions and model), picked above the
+/// composer.
+fn working_in<'a>(state: &'a State) -> El<'a> {
+    const NONE: &str = "No project";
+    let projects = state.ide.projects.list.as_deref().unwrap_or_default();
+    let mut names: Vec<String> = vec![NONE.to_string()];
+    names.extend(projects.iter().filter(|p| !p.archived).map(|p| p.name.clone()));
+    let picked = state.ide.project.as_deref().and_then(|id| state.ide.projects.find(id));
+    let current = Some(picked.map_or_else(|| NONE.to_string(), |p| p.name.clone()));
+    let ids: Vec<(String, String)> = projects.iter().filter(|p| !p.archived).map(|p| (p.name.clone(), p.id.clone())).collect();
+    let pick = pick_list(names, current, move |name: String| {
+        Msg::WorkIn(ids.iter().find(|(n, _)| *n == name).map(|(_, id)| id.clone()))
+    })
+    .text_size(12.0)
+    .padding([3.0, 8.0]);
+    let short = |f: &str| super::file_name(&f.replace('\\', "/")).to_string();
+    let folders: Vec<String> = picked.map(|p| p.folders().into_iter().map(str::to_string).collect()).unwrap_or_default();
+    // A project of several folders: which of them the chat works in.
+    let folder: El<'a> = if folders.len() > 1 {
+        let shown: Vec<String> = folders.iter().map(|f| short(f)).collect();
+        let current = state.work_folder().map(|f| short(&f));
+        pick_list(shown, current, move |name: String| {
+            Msg::WorkFolder(folders.iter().find(|f| short(f) == name).cloned().unwrap_or_default())
+        })
+        .text_size(12.0)
+        .padding([3.0, 8.0])
+        .into()
+    } else {
+        let words = match (folders.first(), &state.ide.folder) {
+            (Some(f), _) => short(f),
+            (None, Some(open)) => open.name().to_string(),
+            (None, None) => "no folder".to_string(),
+        };
+        label(words, 11.5, theme::TEXT_DIM).into()
+    };
+    let routed = label(state.routed.as_deref().unwrap_or(""), 11.0, theme::GOLD_DIM);
+    let line = row![
+        label("Working in", 11.5, theme::TEXT_FAINT),
+        pick,
+        folder,
+        space().width(Length::Fill),
+        routed,
+        ghost("+ Project", Some(go(IdeMsg::Projects(super::projects::ProjectsMsg::Create)))),
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    container(line).padding(Padding { top: 6.0, right: 12.0, bottom: 0.0, left: 12.0 }).into()
 }
 
 fn header<'a>(state: &'a State) -> El<'a> {
@@ -104,20 +224,29 @@ fn header<'a>(state: &'a State) -> El<'a> {
                 n => line = line.push(ui::chip(format!("{n} waiting for you"), theme::GOLD)),
             }
         }
+        None if crate::lattice::ONE_SURFACE => line = line.push(strong("Chat", 13.5, theme::TEXT)),
         None => line = line.push(strong("New chat", 13.5, theme::TEXT)),
     }
     line = line.push(space().width(Length::Fill));
     // Where the chat leads: one menu, not a row of buttons.
     line = line.push(super::jump::button_for(None));
-    // The grid: chats side by side, shown in the editor's place.
-    let grid = &state.ide.grid;
-    let grid_tip = if grid.shown { "Back to the editor" } else { "Chats side by side" };
-    line = line.push(icon("\u{25A6}", grid_tip, Some(super::grid::go(super::grid::GridMsg::Show(!grid.shown)))));
-    line = line.push(icon("\u{25C8}", "All chats", Some(go(IdeMsg::Side(Side::Chats)))));
-    if let Some(c) = state.conversation() {
-        line = line.push(icon("\u{2399}", "Archive this chat (it is never deleted)", Some(Msg::Archive(c.id().to_string()))));
+    if crate::lattice::ONE_SURFACE {
+        // The Tasks view: the tasks side by side, read-only, in the editor's place.
+        let grid = &state.ide.grid;
+        let tip = if grid.shown { "Back to the editor" } else { "Tasks, side by side" };
+        line = line.push(icon("\u{25A6}", tip, Some(super::grid::go(super::grid::GridMsg::Show(!grid.shown)))));
     }
-    line = line.push(icon("+", "New chat (Ctrl+N)", Some(Msg::New)));
+    if !crate::lattice::ONE_SURFACE {
+        // The grid: chats side by side, shown in the editor's place.
+        let grid = &state.ide.grid;
+        let grid_tip = if grid.shown { "Back to the editor" } else { "Chats side by side" };
+        line = line.push(icon("\u{25A6}", grid_tip, Some(super::grid::go(super::grid::GridMsg::Show(!grid.shown)))));
+        line = line.push(icon("\u{25C8}", "All chats", Some(go(IdeMsg::Side(Side::Chats)))));
+        if let Some(c) = state.conversation() {
+            line = line.push(icon("\u{2399}", "Archive this chat (it is never deleted)", Some(Msg::Archive(c.id().to_string()))));
+        }
+        line = line.push(icon("+", "New chat (Ctrl+N)", Some(Msg::New)));
+    }
     let mut col = Column::new().push(container(line).padding([8.0, 12.0]));
     if let Some(stages) = state.conversation().and_then(|c| stage_line(c, state.changes.as_ref())) {
         col = col.push(container(stages).padding(Padding { top: 0.0, right: 12.0, bottom: 7.0, left: 12.0 }));
@@ -205,8 +334,9 @@ fn empty_state<'a>(state: &'a State) -> El<'a> {
         );
     }
     col = col.push(chips);
-    // The newest chats, to go back to one.
-    if let Some(list) = &state.list
+    // The newest chats, to go back to one (on one surface the stream opens on the newest by itself).
+    if !crate::lattice::ONE_SURFACE
+        && let Some(list) = &state.list
         && !list.conversations.is_empty()
     {
         col = col.push(space().height(4));
@@ -775,10 +905,23 @@ fn task_chip<'a>(
         None => {
             line = line.push(ui::primary("Start", (!state.sending).then(|| go(IdeMsg::TaskStart(task.to_string())))));
             line = line.push(ui::secondary("Dismiss", Some(go(IdeMsg::TaskDismiss(task.to_string())))));
+            if crate::lattice::ONE_SURFACE {
+                line = line.push(label("Runs beside this chat", 11.0, theme::TEXT_FAINT));
+            }
             line = line.push(space().width(Length::Fill));
         }
         Some(TaskOutcome::Started { conversation }) => {
-            line = line.push(settled("Started as a new chat".to_string()));
+            let words = if crate::lattice::ONE_SURFACE {
+                // Where the task is now, from the topics' list.
+                match state.list.as_ref().and_then(|l| l.conversations.iter().find(|c| c.id == *conversation)) {
+                    Some(c) if c.needs_you || state.calling.contains(&c.id) => "Running beside this chat: it needs you",
+                    Some(c) if c.running => "Running beside this chat",
+                    _ => "Ran as a topic of its own",
+                }
+            } else {
+                "Started as a new chat"
+            };
+            line = line.push(settled(words.to_string()));
             line = line.push(ghost("Open it", Some(Msg::Open(conversation.clone()))));
         }
         Some(TaskOutcome::Dismissed) => line = line.push(settled("Dismissed".to_string())),

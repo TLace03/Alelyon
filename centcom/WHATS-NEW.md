@@ -3,6 +3,27 @@
 Shown by the account menu's "What's New" (src/signin/mod.rs reads this file at build time). Newest first. Each
 release is a `## ` heading (a date, then an optional title after " — "), followed by `- ` lines in plain words.
 
+## 2026-10-14 — Tasks side by side
+
+- The tasks you start from suggestion chips now show in a Tasks view, several side by side (the ▦ button above the chat). Each one shows what it is doing; you don't type into a task, you steer it from the main chat.
+- When a task has a question, needs your approval or proposes a plan, it shows on the task and as a card in the main chat. Answer it in either place, or just tell the agent in the main chat and it passes your answer on. An approval still asks you to confirm it.
+- Ask the agent in the main chat to give a task another instruction or to stop it; each task also has a Stop button.
+- Your messages never land in a task's own thread.
+
+## 2026-10-14 — One chat
+
+- Lattice's chat is now one conversation that carries on, instead of a list of chats: it opens where you left off.
+- Your earlier chats are still there: Show earlier brings them back above, and Continue this picks one up again.
+- Working in, above the chat box, picks the project you are working on; the chat moves to its folder and its latest work.
+- A project can hold several folders: add them on its page, then switch between them in Working in.
+- When you return to something you worked on earlier, your message goes back to that topic by itself (and a new subject starts a new one); a note above the box says where it went.
+- Each topic is kept in brief after every few turns, so the agent knows where your other work stands; choose which model writes these summaries (this PC's or a hosted one) on the Tools page.
+- The agent remembers across topics: what you said or decided in earlier conversations comes back when it bears on your message, and the agent can search them itself.
+- A task you start from a suggestion chip now runs beside the chat as a topic of its own, and the chat stays where it is.
+- Activity, in the side bar, shows everything working now, each task beneath the topic it came from, then every topic to jump to.
+- Choose how many tasks run at once on the Tools page: 3 unless you pick another number, or no limit. More at once uses more of your PC, or more of a hosted model's charges.
+- When your message belongs to another of your projects, the agent can ask to move the work there. Say Switch and a new topic begins in that project's folder; say Stay here and nothing changes.
+
 ## 2026-10-14 — Checklists from agents in Lattice
 
 - An agent you run inside Lattice can now give you a checklist of things to do yourself, like any other agent: it is pinned above the chat's composer, and you check each step there.

@@ -151,7 +151,7 @@ pub fn plan_words(s: &State) -> (String, iced::Color) {
     }
 }
 
-/// The plan's line and its buttons: Upgrade (the pricing page) on Free or Beta, Manage billing (Stripe's portal, in
+/// The plan's line and its buttons: Upgrade (the pricing page) on Free, Manage billing (Stripe's portal, in
 /// your own browser) when the account has billing to manage. No card is entered here.
 fn plan<'a>(s: &'a State) -> El<'a> {
     let (said, color) = plan_words(s);

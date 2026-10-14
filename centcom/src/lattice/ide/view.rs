@@ -253,6 +253,8 @@ fn side_bar<'a>(state: &'a State, phase: f32) -> El<'a> {
     match state.ide.side {
         Side::Explorer => explorer(state, phase),
         Side::Search => super::search::view(state, phase),
+        // One chat surface lists no chats: Activity charts what is working, then every topic.
+        Side::Chats if crate::lattice::ONE_SURFACE => super::activity::view(state, phase),
         Side::Chats => super::agent::chats(state, phase),
         Side::Changes => changes_view(state),
         Side::Tools => super::tools::side(state),
@@ -1264,7 +1266,11 @@ fn welcome<'a>(state: &'a State) -> El<'a> {
     keys = keys.push(shortcut("Ctrl+F, Ctrl+H", "Find, and replace, in the file"));
     keys = keys.push(shortcut("Ctrl+Shift+F", "Search the folder"));
     keys = keys.push(shortcut("Ctrl+K", "Ask the agent to edit the selected lines"));
-    keys = keys.push(shortcut("Ctrl+L, Ctrl+N", "Ask the agent; a new chat"));
+    keys = keys.push(if crate::lattice::ONE_SURFACE {
+        shortcut("Ctrl+L", "Ask the agent")
+    } else {
+        shortcut("Ctrl+L, Ctrl+N", "Ask the agent; a new chat")
+    });
     keys = keys.push(shortcut("Ctrl+B", "Show or hide the side bar"));
     keys = keys.push(shortcut("Ctrl+J", "The agent's commands and your terminal"));
     keys = keys.push(shortcut("Enter", "Send (Shift+Enter: a new line; Esc: stop the agent)"));

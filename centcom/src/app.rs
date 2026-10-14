@@ -1061,7 +1061,8 @@ impl App {
         }
         let mind = self.can(Capability::SinaiMind);
         match choice {
-            Some(Choice::SinaiMind) => self.models.update(crate::models::Msg::Instead(false), &mut self.lattice.choice).map(Message::Models),
+            // the one model is Sinai's own mind running on another model: Sinai answers on its page
+            Some(Choice::SinaiMind | Choice::OneModel(_)) => self.models.update(crate::models::Msg::Instead(false), &mut self.lattice.choice).map(Message::Models),
             Some(c) => {
                 if let (Some(pick), Some(catalog)) = (c.pick(), self.models.catalog.as_mut()) {
                     catalog.sinai_kept = Some(pick);
@@ -1541,6 +1542,10 @@ impl App {
                     Then::Chosen(part, choice) => {
                         self.auto.chosen(part, &choice);
                         return self.part_chosen(part, choice);
+                    }
+                    Then::ChosenMany(chosen) => {
+                        let tasks: Vec<Task<Message>> = chosen.into_iter().map(|(part, choice)| self.part_chosen(part, choice)).collect();
+                        return Task::batch(tasks);
                     }
                 }
             }

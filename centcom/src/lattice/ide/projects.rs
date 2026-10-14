@@ -12,7 +12,7 @@ use iced::widget::{Column, Row, button, column, container, row, scrollable, spac
 use iced::{Alignment, Element, Length, Task};
 
 use crate::theme::{self, fonts};
-use lattice_core::projects::{Change, MAX_FILES, Project};
+use lattice_core::projects::{Change, MAX_FILES, MAX_FOLDERS, Project};
 
 use super::{IdeMsg, TabKind};
 use crate::lattice::{Msg, STOPPED, State, on};
@@ -27,6 +27,10 @@ pub struct Edit {
     pub name: String,
     pub instructions: text_editor::Content,
     pub folder: String,
+    /// The folders it works in besides its own.
+    pub more_folders: Vec<String>,
+    /// The path typed to add a folder.
+    pub adding_folder: String,
     pub files: Vec<String>,
     /// The model a new chat in it starts with (a choice's id).
     pub choice: Option<String>,
@@ -68,6 +72,11 @@ pub enum ProjectsMsg {
     Folder(String),
     /// The page's folder is the one the editor has open.
     UseOpenFolder,
+    AddingFolder(String),
+    AddFolder,
+    /// Add the folder the editor has open to its folders.
+    AddOpenFolder,
+    RemoveFolder(usize),
     Adding(String),
     Add,
     Remove(usize),
@@ -152,6 +161,8 @@ impl State {
                         name: project.name.clone(),
                         instructions: text_editor::Content::with_text(&project.instructions),
                         folder: project.folder.clone().unwrap_or_default(),
+                        more_folders: project.more_folders.clone(),
+                        adding_folder: String::new(),
                         files: project.files.clone(),
                         choice: project.choice.clone(),
                         adding: String::new(),
@@ -185,6 +196,32 @@ impl State {
                 let open = self.ide.folder.as_ref().map(|f| f.shown_path());
                 if let (Some(edit), Some(open)) = (&mut self.ide.projects.edit, open) {
                     edit.folder = open;
+                }
+            }
+            ProjectsMsg::AddingFolder(path) => {
+                if let Some(edit) = &mut self.ide.projects.edit {
+                    edit.adding_folder = path;
+                }
+            }
+            ProjectsMsg::AddFolder | ProjectsMsg::AddOpenFolder => {
+                let open = self.ide.folder.as_ref().map(|f| f.shown_path());
+                if let Some(edit) = &mut self.ide.projects.edit {
+                    let path = match msg {
+                        ProjectsMsg::AddOpenFolder => open.unwrap_or_default(),
+                        _ => edit.adding_folder.trim().trim_matches('"').to_string(),
+                    };
+                    let known = same_folder(&edit.folder, &path) || edit.more_folders.iter().any(|f| same_folder(f, &path));
+                    if !path.is_empty() && !known && edit.more_folders.len() < MAX_FOLDERS {
+                        edit.more_folders.push(path);
+                        edit.adding_folder.clear();
+                    }
+                }
+            }
+            ProjectsMsg::RemoveFolder(at) => {
+                if let Some(edit) = &mut self.ide.projects.edit
+                    && at < edit.more_folders.len()
+                {
+                    edit.more_folders.remove(at);
                 }
             }
             ProjectsMsg::Adding(path) => {
@@ -227,6 +264,7 @@ impl State {
                     name: Some(edit.name.clone()),
                     instructions: Some(edit.instructions.text().trim_end().to_string()),
                     folder: Some((!folder.is_empty()).then_some(folder)),
+                    more_folders: Some(edit.more_folders.clone()),
                     files: Some(edit.files.clone()),
                     choice: Some(edit.choice.clone()),
                     archived: None,
@@ -423,7 +461,7 @@ pub fn page<'a>(state: &'a State, id: &'a str) -> El<'a> {
         column![
             strong(if project.archived { "Project (archived)" } else { "Project" }, 20.0, theme::TEXT),
             label(
-                "A project groups chats. Its instructions and reference files go with every turn of its chats, before the folder's rules, and cannot let the agent do anything it otherwise could not. Pick it in Chats: a new chat then joins it.",
+                "A project groups chats. Its instructions and reference files go with every turn of its chats, before the folder's rules, and cannot let the agent do anything it otherwise could not. Pick it in Working in, above the chat box: the chat then works in it, in its folder.",
                 12.5,
                 theme::TEXT_DIM,
             ),
@@ -450,6 +488,36 @@ pub fn page<'a>(state: &'a State, id: &'a str) -> El<'a> {
         row![
             text_input(r"D:\Projects\demo", &edit.folder).on_input(|t| go(ProjectsMsg::Folder(t))).padding([6.0, 8.0]).size(12.5).style(ui::input_style),
             ui::secondary("Use the open folder", state.ide.folder.is_some().then(|| go(ProjectsMsg::UseOpenFolder))),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(label(
+        format!("More folders it works in (at most {MAX_FOLDERS}): Working in, above the chat box, switches between them"),
+        12.0,
+        theme::TEXT_FAINT,
+    ));
+    let mut more = Column::new().spacing(4);
+    for (at, folder) in edit.more_folders.iter().enumerate() {
+        more = more.push(
+            row![
+                mono(ui::cut(folder, 90), 11.5, theme::TEXT_DIM).width(Length::Fill),
+                button(label("Remove", 11.0, theme::TEXT_DIM)).padding([1.0, 6.0]).style(theme::ghost_button).on_press(go(ProjectsMsg::RemoveFolder(at))),
+            ]
+            .align_y(Alignment::Center),
+        );
+    }
+    col = col.push(more);
+    col = col.push(
+        row![
+            text_input(r"D:\Projects\api", &edit.adding_folder)
+                .on_input(|t| go(ProjectsMsg::AddingFolder(t)))
+                .on_submit(go(ProjectsMsg::AddFolder))
+                .padding([6.0, 8.0])
+                .size(12.5)
+                .style(ui::input_style),
+            ui::secondary("Add", Some(go(ProjectsMsg::AddFolder))),
+            ui::secondary("Add the open folder", state.ide.folder.is_some().then(|| go(ProjectsMsg::AddOpenFolder))),
         ]
         .spacing(6)
         .align_y(Alignment::Center),
@@ -529,6 +597,7 @@ mod tests {
             name: name.into(),
             instructions: String::new(),
             folder: None,
+            more_folders: vec![],
             files: vec![],
             choice: None,
             chats: vec![],

@@ -9,14 +9,17 @@
 //! Nothing here runs on a timer: a screen is read when it is opened, when "Refresh" is pressed, and after each change
 //! made from this page. A page is public: the page says so before a person opens theirs.
 
+mod photos;
 mod view;
 
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 use alelyon_identity_client::pages::{
-    self, Applicant, Education, Employment, Experience, Found, JobsQuery, Kind, Me, Member, ModAct, ModAction, ModReport,
-    NewEducation, NewExperience, NewJob, NewPoll, NewPost, Notifications, Org, OrgPage, Person, PersonPage, Post, Posts, Reason,
-    ReplyRule, SearchKind, Suggestions, Tagged, Target, Thread, Trending, Workplace,
+    self, Applicant, Community, CommunityPage, CommunitySummary, Education, Employment, Experience, Found, Joining, JobsQuery, Kind,
+    ListMembers, ListPage, ListTarget, MediaMatch, Me, Member, ModAct, ModAction, ModReport, PageList,
+    NewEducation, NewExperience, NewJob, NewPhoto, NewPoll, NewPost, Notifications, Org, OrgPage, Person, PersonPage, Post, Posts,
+    Reaction, Reason, ReplyRule, SearchKind, Suggestions, Tagged, Target, Thread, Trending, Upload, Workplace,
 };
 pub use alelyon_identity_client::pages::Problem;
 use alelyon_identity_client::social;
@@ -24,8 +27,12 @@ use iced::Task;
 use iced::widget::text_editor;
 
 use crate::signin::client::Client;
+use photos::{Picture, Size};
 
 pub use view::view;
+
+/// How many photos are kept before those no screen on show draws are forgotten.
+const PHOTOS_KEPT: usize = 48;
 
 /// What the page shows. The first four are its tabs; the rest are reached from them, with a way back.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -54,11 +61,29 @@ pub enum Screen {
     Applicants(String),
     /// Moderators only: the reports, and the moderation log.
     Moderation,
+    /// Communities (ADR-0053): the reader's own, those with the most members, and starting one.
+    Communities,
+    /// A community, by its handle.
+    Community(String),
+    /// A community's members; its owners and moderators also see requests and bans.
+    CommunityMembers(String),
+    /// Lists (ADR-0054): the reader's private lists, and one list (by id) read as a stream.
+    Lists,
+    List(String),
 }
 
 impl Screen {
-    pub const TABS: [Screen; 7] =
-        [Screen::Home, Screen::Explore, Screen::Jobs, Screen::Notifications, Screen::Bookmarks, Screen::Mine, Screen::Orgs];
+    pub const TABS: [Screen; 9] = [
+        Screen::Home,
+        Screen::Explore,
+        Screen::Communities,
+        Screen::Lists,
+        Screen::Jobs,
+        Screen::Notifications,
+        Screen::Bookmarks,
+        Screen::Mine,
+        Screen::Orgs,
+    ];
 
     pub fn title(&self) -> String {
         match self {
@@ -79,6 +104,11 @@ impl Screen {
             Screen::Jobs => "Jobs".into(),
             Screen::Applicants(_) => "Applicants".into(),
             Screen::Moderation => "Moderation".into(),
+            Screen::Communities => "Communities".into(),
+            Screen::Community(h) => format!("c/{h}"),
+            Screen::CommunityMembers(h) => format!("c/{h} members"),
+            Screen::Lists => "Lists".into(),
+            Screen::List(_) => "List".into(),
         }
     }
 
@@ -94,18 +124,58 @@ pub enum ModView {
     Open,
     Closed,
     Log,
+    /// Uploads a screen matched to known illegal imagery (ADR-0050).
+    Matches,
 }
 
 impl ModView {
-    pub const ALL: [ModView; 3] = [ModView::Open, ModView::Closed, ModView::Log];
+    pub const ALL: [ModView; 4] = [ModView::Open, ModView::Closed, ModView::Log, ModView::Matches];
 
     pub fn title(self) -> &'static str {
         match self {
             ModView::Open => "Open reports",
             ModView::Closed => "Closed",
             ModView::Log => "Log",
+            ModView::Matches => "Photo matches",
         }
     }
+}
+
+/// What a chosen photo is for: the post being written, the reader's page, or an organization they run.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PhotoFor {
+    Post,
+    /// The page's `avatar` or `banner`.
+    Page(&'static str),
+    /// An organization's `logo` or `banner`, by its ticker.
+    Org(String, &'static str),
+}
+
+impl PhotoFor {
+    /// What was done, in words, once the photo is set (or cleared).
+    fn done_words(&self, cleared: bool) -> String {
+        let done = if cleared { "removed" } else { "changed" };
+        match self {
+            PhotoFor::Post => String::new(),
+            PhotoFor::Page("avatar") => format!("Your photo is {done}."),
+            PhotoFor::Page(kind) => format!("Your {kind} is {done}."),
+            PhotoFor::Org(ticker, kind) => format!("({ticker})'s {kind} is {done}."),
+        }
+    }
+}
+
+/// The files chosen in the picker, each read: its name, and its bytes or why it cannot be used; or why the picker
+/// failed.
+pub type Chosen = Result<Vec<(String, Result<Vec<u8>, String>)>, String>;
+
+/// A photo attached to the post being written: one of the reader's uploads, with its description.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct Attached {
+    pub id: String,
+    pub url: String,
+    /// The file's name, as the composer shows it.
+    pub name: String,
+    pub alt: String,
 }
 
 /// Which feed Home shows: the ranked one, or that of the people and organizations followed.
@@ -187,6 +257,54 @@ impl std::fmt::Display for AsWho {
     }
 }
 
+/// Where a new post goes: the reader's own page, or a community they are a member of (its handle).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InWhere(pub Option<String>);
+
+impl std::fmt::Display for InWhere {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => write!(f, "My page"),
+            Some(handle) => write!(f, "c/{handle}"),
+        }
+    }
+}
+
+/// A field of the form that starts a community, or of the form its owners edit it with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CommunityField {
+    Handle,
+    Name,
+    About,
+    Rules,
+}
+
+/// A community being started (or, without its handle, edited by an owner).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NewCommunity {
+    pub handle: String,
+    pub name: String,
+    pub about: String,
+    pub rules: String,
+    pub joining: Joining,
+}
+
+impl NewCommunity {
+    /// As the service reads a handle: trimmed, lower case, without a typed `c/`, letters, digits and `_` only.
+    fn tidy_handle(typed: &str) -> String {
+        let lower = typed.trim().to_ascii_lowercase();
+        let bare = lower.strip_prefix("c/").unwrap_or(&lower);
+        bare.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '_').take(30).collect()
+    }
+
+    /// Ready to start: a handle of 3-30 beginning with a letter, and a name.
+    pub fn ready(&self) -> bool {
+        (3..=30).contains(&self.handle.len())
+            && self.handle.starts_with(|c: char| c.is_ascii_lowercase())
+            && !self.name.trim().is_empty()
+    }
+}
+
 /// The organization a title names, as the picker offers it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TitleOrg(pub Option<Org>);
@@ -220,6 +338,10 @@ pub struct Composer {
     pub job_on: bool,
     pub job: NewJob,
     pub job_days: JobDays,
+    /// Up to four photos, uploaded as they were chosen; never with a poll.
+    pub photos: Vec<Attached>,
+    /// The community to post in (a handle), when not on the reader's own page.
+    pub in_community: Option<String>,
 }
 
 /// How long a poll stays open, as the composer offers it.
@@ -343,7 +465,18 @@ impl Composer {
         self.job_on && self.kind == Kind::Article && self.as_who.is_some()
     }
 
+    /// A poll goes with a post of its own (not an article, not a quote) only.
+    fn poll_wanted(&self) -> bool {
+        self.poll_on && self.kind == Kind::Post && self.quoting.is_none()
+    }
+
     fn new_post(&self) -> NewPost {
+        let poll = self.poll_wanted().then(|| NewPoll { options: self.poll_choices(), hours: self.poll_length.0 });
+        let media = if poll.is_some() {
+            Vec::new()
+        } else {
+            self.photos.iter().map(|p| NewPhoto { id: p.id.clone(), alt: p.alt.trim().to_string() }).collect()
+        };
         NewPost {
             kind: self.kind,
             text: self.body.text().trim().to_string(),
@@ -352,9 +485,11 @@ impl Composer {
             repost_of: self.quoting.as_ref().map(|p| p.id.clone()),
             as_org: self.as_who.clone(),
             replies: self.replies,
-            poll: (self.poll_on && self.kind == Kind::Post && self.quoting.is_none())
-                .then(|| NewPoll { options: self.poll_choices(), hours: self.poll_length.0 }),
+            poll,
             job: self.job_wanted().then(|| NewJob { days: self.job_days.0, ..self.job.clone() }),
+            media,
+            // A community post is one's own, not an organization's, and not a quote.
+            community: self.in_community.clone().filter(|_| self.as_who.is_none() && self.quoting.is_none()),
         }
     }
 }
@@ -441,6 +576,31 @@ pub struct State {
     pub mod_reports: Option<(Vec<ModReport>, bool)>,
     pub mod_log: Option<(Vec<ModAction>, bool)>,
     pub mod_note: String,
+    /// Moderators only: the screens' matches not yet cleared.
+    pub mod_matches: Option<Vec<MediaMatch>>,
+    /// The photos fetched for what the screens hold, by address.
+    pub photos: HashMap<String, Picture>,
+    /// Photo uploads under way.
+    pub uploading: usize,
+    /// Communities (ADR-0053): those with the most members, and the reader's own (with those they asked to join).
+    pub communities: Option<Vec<CommunitySummary>>,
+    pub my_communities: Option<Vec<CommunitySummary>>,
+    /// The community on show, and a members list (its handle with it).
+    pub community: Option<CommunityPage>,
+    pub community_members: Option<(String, Vec<Member>)>,
+    /// A community being started, and the edit its owners make of the one on show (Some while that form is open).
+    pub new_community: NewCommunity,
+    pub edit_community: Option<NewCommunity>,
+    /// Lists (ADR-0054): the reader's own, the one on show with its members (when asked for), a new one's name
+    /// and line, the edit of the one on show (its id, name and line; Some while that form is open), the list a press
+    /// of Delete waits to confirm, and the lists offered for a person or organization.
+    pub lists: Option<Vec<PageList>>,
+    pub list: Option<ListPage>,
+    pub list_members: Option<(String, ListMembers)>,
+    pub new_list: (String, String),
+    pub edit_list: Option<(String, String, String)>,
+    pub confirm_delete_list: Option<String>,
+    pub list_picker: Option<(ListTarget, Vec<PageList>)>,
 }
 
 #[derive(Clone, Debug)]
@@ -548,6 +708,8 @@ pub enum Msg {
     Replied(Result<Post, Problem>),
     // acting on posts and people
     Like(String, bool),
+    /// React to a post another way (or as a like).
+    React(String, Reaction),
     Repost(String),
     Delete(String),
     FollowPerson(String, bool),
@@ -594,6 +756,76 @@ pub enum Msg {
     ModAct(ModAct, Option<Target>, Option<String>),
     ModDismiss(String),
     ModDone(Result<ModAction, Problem>),
+    /// The screens' matches, and marking one reported or clearing it (match id, reported, cleared).
+    MediaMatches(Result<Vec<MediaMatch>, Problem>),
+    MarkMatch(String, bool, bool),
+    // photos
+    /// Choose photos: to attach to the post being written, or as a page's or an organization's photo or banner.
+    PickPhotos(PhotoFor),
+    /// The files chosen, each read.
+    PhotosChosen(PhotoFor, Chosen),
+    /// An upload answered: what it is for, the file's name, and the upload with its picture.
+    Uploaded(PhotoFor, String, Result<(Upload, Picture), Problem>),
+    /// The description of a photo attached to the post being written.
+    PhotoAlt(usize, String),
+    RemovePhoto(usize),
+    /// Clear a page's or an organization's photo or banner.
+    ClearPhoto(PhotoFor),
+    /// A photo arrived for its address.
+    Photo(String, Picture),
+    // communities (ADR-0053)
+    Communities(Result<Vec<CommunitySummary>, Problem>),
+    MyCommunities(Result<Vec<CommunitySummary>, Problem>),
+    /// A page of a community; `append` adds its posts under those on show.
+    Community(String, bool, Result<CommunityPage, Problem>),
+    CommunityMembers(String, Result<Vec<Member>, Problem>),
+    NewCommunityField(CommunityField, String),
+    NewCommunityJoining(Joining),
+    CreateCommunity,
+    CommunityCreated(Result<Community, Problem>),
+    JoinCommunity(String),
+    LeaveCommunity(String),
+    /// Approve (true) or refuse a request: handle, member.
+    DecideRequest(String, String, bool),
+    /// Owners: make a member `member`, `moderator` or `owner`: handle, member, role.
+    CommunityRole(String, String, &'static str),
+    /// Remove a member, or ban them too (true), or lift a ban (a banned member, false): handle, member, ban.
+    RemoveFromCommunity(String, String, bool),
+    /// Take a conversation out of its community (its first post).
+    TakeOut(String),
+    InCommunity(InWhere),
+    /// Open (true) or close the edit form of the community on show (for its owners).
+    EditCommunity(bool),
+    EditCommunityField(CommunityField, String),
+    EditCommunityJoining(Joining),
+    SaveCommunity,
+    /// Moderators: suspend (true) or restore a community, by handle.
+    ModCommunity(String, bool),
+    // lists (ADR-0054)
+    Lists(Result<Vec<PageList>, Problem>),
+    /// A page of a list's stream; `append` adds its posts under those on show.
+    ListPage(String, bool, Result<ListPage, Problem>),
+    /// Show (true) or hide who is on the list on show.
+    ShowListMembers(bool),
+    ListMembers(String, Result<ListMembers, Problem>),
+    NewListName(String),
+    NewListAbout(String),
+    CreateList,
+    ListCreated(Result<PageList, Problem>),
+    /// Open (true) or close the edit of the list on show.
+    EditList(bool),
+    EditListName(String),
+    EditListAbout(String),
+    SaveList,
+    /// Delete a list: the first press asks, the second deletes.
+    DeleteList(String),
+    /// Offer the reader's lists for a person or organization (Some), or close the offer.
+    PickLists(Option<ListTarget>),
+    ListsFor(ListTarget, Result<Vec<PageList>, Problem>),
+    /// Put the target on the list (true) or take it off: list id, target, add.
+    ListAdd(String, ListTarget, bool),
+    /// Take someone off the list on show (its stream and members are read again).
+    ListTakeOff(String, ListTarget),
 }
 
 impl State {
@@ -717,13 +949,36 @@ impl State {
                 })
             }
             Screen::Moderation => self.read_mod(before),
+            Screen::Communities => self.run(|c, t| async move { pages::communities(&c, &t, false).await }, Msg::Communities),
+            Screen::Community(handle) => {
+                let key = handle.clone();
+                self.run(move |c, t| async move { pages::community(&c, &t, &handle, before.as_deref()).await }, move |r| {
+                    Msg::Community(key.clone(), append, r)
+                })
+            }
+            Screen::CommunityMembers(handle) => {
+                let key = handle.clone();
+                self.run(move |c, t| async move { pages::community_members(&c, &t, &handle).await }, move |r| {
+                    Msg::CommunityMembers(key.clone(), r)
+                })
+            }
+            Screen::Lists => self.run(|c, t| async move { pages::lists(&c, &t, None).await }, Msg::Lists),
+            Screen::List(id) => {
+                let key = id.clone();
+                self.run(move |c, t| async move { pages::list(&c, &t, &id, before.as_deref()).await }, move |r| {
+                    Msg::ListPage(key.clone(), append, r)
+                })
+            }
         }
     }
 
-    /// The moderation screen's view: the open or closed reports, or the log.
+    /// The moderation screen's view: the open or closed reports, the log, or the photo matches.
     fn read_mod(&self, before: Option<String>) -> Task<Msg> {
         let view = self.mod_view;
         let append = before.is_some();
+        if view == ModView::Matches {
+            return self.run(|c, t| async move { pages::media_matches(&c, &t, false).await }, Msg::MediaMatches);
+        }
         if view == ModView::Log {
             return self.run(move |c, t| async move { pages::mod_history(&c, &t, before.as_deref()).await }, move |r| Msg::ModLog(append, r));
         }
@@ -743,13 +998,41 @@ impl State {
         if !keep {
             self.loading = true;
         }
-        self.read(screen, None)
+        let read = self.read(screen, None);
+        // The reader's own communities: the composer's choices on Home, and what they keep anywhere.
+        if matches!(screen, Screen::Home | Screen::Communities | Screen::Community(_)) {
+            let mine = self.run(|c, t| async move { pages::communities(&c, &t, true).await }, Msg::MyCommunities);
+            return Task::batch([read, mine]);
+        }
+        read
+    }
+
+    /// The reader keeps the community (an active owner or moderator), as their own list says.
+    pub fn keeps(&self, handle: &str) -> bool {
+        self.my_communities.iter().flatten().any(|c| c.community.handle == handle && c.you_keep())
+    }
+
+    /// The person or organization whose page is on show, as a list names it.
+    fn list_target_on_show(&self) -> Option<ListTarget> {
+        match self.screen.as_ref()? {
+            Screen::Person(_) => self.person.as_ref()?.person.username.clone().map(ListTarget::Person),
+            Screen::Org(_) => self.org.as_ref().map(|o| ListTarget::Org(o.org.ticker.clone())),
+            _ => None,
+        }
     }
 
     /// The screen on show, read again (after a change made here).
     fn reload(&mut self) -> Task<Msg> {
         let Some(screen) = self.screen.clone() else { return Task::none() };
-        Task::batch([self.load(&screen, true), self.fetch_me()])
+        let mut tasks = vec![self.load(&screen, true), self.fetch_me()];
+        // An open list of who is on the list on show is read again too.
+        if let (Screen::List(id), Some((shown, _))) = (&screen, &self.list_members)
+            && shown == id
+        {
+            let (id, key) = (id.clone(), id.clone());
+            tasks.push(self.run(move |c, t| async move { pages::list_members(&c, &t, &id).await }, move |r| Msg::ListMembers(key.clone(), r)));
+        }
+        Task::batch(tasks)
     }
 
     fn go(&mut self, screen: Screen) -> Task<Msg> {
@@ -764,6 +1047,11 @@ impl State {
         }
         self.reporting = None;
         self.problem = None;
+        self.edit_community = None;
+        self.list_picker = None;
+        self.list_members = None;
+        self.edit_list = None;
+        self.confirm_delete_list = None;
         self.screen = Some(screen.clone());
         self.load(&screen, false)
     }
@@ -779,8 +1067,11 @@ impl State {
             Screen::Notifications => self.notifications.as_ref()?.next(),
             Screen::Bookmarks => self.bookmarks.as_ref()?.next(),
             Screen::Jobs => self.jobs.as_ref()?.next(),
+            Screen::Community(_) => self.community.as_ref()?.posts.next(),
+            Screen::List(_) => self.list.as_ref()?.posts.next(),
             Screen::Tag(_) => self.tagged.as_ref()?.posts.next(),
             Screen::Search(_) if self.search_kind == SearchKind::Posts => self.found.as_ref()?.2.posts.next(),
+            Screen::Moderation if self.mod_view == ModView::Matches => None,
             Screen::Moderation if self.mod_view == ModView::Log => {
                 let (actions, more) = self.mod_log.as_ref()?;
                 more.then(|| actions.last().map(|a| a.id.clone())).flatten()
@@ -825,17 +1116,130 @@ impl State {
         shown
     }
 
+    /// Uploads a photo the reader chose. Its picture is made from the bytes at hand, so it shows without a fetch.
+    fn upload(&self, target: PhotoFor, name: String, bytes: Vec<u8>) -> Task<Msg> {
+        self.run(
+            move |c, t| async move {
+                let upload = pages::upload(&c, &t, &bytes).await?;
+                let picture = crate::lattice::off_thread(move || photos::picture(&bytes, Size::Large)).await.unwrap_or(Picture::Failed);
+                Ok((upload, picture))
+            },
+            move |r| Msg::Uploaded(target.clone(), name.clone(), r),
+        )
+    }
+
+    /// The photos the screen on show draws, each address once, with the size it is drawn at.
+    fn photos_on_show(&self) -> Vec<(String, Size)> {
+        let mut want = Wanted::default();
+        match self.screen.as_ref() {
+            Some(Screen::Home) => {
+                for p in &self.composer.photos {
+                    want.add(Some(&p.url), Size::Large);
+                }
+                match self.home_feed {
+                    HomeFeed::ForYou => want.posts(self.for_you.as_ref().map(|(_, p)| p)),
+                    HomeFeed::Following => want.posts(self.home.as_ref()),
+                }
+            }
+            Some(Screen::Explore) => want.posts(self.explore.as_ref()),
+            Some(Screen::Bookmarks) => want.posts(self.bookmarks.as_ref()),
+            Some(Screen::Jobs) => want.posts(self.jobs.as_ref()),
+            Some(Screen::Community(_)) => want.posts(self.community.as_ref().map(|c| &c.posts)),
+            Some(Screen::List(_)) => want.posts(self.list.as_ref().map(|l| &l.posts)),
+            Some(Screen::Flagged(_)) => want.posts(self.flagged.as_ref().map(|(_, p)| p)),
+            Some(Screen::Tag(_)) => want.posts(self.tagged.as_ref().map(|t| &t.posts)),
+            Some(Screen::Search(_)) => want.posts(self.found.as_ref().map(|(_, _, f)| &f.posts)),
+            Some(Screen::Thread(_)) => {
+                if let Some(t) = &self.thread {
+                    if let Some(parent) = &t.parent {
+                        want.post(parent);
+                    }
+                    want.post(&t.post);
+                    want.posts(Some(&t.replies));
+                }
+            }
+            Some(Screen::Person(_)) => {
+                if let Some(page) = &self.person {
+                    want.add(page.banner.as_ref(), Size::Large);
+                    want.add(page.person.avatar.as_ref(), Size::Small);
+                    if let Some(p) = &page.pinned {
+                        want.post(p);
+                    }
+                    want.posts(Some(&page.posts));
+                }
+            }
+            Some(Screen::Org(_)) => {
+                if let Some(page) = &self.org {
+                    want.add(page.banner.as_ref(), Size::Large);
+                    want.add(page.org.logo.as_ref(), Size::Small);
+                    want.posts(Some(&page.posts));
+                }
+            }
+            Some(Screen::Mine) => {
+                if let Some(me) = &self.me {
+                    want.add(me.me.avatar.as_ref(), Size::Small);
+                }
+            }
+            _ => {}
+        }
+        want.0
+    }
+
+    /// Fetches the photos the screen on show draws that are not held yet; once many are held, forgets those it does not
+    /// draw.
+    fn fetch_photos(&mut self) -> Task<Msg> {
+        let Some(client) = self.session.as_ref().map(|(c, _)| c.clone()) else { return Task::none() };
+        let wanted = self.photos_on_show();
+        if self.photos.len() > PHOTOS_KEPT {
+            let drawn: HashSet<&str> = wanted.iter().map(|(u, _)| u.as_str()).collect();
+            self.photos.retain(|u, _| drawn.contains(u.as_str()));
+        }
+        let mut fetches = Vec::new();
+        for (url, size) in wanted {
+            if self.photos.contains_key(&url) {
+                continue;
+            }
+            self.photos.insert(url.clone(), Picture::Loading);
+            let client = client.clone();
+            fetches.push(Task::perform(
+                async move {
+                    let picture = match client.photo(&url).await {
+                        Ok(bytes) => crate::lattice::off_thread(move || photos::picture(&bytes, size)).await.unwrap_or(Picture::Failed),
+                        Err(_) => Picture::Failed,
+                    };
+                    (url, picture)
+                },
+                |(url, picture)| Msg::Photo(url, picture),
+            ));
+        }
+        Task::batch(fetches)
+    }
+
+    /// Handles a message, then fetches the photos the screen on show now draws.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
+        let task = self.step(msg);
+        Task::batch([task, self.fetch_photos()])
+    }
+
+    fn step(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
             Msg::Go(screen) => return self.go(screen),
             Msg::Back => {
                 if let Some(previous) = self.history.pop() {
                     self.screen = Some(previous.clone());
                     self.reporting = None;
+                    self.list_picker = None;
+                    self.list_members = None;
+                    self.edit_list = None;
+                    self.confirm_delete_list = None;
                     return self.load(&previous, true);
                 }
             }
-            Msg::Refresh => return self.reload(),
+            Msg::Refresh => {
+                // a photo that failed is fetched again
+                self.photos.retain(|_, p| !matches!(p, Picture::Failed));
+                return self.reload();
+            }
             Msg::Dismiss => {
                 self.problem = None;
                 self.note = None;
@@ -1241,7 +1645,9 @@ impl State {
                 }
             }
             Msg::Replies(rule) => self.composer.replies = rule,
-            Msg::PollToggle => self.composer.poll_on = !self.composer.poll_on,
+            // a post carries a poll or photos, not both
+            Msg::PollToggle if self.composer.photos.is_empty() || self.composer.poll_on => self.composer.poll_on = !self.composer.poll_on,
+            Msg::PollToggle => {}
             Msg::PollOption(i, text) => {
                 if let Some(option) = self.composer.poll_options.get_mut(i) {
                     *option = text;
@@ -1339,7 +1745,7 @@ impl State {
             }
             Msg::Unquote => self.composer.quoting = None,
             Msg::Submit => {
-                if !self.composer.ready() {
+                if !self.composer.ready() || self.uploading > 0 {
                     return Task::none();
                 }
                 self.composer.sending = true;
@@ -1380,6 +1786,9 @@ impl State {
             }
             Msg::Like(id, like) => {
                 return self.done(move |c, t| async move { pages::like(&c, &t, &id, like).await }, String::new());
+            }
+            Msg::React(id, reaction) => {
+                return self.done(move |c, t| async move { pages::react(&c, &t, &id, reaction).await }, String::new());
             }
             Msg::Repost(id) => {
                 let new = NewPost { repost_of: Some(id), ..NewPost::default() };
@@ -1547,6 +1956,7 @@ impl State {
                 self.mod_view = view;
                 self.mod_reports = None;
                 self.mod_log = None;
+                self.mod_matches = None;
                 if self.screen == Some(Screen::Moderation) {
                     self.loading = true;
                     return self.read_mod(None);
@@ -1602,6 +2012,404 @@ impl State {
                 return self.reload();
             }
             Msg::ModDone(Err(p)) => self.problem = Some(p),
+            Msg::MediaMatches(result) => {
+                if self.mod_view != ModView::Matches {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(list) => self.mod_matches = Some(list),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::MarkMatch(id, reported, cleared) => {
+                let words = if cleared { "Cleared: the account may upload photos again." } else { "Marked as reported." };
+                return self.done(move |c, t| async move { pages::mark_media_match(&c, &t, &id, reported, cleared).await }, words.into());
+            }
+            Msg::PickPhotos(target) => {
+                if self.session.is_none() {
+                    return Task::none();
+                }
+                let many = target == PhotoFor::Post;
+                return Task::perform(
+                    crate::lattice::off_thread(move || {
+                        crate::lattice::ide::picker::pick_photos(many).map(|paths| paths.iter().map(|p| photos::read(p)).collect())
+                    }),
+                    move |r| Msg::PhotosChosen(target, r.unwrap_or_else(|| Err("Windows' file picker could not start.".into()))),
+                );
+            }
+            Msg::PhotosChosen(target, chosen) => {
+                // signed out while the picker was open: nothing is uploaded, so nothing is counted as uploading
+                if self.session.is_none() {
+                    return Task::none();
+                }
+                let files = match chosen {
+                    Ok(files) => files,
+                    Err(why) => {
+                        self.problem = Some(Problem::Refused("photo-file".into(), why));
+                        return Task::none();
+                    }
+                };
+                let room = match target {
+                    PhotoFor::Post if self.composer.poll_on => 0,
+                    PhotoFor::Post => pages::POST_MAX_PHOTOS.saturating_sub(self.composer.photos.len() + self.uploading),
+                    _ => 1,
+                };
+                let (mut uploads, mut refused) = (Vec::new(), Vec::new());
+                for (name, bytes) in files {
+                    match bytes {
+                        Err(why) => refused.push(why),
+                        Ok(_) if uploads.len() >= room => refused.push(format!("{name} was left out: a post carries four photos at most.")),
+                        Ok(bytes) => uploads.push(self.upload(target.clone(), name, bytes)),
+                    }
+                }
+                if !refused.is_empty() {
+                    self.problem = Some(Problem::Refused("photo-file".into(), refused.join(" ")));
+                }
+                self.uploading += uploads.len();
+                return Task::batch(uploads);
+            }
+            Msg::Uploaded(target, name, result) => {
+                self.uploading = self.uploading.saturating_sub(1);
+                let (upload, picture) = match result {
+                    Ok(done) => done,
+                    Err(p) => {
+                        self.problem = Some(p);
+                        return Task::none();
+                    }
+                };
+                if !upload.url.is_empty() {
+                    self.photos.insert(upload.url.clone(), picture);
+                }
+                let id = upload.id;
+                let words = target.done_words(false);
+                match target {
+                    // the poll may have been chosen, or the photos filled, while it uploaded: it then expires unused
+                    PhotoFor::Post => {
+                        if !self.composer.poll_on && self.composer.photos.len() < pages::POST_MAX_PHOTOS {
+                            self.composer.photos.push(Attached { id, url: upload.url, name, alt: String::new() });
+                        }
+                    }
+                    PhotoFor::Page(kind) => {
+                        return self.done(move |c, t| async move { pages::set_page_media(&c, &t, kind, &id).await }, words);
+                    }
+                    PhotoFor::Org(ticker, kind) => {
+                        return self.done(move |c, t| async move { pages::set_org_media(&c, &t, &ticker, kind, &id).await }, words);
+                    }
+                }
+            }
+            Msg::PhotoAlt(i, alt) => {
+                if let Some(photo) = self.composer.photos.get_mut(i) {
+                    photo.alt = alt.chars().take(pages::ALT_MAX_CHARS).collect();
+                }
+            }
+            Msg::RemovePhoto(i) => {
+                if i < self.composer.photos.len() {
+                    self.composer.photos.remove(i);
+                }
+            }
+            Msg::ClearPhoto(target) => {
+                let words = target.done_words(true);
+                match target {
+                    PhotoFor::Post => {}
+                    PhotoFor::Page(kind) => {
+                        return self.done(move |c, t| async move { pages::set_page_media(&c, &t, kind, "").await }, words);
+                    }
+                    PhotoFor::Org(ticker, kind) => {
+                        return self.done(move |c, t| async move { pages::set_org_media(&c, &t, &ticker, kind, "").await }, words);
+                    }
+                }
+            }
+            Msg::Photo(url, picture) => {
+                self.photos.insert(url, picture);
+            }
+            Msg::Communities(result) => {
+                if self.screen != Some(Screen::Communities) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(list) => self.communities = Some(list),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::MyCommunities(result) => match result {
+                Ok(list) => {
+                    // A community the reader no longer belongs to is not offered to post in.
+                    if let Some(handle) = &self.composer.in_community
+                        && !list.iter().any(|c| c.you_belong() && &c.community.handle == handle)
+                    {
+                        self.composer.in_community = None;
+                    }
+                    self.my_communities = Some(list);
+                }
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Community(handle, append, result) => {
+                if self.screen != Some(Screen::Community(handle)) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.community.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.posts.posts.extend(page.posts.posts);
+                            shown.posts.more = page.posts.more;
+                        }
+                        None => {
+                            // The composer on a community's page posts in it, while nothing is written yet.
+                            let c = &self.composer;
+                            if page.summary.you_belong() && c.chars() == 0 && c.photos.is_empty() && c.as_who.is_none() {
+                                self.composer.in_community = Some(page.summary.community.handle.clone());
+                            }
+                            self.community = Some(page);
+                        }
+                    },
+                    Err(p) => {
+                        self.community = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::CommunityMembers(handle, result) => {
+                if self.screen != Some(Screen::CommunityMembers(handle.clone())) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(list) => self.community_members = Some((handle, list)),
+                    Err(p) => {
+                        self.community_members = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::NewCommunityField(field, text) => {
+                let form = &mut self.new_community;
+                match field {
+                    CommunityField::Handle => form.handle = NewCommunity::tidy_handle(&text),
+                    CommunityField::Name => form.name = text,
+                    CommunityField::About => form.about = text,
+                    CommunityField::Rules => form.rules = text,
+                }
+            }
+            Msg::NewCommunityJoining(joining) => self.new_community.joining = joining,
+            Msg::CreateCommunity => {
+                if !self.new_community.ready() {
+                    return Task::none();
+                }
+                let NewCommunity { handle, name, about, rules, joining } = self.new_community.clone();
+                return self.run(
+                    move |c, t| async move { pages::community_create(&c, &t, &handle, name.trim(), about.trim(), rules.trim(), joining).await },
+                    Msg::CommunityCreated,
+                );
+            }
+            Msg::CommunityCreated(Ok(community)) => {
+                self.new_community = NewCommunity::default();
+                self.note = Some(format!("c/{} is yours.", community.handle));
+                return self.go(Screen::Community(community.handle));
+            }
+            Msg::CommunityCreated(Err(p)) => self.problem = Some(p),
+            Msg::JoinCommunity(handle) => {
+                return self.run(
+                    move |c, t| async move { pages::community_join(&c, &t, &handle).await },
+                    |r| {
+                        Msg::Done(r.map(|state| {
+                            if state == "member" { "You are a member.".to_string() } else { "Asked to join. Its moderators decide.".to_string() }
+                        }))
+                    },
+                );
+            }
+            Msg::LeaveCommunity(handle) => {
+                return self.done(move |c, t| async move { pages::community_leave(&c, &t, &handle).await }, "Done.".into());
+            }
+            Msg::DecideRequest(handle, member, approve) => {
+                let words = if approve { "Approved." } else { "Refused." };
+                return self.done(move |c, t| async move { pages::community_decide(&c, &t, &handle, &member, approve).await }, words.into());
+            }
+            Msg::CommunityRole(handle, member, role) => {
+                return self.done(move |c, t| async move { pages::community_role(&c, &t, &handle, &member, role).await }, "Role changed.".into());
+            }
+            Msg::RemoveFromCommunity(handle, member, ban) => {
+                let words = if ban { "Removed, and kept from joining again." } else { "Done." };
+                return self.done(move |c, t| async move { pages::community_remove(&c, &t, &handle, &member, ban).await }, words.into());
+            }
+            Msg::TakeOut(post_id) => {
+                return self.done(
+                    move |c, t| async move { pages::community_remove_post(&c, &t, &post_id).await },
+                    "Taken out of the community, and closed to replies.".into(),
+                );
+            }
+            Msg::InCommunity(choice) => self.composer.in_community = choice.0,
+            Msg::EditCommunity(open) => {
+                self.edit_community = if open {
+                    self.community.as_ref().map(|c| NewCommunity {
+                        handle: c.summary.community.handle.clone(),
+                        name: c.summary.community.name.clone(),
+                        about: c.summary.about.clone(),
+                        rules: c.rules.clone(),
+                        joining: c.summary.joining,
+                    })
+                } else {
+                    None
+                };
+            }
+            Msg::EditCommunityField(field, text) => {
+                if let Some(form) = self.edit_community.as_mut() {
+                    match field {
+                        CommunityField::Handle => {}
+                        CommunityField::Name => form.name = text,
+                        CommunityField::About => form.about = text,
+                        CommunityField::Rules => form.rules = text,
+                    }
+                }
+            }
+            Msg::EditCommunityJoining(joining) => {
+                if let Some(form) = self.edit_community.as_mut() {
+                    form.joining = joining;
+                }
+            }
+            Msg::SaveCommunity => {
+                let Some(form) = self.edit_community.take().filter(|f| !f.name.trim().is_empty()) else { return Task::none() };
+                return self.run(
+                    move |c, t| async move {
+                        pages::community_update(&c, &t, &form.handle, Some(form.name.trim()), Some(form.about.trim()), Some(form.rules.trim()), Some(form.joining))
+                            .await
+                    },
+                    |r| Msg::Done(r.map(|_| "Saved.".to_string())),
+                );
+            }
+            Msg::ModCommunity(handle, suspend) => {
+                let note = self.mod_note.trim().to_string();
+                return self.run(move |c, t| async move { pages::mod_community(&c, &t, suspend, &handle, &note).await }, Msg::ModDone);
+            }
+            Msg::Lists(result) => {
+                if self.screen != Some(Screen::Lists) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(found) => self.lists = Some(found),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::ListPage(id, append, result) => {
+                if self.screen != Some(Screen::List(id)) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.list.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.posts.posts.extend(page.posts.posts);
+                            shown.posts.more = page.posts.more;
+                        }
+                        None => self.list = Some(page),
+                    },
+                    Err(p) => {
+                        self.list = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::ShowListMembers(show) => {
+                let Some(id) = self.list.as_ref().map(|l| l.list.id.clone()).filter(|_| show) else {
+                    self.list_members = None;
+                    return Task::none();
+                };
+                let key = id.clone();
+                return self.run(move |c, t| async move { pages::list_members(&c, &t, &id).await }, move |r| Msg::ListMembers(key.clone(), r));
+            }
+            Msg::ListMembers(id, result) => {
+                if self.screen != Some(Screen::List(id.clone())) {
+                    return Task::none();
+                }
+                match result {
+                    Ok(members) => self.list_members = Some((id, members)),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::NewListName(text) => self.new_list.0 = text.chars().take(pages::LIST_NAME_MAX_CHARS).collect(),
+            Msg::NewListAbout(text) => self.new_list.1 = text.chars().take(pages::LIST_ABOUT_MAX_CHARS).collect(),
+            Msg::CreateList => {
+                let (name, about) = (self.new_list.0.trim().to_string(), self.new_list.1.trim().to_string());
+                if name.is_empty() {
+                    return Task::none();
+                }
+                return self.run(move |c, t| async move { pages::list_create(&c, &t, &name, &about).await }, Msg::ListCreated);
+            }
+            Msg::ListCreated(Ok(made)) => {
+                self.new_list = (String::new(), String::new());
+                self.note = Some(format!("{} is made. Add people and organizations from their pages.", made.name));
+                return self.go(Screen::List(made.id));
+            }
+            Msg::ListCreated(Err(p)) => self.problem = Some(p),
+            Msg::EditList(open) => {
+                self.edit_list = if open { self.list.as_ref().map(|l| (l.list.id.clone(), l.list.name.clone(), l.list.about.clone())) } else { None };
+            }
+            Msg::EditListName(text) => {
+                if let Some(form) = self.edit_list.as_mut() {
+                    form.1 = text.chars().take(pages::LIST_NAME_MAX_CHARS).collect();
+                }
+            }
+            Msg::EditListAbout(text) => {
+                if let Some(form) = self.edit_list.as_mut() {
+                    form.2 = text.chars().take(pages::LIST_ABOUT_MAX_CHARS).collect();
+                }
+            }
+            Msg::SaveList => {
+                // A list needs a name: the form stays open until it has one.
+                let Some((id, name, about)) = self.edit_list.clone().filter(|f| !f.1.trim().is_empty()) else { return Task::none() };
+                self.edit_list = None;
+                return self.run(
+                    move |c, t| async move { pages::list_update(&c, &t, &id, Some(name.trim()), Some(about.trim())).await },
+                    |r| Msg::Done(r.map(|_| "Saved.".to_string())),
+                );
+            }
+            Msg::DeleteList(id) => {
+                if self.confirm_delete_list.as_deref() != Some(id.as_str()) {
+                    self.confirm_delete_list = Some(id);
+                    return Task::none();
+                }
+                self.confirm_delete_list = None;
+                return self.run(
+                    move |c, t| async move { pages::list_delete(&c, &t, &id).await },
+                    |r| match r {
+                        Ok(()) => Msg::Go(Screen::Lists),
+                        Err(p) => Msg::Done(Err(p)),
+                    },
+                );
+            }
+            Msg::PickLists(target) => {
+                let Some(target) = target else {
+                    self.list_picker = None;
+                    return Task::none();
+                };
+                let key = target.clone();
+                return self.run(move |c, t| async move { pages::lists(&c, &t, Some(&target)).await }, move |r| Msg::ListsFor(key.clone(), r));
+            }
+            Msg::ListsFor(target, result) => match result {
+                Ok(found) => {
+                    if self.list_target_on_show().as_ref() == Some(&target) {
+                        self.list_picker = Some((target, found));
+                    }
+                }
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::ListTakeOff(list_id, target) => {
+                return self.done(move |c, t| async move { pages::list_add(&c, &t, &list_id, &target, false).await }, "Taken off the list.".into());
+            }
+            Msg::ListAdd(list_id, target, add) => {
+                // The offer is read again after the change, so it shows what is so.
+                let key = target.clone();
+                return self.run(
+                    move |c, t| async move {
+                        pages::list_add(&c, &t, &list_id, &target, add).await?;
+                        pages::lists(&c, &t, Some(&target)).await
+                    },
+                    move |r| Msg::ListsFor(key.clone(), r),
+                );
+            }
         }
         Task::none()
     }
@@ -1615,13 +2423,52 @@ enum TickerChange {
     Down,
 }
 
+/// The photos a screen draws, in order, each address once, with the size it is drawn at.
+#[derive(Default)]
+struct Wanted(Vec<(String, Size)>);
+
+impl Wanted {
+    fn add(&mut self, url: Option<&String>, size: Size) {
+        if let Some(url) = url
+            && !self.0.iter().any(|(u, _)| u == url)
+        {
+            self.0.push((url.clone(), size));
+        }
+    }
+
+    /// As its card draws it: the organization's logo or the author's photo, and its photos; a plain repost draws the
+    /// post it reposts (a quote only names it).
+    fn post(&mut self, p: &Post) {
+        if p.is_plain_repost() {
+            if let Some(inner) = &p.repost_of {
+                self.post(inner);
+            }
+            return;
+        }
+        match (&p.org, &p.author) {
+            (Some(o), _) => self.add(o.logo.as_ref(), Size::Small),
+            (None, Some(a)) => self.add(a.avatar.as_ref(), Size::Small),
+            (None, None) => {}
+        }
+        for photo in &p.media {
+            self.add(Some(&photo.url), Size::Large);
+        }
+    }
+
+    fn posts(&mut self, page: Option<&Posts>) {
+        for p in page.map(|p| p.posts.as_slice()).unwrap_or_default() {
+            self.post(p);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use alelyon_identity_client::pages::{Membership, Person};
 
     fn org(ticker: &str) -> Org {
-        Org { id: format!("org_{ticker}"), ticker: ticker.into(), name: ticker.into() }
+        Org { id: format!("org_{ticker}"), ticker: ticker.into(), name: ticker.into(), ..Org::default() }
     }
 
     fn me_showing(tickers: &[&str]) -> Me {
@@ -1791,7 +2638,7 @@ mod tests {
         let entry = Experience {
             id: "exp_1".into(),
             title: "Founder".into(),
-            org: Some(Org { id: "org_1".into(), ticker: "LACE".into(), name: "Lace Labs".into() }),
+            org: Some(Org { id: "org_1".into(), ticker: "LACE".into(), name: "Lace Labs".into(), ..Org::default() }),
             org_name: "Lace Labs".into(),
             started: "2024-01".into(),
             ..Experience::default()
@@ -1982,5 +2829,281 @@ mod tests {
         let mut s = State::default();
         let _ = s.update(Msg::NewTicker("la-ce99xyz".into()));
         assert_eq!(s.new_org.ticker, "LACEX");
+    }
+
+    fn photo_url(id: &str, ext: &str) -> String {
+        format!("https://media.alelyon.com/m/med_{id}abcdefgh.{ext}")
+    }
+
+    fn uploaded(id: &str) -> Upload {
+        Upload { id: format!("med_{id}"), url: photo_url(id, "png"), width: 4, height: 3 }
+    }
+
+    fn signed_in() -> State {
+        // the tasks a test's updates return are never run: nothing is sent to this address
+        let c = Client::new("http://127.0.0.1:9".into()).unwrap();
+        State { session: Some((c, "t".into())), ..State::default() }
+    }
+
+    #[test]
+    fn a_post_carries_up_to_four_photos_with_their_descriptions_and_never_a_poll() {
+        let mut s = State::default();
+        for i in 0..5 {
+            s.uploading += 1;
+            let _ = s.update(Msg::Uploaded(PhotoFor::Post, format!("{i}.png"), Ok((uploaded(&i.to_string()), Picture::Failed))));
+        }
+        assert_eq!((s.composer.photos.len(), s.uploading), (4, 0), "the fifth is left to expire unused");
+        assert!(s.photos.contains_key(&photo_url("0", "png")), "an upload's picture is held without a fetch");
+        let _ = s.update(Msg::PhotoAlt(1, "x".repeat(1_200)));
+        assert_eq!(s.composer.photos[1].alt.chars().count(), pages::ALT_MAX_CHARS);
+        let _ = s.update(Msg::PhotoAlt(0, " A red card ".into()));
+        let _ = s.update(Msg::RemovePhoto(3));
+        let _ = s.update(Msg::PollToggle);
+        assert!(!s.composer.poll_on, "no poll while photos are attached");
+        s.composer.body = text_editor::Content::with_text("Cards");
+        let new = s.composer.new_post();
+        assert_eq!(new.media.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(), ["med_0", "med_1", "med_2"]);
+        assert_eq!(new.media[0].alt, "A red card");
+        s.uploading = 1;
+        let _ = s.update(Msg::Submit);
+        assert!(!s.composer.sending, "not sent while a photo uploads");
+        s.uploading = 0;
+        let _ = s.update(Msg::Submit);
+        assert!(s.composer.sending);
+        s.composer.sending = false;
+        for _ in 0..3 {
+            let _ = s.update(Msg::RemovePhoto(0));
+        }
+        let _ = s.update(Msg::PollToggle);
+        assert!(s.composer.poll_on);
+        let _ = s.update(Msg::Uploaded(PhotoFor::Post, "late.png".into(), Ok((uploaded("9"), Picture::Failed))));
+        assert!(s.composer.photos.is_empty(), "a photo that arrives once a poll is chosen is not attached");
+    }
+
+    #[test]
+    fn chosen_files_are_refused_with_their_reasons_and_only_as_many_as_fit_are_uploaded() {
+        let png = b"\x89PNG\r\n\x1a\nrest".to_vec();
+        let mut files: Vec<(String, Result<Vec<u8>, String>)> = (0..6).map(|i| (format!("{i}.png"), Ok(png.clone()))).collect();
+        files.push(("x.gif".into(), Err("x.gif is not a JPEG, PNG or WebP image.".into())));
+        let mut s = State::default();
+        let _ = s.update(Msg::PhotosChosen(PhotoFor::Post, Ok(files.clone())));
+        assert_eq!(s.uploading, 0, "signed out: nothing uploads");
+        let mut s = signed_in();
+        s.composer.photos.push(Attached { id: "med_a".into(), ..Attached::default() });
+        let _ = s.update(Msg::PhotosChosen(PhotoFor::Post, Ok(files)));
+        assert_eq!(s.uploading, 3, "room for three beside the one attached");
+        let Some(Problem::Refused(_, words)) = &s.problem else { panic!("{:?}", s.problem) };
+        assert!(words.contains("3.png was left out") && words.contains("x.gif is not a JPEG"), "{words}");
+        let mut s = signed_in();
+        let _ = s.update(Msg::PhotosChosen(PhotoFor::Page("avatar"), Ok(vec![("a.png".into(), Ok(png))])));
+        assert_eq!(s.uploading, 1);
+        assert_eq!(PhotoFor::Page("avatar").done_words(false), "Your photo is changed.");
+        assert_eq!(PhotoFor::Org("LACE".into(), "logo").done_words(true), "(LACE)'s logo is removed.");
+    }
+
+    #[test]
+    fn the_screen_on_show_fetches_each_of_its_photos_once() {
+        let photo = |url: String| pages::Photo { url, width: 4, height: 3, alt: String::new() };
+        let ada = Person { id: "a".into(), avatar: Some(photo_url("face", "png")), ..Person::default() };
+        let post = Post {
+            id: "p1".into(),
+            author: Some(ada),
+            media: vec![photo(photo_url("one", "png")), photo(photo_url("two", "jpg"))],
+            ..Post::default()
+        };
+        let repost = Post {
+            id: "p2".into(),
+            author: Some(Person { avatar: Some(photo_url("reposter", "png")), ..Person::default() }),
+            repost_of_id: Some("p1".into()),
+            repost_of: Some(Box::new(post.clone())),
+            ..Post::default()
+        };
+        let mut s = signed_in();
+        s.screen = Some(Screen::Home);
+        s.home = Some(Posts { posts: vec![post, repost], more: false });
+        assert_eq!(
+            s.photos_on_show(),
+            [(photo_url("face", "png"), Size::Small), (photo_url("one", "png"), Size::Large), (photo_url("two", "jpg"), Size::Large)],
+            "a reposted post's photos once; a plain repost's own author is not drawn"
+        );
+        let _ = s.update(Msg::Dismiss);
+        assert!(matches!(s.photos.get(&photo_url("one", "png")), Some(Picture::Loading)));
+        assert!(matches!(s.photos.get(&photo_url("two", "jpg")), Some(Picture::Loading)), "a JPEG is fetched too");
+        let _ = s.update(Msg::Photo(photo_url("one", "png"), Picture::Failed));
+        assert!(matches!(s.photos.get(&photo_url("one", "png")), Some(Picture::Failed)), "not fetched again on its own");
+        let _ = s.update(Msg::Refresh);
+        assert!(matches!(s.photos.get(&photo_url("one", "png")), Some(Picture::Loading)), "Refresh fetches it again");
+        for i in 0..=PHOTOS_KEPT {
+            s.photos.insert(format!("old{i}"), Picture::Failed);
+        }
+        let _ = s.update(Msg::Dismiss);
+        assert!(s.photos.keys().all(|u| !u.starts_with("old")), "once many are held, those not drawn are forgotten");
+        assert!(s.photos.contains_key(&photo_url("one", "png")));
+    }
+
+    fn summary(handle: &str, role: Option<&str>, state: Option<&str>) -> CommunitySummary {
+        CommunitySummary {
+            community: Community { id: format!("com_{handle}"), handle: handle.into(), name: handle.into() },
+            your_role: role.map(str::to_string),
+            your_state: state.map(str::to_string),
+            ..CommunitySummary::default()
+        }
+    }
+
+    #[test]
+    fn a_composer_posts_in_a_community_only_as_oneself_and_never_a_quote() {
+        let mut s = State::default();
+        let _ = s.update(Msg::InCommunity(InWhere(Some("engines".into()))));
+        assert_eq!(s.composer.new_post().community.as_deref(), Some("engines"));
+        s.composer.as_who = Some("LACE".into());
+        assert_eq!(s.composer.new_post().community, None, "an organization's post is not a community's");
+        s.composer.as_who = None;
+        s.composer.quoting = Some(Post::default());
+        assert_eq!(s.composer.new_post().community, None, "a quote stays outside");
+        assert_eq!(InWhere(Some("engines".into())).to_string(), "c/engines");
+        assert_eq!(InWhere(None).to_string(), "My page");
+    }
+
+    #[test]
+    fn a_communitys_screen_keeps_only_its_own_answer_and_its_composer_posts_in_it() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Community("engines".into())));
+        let page = |handle: &str| CommunityPage { summary: summary(handle, Some("member"), Some("active")), ..CommunityPage::default() };
+        let _ = s.update(Msg::Community("looms".into(), false, Ok(page("looms"))));
+        assert!(s.community.is_none(), "an answer for another community is dropped");
+        let _ = s.update(Msg::Community("engines".into(), false, Ok(page("engines"))));
+        assert_eq!(s.community.as_ref().map(|c| c.summary.community.handle.as_str()), Some("engines"));
+        assert_eq!(s.composer.in_community.as_deref(), Some("engines"), "a member's composer posts here");
+        let _ = s.update(Msg::MyCommunities(Ok(vec![summary("looms", Some("moderator"), Some("active"))])));
+        assert_eq!(s.composer.in_community, None, "a community the reader left is not offered");
+        assert!(s.keeps("looms") && !s.keeps("engines"));
+        let _ = s.update(Msg::MyCommunities(Ok(vec![summary("looms", Some("moderator"), Some("requested"))])));
+        assert!(!s.keeps("looms"), "only an active owner or moderator keeps one");
+    }
+
+    #[test]
+    fn a_new_communitys_handle_is_tidied_as_the_service_reads_it() {
+        let mut s = State::default();
+        let _ = s.update(Msg::NewCommunityField(CommunityField::Handle, " C/Rust Aceans! ".into()));
+        assert_eq!(s.new_community.handle, "rustaceans");
+        let _ = s.update(Msg::NewCommunityField(CommunityField::Name, "Rustaceans".into()));
+        assert!(s.new_community.ready());
+        for (typed, ok) in [("ab", false), ("1engines", false), ("engines", true), (&"x".repeat(40)[..], true)] {
+            let _ = s.update(Msg::NewCommunityField(CommunityField::Handle, typed.into()));
+            assert_eq!(s.new_community.ready(), ok, "{typed}");
+        }
+        assert_eq!(s.new_community.handle.len(), 30, "cut to the longest a handle may be");
+    }
+
+    #[test]
+    fn the_photo_matches_are_kept_only_while_their_view_is_on_show() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Moderation));
+        let _ = s.update(Msg::ModView(ModView::Matches));
+        let _ = s.update(Msg::MediaMatches(Ok(vec![MediaMatch { id: "mm_1".into(), ..MediaMatch::default() }])));
+        assert_eq!(s.mod_matches.as_ref().map(Vec::len), Some(1));
+        assert_eq!(s.next_page(), None, "the matches come in one page");
+        let _ = s.update(Msg::ModView(ModView::Open));
+        assert!(s.mod_matches.is_none());
+        let _ = s.update(Msg::MediaMatches(Ok(vec![MediaMatch::default()])));
+        assert!(s.mod_matches.is_none(), "an answer for another view is dropped");
+    }
+
+    fn a_list(id: &str, name: &str) -> PageList {
+        PageList { id: id.into(), name: name.into(), ..PageList::default() }
+    }
+
+    fn person(username: &str) -> Person {
+        Person { id: format!("acc_{username}"), username: Some(username.into()), ..Person::default() }
+    }
+
+    #[test]
+    fn a_lists_screen_keeps_only_its_own_answers_and_who_is_on_it_goes_with_it() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::List("lst_a".into())));
+        let page = |id: &str, post: &str| ListPage {
+            list: a_list(id, "Engines"),
+            posts: Posts { posts: vec![Post { id: post.into(), ..Post::default() }], more: true },
+        };
+        let _ = s.update(Msg::ListPage("lst_b".into(), false, Ok(page("lst_b", "p1"))));
+        assert!(s.list.is_none(), "an answer for another list is dropped");
+        let _ = s.update(Msg::ListPage("lst_a".into(), false, Ok(page("lst_a", "p1"))));
+        let _ = s.update(Msg::ListPage("lst_a".into(), true, Ok(page("lst_a", "p2"))));
+        assert_eq!(s.list.as_ref().map(|l| l.posts.posts.len()), Some(2), "a further page goes under the first");
+        assert_eq!(s.next_page().as_deref(), Some("p2"));
+        let on_it = ListMembers { people: vec![person("ada")], orgs: vec![org("LACE")] };
+        let _ = s.update(Msg::ListMembers("lst_b".into(), Ok(on_it.clone())));
+        assert!(s.list_members.is_none(), "who is on another list is dropped");
+        let _ = s.update(Msg::ListMembers("lst_a".into(), Ok(on_it.clone())));
+        assert!(s.list_members.as_ref().is_some_and(|(id, m)| id == "lst_a" && m.people.len() == 1 && m.orgs.len() == 1));
+        let _ = s.update(Msg::ShowListMembers(false));
+        assert!(s.list_members.is_none(), "hiding them forgets them");
+        let _ = s.update(Msg::ListMembers("lst_a".into(), Ok(on_it)));
+        let _ = s.update(Msg::Go(Screen::Lists));
+        assert!(s.list_members.is_none(), "leaving the list forgets them");
+    }
+
+    #[test]
+    fn a_new_list_is_cut_to_what_the_service_keeps_and_deleting_one_asks_first() {
+        let mut s = State::default();
+        let _ = s.update(Msg::NewListName("x".repeat(40)));
+        let _ = s.update(Msg::NewListAbout("y".repeat(150)));
+        assert_eq!((s.new_list.0.chars().count(), s.new_list.1.chars().count()), (pages::LIST_NAME_MAX_CHARS, pages::LIST_ABOUT_MAX_CHARS));
+        let _ = s.update(Msg::ListCreated(Ok(a_list("lst_n", "Engines"))));
+        assert_eq!(s.new_list, (String::new(), String::new()), "the form is emptied");
+        assert_eq!(s.screen, Some(Screen::List("lst_n".into())), "the new list opens");
+        let _ = s.update(Msg::DeleteList("lst_n".into()));
+        assert_eq!(s.confirm_delete_list.as_deref(), Some("lst_n"), "the first press asks");
+        let _ = s.update(Msg::DeleteList("lst_o".into()));
+        assert_eq!(s.confirm_delete_list.as_deref(), Some("lst_o"), "a press for another list asks about that one");
+        let _ = s.update(Msg::DeleteList("lst_o".into()));
+        assert_eq!(s.confirm_delete_list, None, "the second press deletes");
+    }
+
+    #[test]
+    fn a_lists_edit_starts_from_what_is_on_show_and_needs_a_name_to_save() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::List("lst_a".into())));
+        let _ = s.update(Msg::EditList(true));
+        assert!(s.edit_list.is_none(), "nothing to edit before the list is read");
+        let shown = ListPage { list: PageList { about: "Who builds them".into(), ..a_list("lst_a", "Engines") }, ..ListPage::default() };
+        let _ = s.update(Msg::ListPage("lst_a".into(), false, Ok(shown)));
+        let _ = s.update(Msg::EditList(true));
+        assert_eq!(s.edit_list, Some(("lst_a".into(), "Engines".into(), "Who builds them".into())));
+        let _ = s.update(Msg::EditListName("z".repeat(30)));
+        let _ = s.update(Msg::EditListAbout("w".repeat(120)));
+        let form = s.edit_list.clone().unwrap_or_default();
+        assert_eq!((form.1.chars().count(), form.2.chars().count()), (pages::LIST_NAME_MAX_CHARS, pages::LIST_ABOUT_MAX_CHARS));
+        let _ = s.update(Msg::EditListName("   ".into()));
+        let _ = s.update(Msg::SaveList);
+        assert!(s.edit_list.is_some(), "a blank name is not saved, and the form stays open");
+        let _ = s.update(Msg::EditListName("Looms".into()));
+        let _ = s.update(Msg::SaveList);
+        assert!(s.edit_list.is_none(), "saving closes the form");
+        let _ = s.update(Msg::EditList(true));
+        let _ = s.update(Msg::Go(Screen::Lists));
+        assert!(s.edit_list.is_none(), "leaving the list closes it");
+    }
+
+    #[test]
+    fn the_lists_offered_for_a_page_are_kept_only_while_that_page_is_on_show() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Person("ada".into())));
+        let ada = ListTarget::Person("ada".into());
+        let offered = vec![PageList { has: Some(true), ..a_list("lst_a", "Engines") }];
+        let _ = s.update(Msg::ListsFor(ada.clone(), Ok(offered.clone())));
+        assert!(s.list_picker.is_none(), "nothing is offered before the page is read");
+        s.person = Some(PersonPage { person: person("ada"), ..PersonPage::default() });
+        let _ = s.update(Msg::ListsFor(ada.clone(), Ok(offered.clone())));
+        assert_eq!(s.list_picker.as_ref().map(|(t, l)| (t, l.len())), Some((&ada, 1)));
+        let _ = s.update(Msg::ListsFor(ListTarget::Person("bob".into()), Ok(Vec::new())));
+        assert_eq!(s.list_picker.as_ref().map(|(t, _)| t), Some(&ada), "an offer for another page is dropped");
+        let _ = s.update(Msg::ListsFor(ListTarget::Org("LACE".into()), Ok(Vec::new())));
+        assert_eq!(s.list_picker.as_ref().map(|(t, _)| t), Some(&ada), "an organization's offer is not a person's");
+        let _ = s.update(Msg::PickLists(None));
+        assert!(s.list_picker.is_none(), "Close lists closes it");
+        let _ = s.update(Msg::ListsFor(ada, Ok(offered)));
+        let _ = s.update(Msg::Go(Screen::Lists));
+        assert!(s.list_picker.is_none(), "leaving the page closes it");
     }
 }

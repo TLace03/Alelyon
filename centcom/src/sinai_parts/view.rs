@@ -215,6 +215,8 @@ pub fn panel<'a>(
                     }
                 }
             },
+            // set only by the one-model switch on Sinai's page, never from one part's picker
+            Kind::OneModel => {}
             Kind::Cloud => {
                 offers = offers.push(label("Free in the cloud, on your own account", 12.5, theme::TEXT_DIM));
                 if let Some(Choice::Cloud { provider, model, .. }) = current.as_ref() {
@@ -241,6 +243,58 @@ pub fn panel<'a>(
     col = col.push(crate::live::badge(&s.fresh));
     let body = scrollable(container(col).padding(20)).style(theme::scrollbars);
     container(container(body).max_width(820).max_height(780.0).style(theme::panel)).center(Length::Fill).padding(24).into()
+}
+
+/// On Sinai's page: the one-model switch, what it needs, and what is missing when it cannot be turned on.
+pub fn one_model_strip<'a>(s: &'a State, phase: f32) -> El<'a> {
+    use super::one_model;
+    let on = one_model::is_on(&s.choices());
+    let found = s.snapshot.as_ref().and_then(|snap| snap.one_model.as_ref());
+    let can_turn_on = found.is_some_and(one_model::Found::ready) && !s.working;
+    let action: El<'a> = if on {
+        secondary("Turn off", (!s.working).then_some(Msg::OneModel(false)))
+    } else {
+        primary("Turn on", can_turn_on.then_some(Msg::OneModel(true)))
+    };
+    let mut col = Column::new().spacing(8);
+    col = col.push(
+        row![
+            column![
+                row![strong("One model", 15.0, theme::TEXT), chip(if on { "On" } else { "Off" }, if on { theme::GOLD } else { theme::TEXT_FAINT })]
+                    .spacing(10)
+                    .align_y(Alignment::Center),
+                note(format!(
+                    "{} on this PC as the mind, eyes and voice of Sinai: one program instead of three. Hearing stays on the \
+                     speech engine and the embeddings on their own model. Off puts your previous choices back.",
+                    found.map(|f| f.title.as_str()).filter(|t| !t.is_empty()).unwrap_or("One local model")
+                )),
+            ]
+            .spacing(2)
+            .width(Length::Fill),
+            action,
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+    );
+    if let Some(needs) = found.map(|f| f.needs.as_str()).filter(|n| !n.is_empty()) {
+        col = col.push(note(needs));
+    }
+    match found {
+        None => col = col.push(working(phase, "Looking for the one model's program and files")),
+        Some(f) if !on => {
+            if let Some(why) = f.refusal() {
+                col = col.push(crate::ui::notice(why, theme::CAUTION));
+            }
+        }
+        Some(_) => {}
+    }
+    if let Some(said) = &s.one_said {
+        col = col.push(match said {
+            Ok(w) => crate::ui::notice(w.as_str(), theme::POSITIVE),
+            Err(w) => crate::ui::notice(w.as_str(), theme::CAUTION),
+        });
+    }
+    container(col).padding([12.0, 16.0]).width(Length::Fill).style(theme::panel).into()
 }
 
 /// The scrim behind the picker: a press on it closes the picker.

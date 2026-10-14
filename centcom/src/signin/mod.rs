@@ -231,7 +231,7 @@ impl State {
     #[cfg(debug_assertions)]
     pub fn demo_plan(&mut self, key: &str) {
         let key = key.trim().to_ascii_lowercase();
-        let paid = !matches!(key.as_str(), "free" | "beta");
+        let paid = billing::Plan::PAID.contains(&key.as_str());
         let mut name = key.clone();
         if let Some(first) = name.get_mut(..1) {
             first.make_ascii_uppercase();

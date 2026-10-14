@@ -1,4 +1,9 @@
-//! The chats grid: several chats side by side, each with its own agent turn running, its status, what it is doing now,
+//! On one chat surface (`lattice::ONE_SURFACE`) this is the Tasks view: the tasks started from chips, several side by
+//! side, each read-only (the reader never types into a task's thread). A task's question, approval or plan is
+//! answered on its tile, on its card in the main chat, or by the main chat's agent on the reader's word
+//! (lattice-core `convo/task_tools`), and the main chat steers it; Stop stays on the tile.
+//!
+//! Without it, the chats grid: several chats side by side, each with its own agent turn running, its status, what it is doing now,
 //! what it has changed, and a box to write to it. The core runs one turn per chat, so chats in the grid work at the
 //! same time. Oversight stays where it is: an approval any of them asks for opens the one dialog, a chat that needs you
 //! says so on its tile, and Open makes a tile the chat on the right, with its whole transcript and its review.
@@ -100,6 +105,8 @@ pub enum GridMsg {
     Show(bool),
     /// Put this chat in the grid (and show the grid).
     Add(String),
+    /// Follow this task in the grid without showing it (a task working or waiting for the reader).
+    Follow(String),
     Remove(String),
     Opened(String, Result<Snapshot, String>),
     Draft(String, String),
@@ -134,6 +141,13 @@ impl State {
                 }
                 if self.ide.grid.tiles.len() >= MAX_TILES {
                     self.problem = Some(format!("The grid holds {MAX_TILES} chats; take one out first."));
+                    return Task::none();
+                }
+                self.ide.grid.tiles.push(Tile::new(id.clone()));
+                return self.grid_open(id);
+            }
+            GridMsg::Follow(id) => {
+                if self.ide.grid.holds(&id) || self.ide.grid.tiles.len() >= MAX_TILES {
                     return Task::none();
                 }
                 self.ide.grid.tiles.push(Tile::new(id.clone()));
@@ -199,6 +213,8 @@ impl State {
                 }
             }
             GridMsg::Focus(id) => return self.update(Msg::Open(id)),
+            // A task's tile acts in the task itself: it never becomes the chat shown.
+            GridMsg::Act(id, msg) if crate::lattice::ONE_SURFACE => return self.act_in(id, *msg),
             GridMsg::Act(id, msg) => {
                 if self.open.as_ref().is_some_and(|c| c.id() == id) {
                     return self.update(*msg);
@@ -221,6 +237,55 @@ impl State {
             }
         }
         Task::none()
+    }
+
+    /// An action on a task's question, approval or plan, done in that task (its tile, or its card in the main chat).
+    /// Anything else is the main chat's to do.
+    pub(in crate::lattice) fn act_in(&mut self, id: String, msg: Msg) -> Task<Msg> {
+        use lattice_protocol::conversation::{Decision, MatchScope};
+        if let Msg::AnswerText(call, text) = msg {
+            self.answers.insert(call, text);
+            return Task::none();
+        }
+        let answers = matches!(
+            msg,
+            Msg::Decide(..) | Msg::AllowAlways(..) | Msg::Answer(..) | Msg::Ide(IdeMsg::PlanApprove(..)) | Msg::Ide(IdeMsg::PlanKeep(..))
+        );
+        if !answers {
+            self.problem = Some("A task is steered from the main chat: tell the agent what it should do.".to_string());
+            return Task::none();
+        }
+        let Some((services, agent)) = self.agent() else { return Task::none() };
+        let finished = |r: Option<Result<(), String>>| crate::lattice::done(r);
+        match msg {
+            Msg::Decide(call, approve) => {
+                let decision = if approve { Decision::Approve } else { Decision::Reject { note: None } };
+                Task::perform(on(&services, async move { agent.decide(&id, &call, decision).await.map_err(|r| r.message) }), finished)
+            }
+            Msg::AllowAlways(call) => Task::perform(
+                on(&services, async move { agent.allow_always(&id, &call, MatchScope::Exact).await.map(|_| ()).map_err(|r| r.message) }),
+                finished,
+            ),
+            Msg::Answer(call) => {
+                let text = self.answers.remove(&call).unwrap_or_default();
+                if let Err(refusal) = services.chat.answer(&id, &call, text) {
+                    self.problem = Some(refusal.message);
+                }
+                Task::none()
+            }
+            Msg::Ide(IdeMsg::PlanApprove(plan)) => {
+                let (chat, choice, shown) = (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice));
+                Task::perform(
+                    on(&services, async move { chat.approve_plan(&id, &plan, choice, shown).await.map(|_| ()).map_err(|r| r.message) }),
+                    finished,
+                )
+            }
+            Msg::Ide(IdeMsg::PlanKeep(plan)) => {
+                let chat = services.chat.clone();
+                Task::perform(on(&services, async move { chat.keep_planning(&id, &plan).await.map_err(|r| r.message) }), finished)
+            }
+            _ => Task::none(),
+        }
     }
 
     /// Read a tile's chat from the core.
@@ -308,7 +373,12 @@ type El<'a> = Element<'a, Msg>;
 pub fn view<'a>(state: &'a State, phase: f32) -> El<'a> {
     let grid = &state.ide.grid;
     if grid.tiles.is_empty() {
-        return container(note("Put a chat here with \u{25A6} in the Chats list.")).padding(16).into();
+        let words = if crate::lattice::ONE_SURFACE {
+            "Tasks you start from a chip show here, several side by side. You steer them from the main chat."
+        } else {
+            "Put a chat here with \u{25A6} in the Chats list."
+        };
+        return container(note(words)).padding(16).into();
     }
     let columns = columns_for(grid.tiles.len());
     let mut rows = Column::new().width(Length::Fill).height(Length::Fill);
@@ -379,7 +449,8 @@ fn pane<'a>(state: &'a State, tile: &'a Tile, phase: f32) -> El<'a> {
         }
     };
     col = col.push(container(body).height(Length::Fill));
-    col = col.push(pane_composer(state, tile, phase));
+    // A task's tile is read-only: no box to type in; Stop while it works, and where it is steered from.
+    col = col.push(if crate::lattice::ONE_SURFACE { pane_footer(tile) } else { pane_composer(state, tile, phase) });
     col.into()
 }
 
@@ -414,13 +485,26 @@ fn pane_header<'a>(tile: &'a Tile, phase: f32) -> El<'a> {
         None => line = line.push(container(strong("A chat", 13.5, theme::TEXT)).width(Length::Fill)),
     }
     line = line.push(super::jump::button_for(Some(id.clone())));
-    line = line.push(super::view::icon("\u{2197}", "Open it on the right", Some(go(GridMsg::Focus(id.clone())))));
+    if !crate::lattice::ONE_SURFACE {
+        line = line.push(super::view::icon("\u{2197}", "Open it on the right", Some(go(GridMsg::Focus(id.clone())))));
+    }
     line = line.push(super::view::icon("\u{00D7}", "Take it out of the grid", Some(go(GridMsg::Remove(id)))));
     let mut col = Column::new().push(container(line).padding([8.0, 12.0]));
     if let Some(stages) = tile.conversation.as_ref().and_then(|c| super::agent::stage_line(c, tile.changes.as_ref())) {
         col = col.push(container(stages).padding(Padding { top: 0.0, right: 12.0, bottom: 7.0, left: 12.0 }));
     }
     col.into()
+}
+
+/// A task's footer: Stop while it works, and that it is steered from the main chat.
+fn pane_footer<'a>(tile: &'a Tile) -> El<'a> {
+    let running = tile.conversation.as_ref().is_some_and(|c| c.running);
+    let mut line = Row::new().spacing(8).align_y(Alignment::Center);
+    line = line.push(container(label("Steer it from the main chat.", 11.5, theme::TEXT_FAINT)).width(Length::Fill));
+    if running && !tile.recording {
+        line = line.push(ui::secondary("Stop", Some(go(GridMsg::Stop(tile.id.clone())))));
+    }
+    container(line).padding([6.0, 12.0]).width(Length::Fill).into()
 }
 
 /// The pane's composer, as the panel's: the box, the mode and the model, Stop and Send.
@@ -582,6 +666,12 @@ mod tests {
         let mut state = State::new();
         let _ = state.grid(GridMsg::Add("c1".into()));
         let _ = state.grid(GridMsg::Act("c1".into(), Box::new(Msg::Stop)));
+        if crate::lattice::ONE_SURFACE {
+            // A task's tile never opens it: what is not a question, approval or plan is the main chat's to do.
+            assert!(state.ide.grid.pending.is_none());
+            assert!(state.problem.as_deref().is_some_and(|p| p.contains("main chat")), "{:?}", state.problem);
+            return;
+        }
         assert_eq!(state.ide.grid.pending.as_ref().map(|(id, _)| id.as_str()), Some("c1"), "kept until c1 has opened");
     }
 

@@ -892,11 +892,13 @@ fn sinai(app: &App) -> El<'_> {
     if let Some(creator) = &app.creator {
         return crate::face::creator::view(creator, crate::appearance::Catalog::builtin()).map(Message::Creator);
     }
-    // Auto configure's dials and button, between the loop's card and the docks
-    column![loop_card(app), crate::sinai_parts::auto::view::strip(&app.auto, app.phase).map(Message::Auto), docks(app)]
-        .spacing(16)
-        .height(Length::Fill)
-        .into()
+    // Auto configure's dials and button, then the one-model switch where the build runs Sinai's own loop and offers
+    // one, between the loop's card and the docks
+    let mut col = column![loop_card(app), crate::sinai_parts::auto::view::strip(&app.auto, app.phase).map(Message::Auto)];
+    if app.can(Capability::SinaiMind) && app.parts.offers_one_model() {
+        col = col.push(crate::sinai_parts::view::one_model_strip(&app.parts, app.phase).map(Message::Parts));
+    }
+    col.push(docks(app)).spacing(16).height(Length::Fill).into()
 }
 
 /// The grants file, edited: each grant's fields, then a review of what the save adds and reduces, then the write.

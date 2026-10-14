@@ -133,17 +133,30 @@ pub fn entries(app: &App) -> Vec<Entry> {
         run.push(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(key))));
         all.push(Entry { id: format!("editor:{words}"), group: "Editor", title: words.to_string(), keys, run });
     }
-    let mut new_chat = to_chat(app);
-    new_chat.push(Message::Lattice(lattice::Msg::New));
-    new_chat.push(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(Key::FocusChat))));
-    all.push(Entry { id: "chat:new".into(), group: "Chat", title: "New chat".into(), keys: "", run: new_chat });
-    // The chats Lattice has listed (newest first): each opens by its title.
+    if lattice::ONE_SURFACE {
+        // One chat surface: the chat box, the projects to work in, and the topics to continue.
+        let mut ask = to_chat(app);
+        ask.push(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(Key::FocusChat))));
+        all.push(Entry { id: "chat:ask".into(), group: "Chat", title: "Ask the agent".into(), keys: "Ctrl+L", run: ask });
+        for project in app.lattice.ide.projects.list.iter().flatten().filter(|p| !p.archived) {
+            let mut run = to_chat(app);
+            run.push(Message::Lattice(lattice::Msg::WorkIn(Some(project.id.clone()))));
+            all.push(Entry { id: format!("project:{}", project.id), group: "Work in", title: project.name.clone(), keys: "", run });
+        }
+    } else {
+        let mut new_chat = to_chat(app);
+        new_chat.push(Message::Lattice(lattice::Msg::New));
+        new_chat.push(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(Key::FocusChat))));
+        all.push(Entry { id: "chat:new".into(), group: "Chat", title: "New chat".into(), keys: "", run: new_chat });
+    }
+    // The chats Lattice has listed (newest first): each opens by its title (on one surface, as a topic to continue).
     if let Some(list) = &app.lattice.list {
+        let group = if lattice::ONE_SURFACE { "Continue topic" } else { "Open chat" };
         for c in list.conversations.iter().take(40) {
             let mut run = to_chat(app);
             run.push(Message::Lattice(lattice::Msg::Open(c.id.clone())));
-            let title = if c.title.trim().is_empty() { "Untitled chat".to_string() } else { c.title.clone() };
-            all.push(Entry { id: format!("chat:{}", c.id), group: "Open chat", title, keys: "", run });
+            let title = if c.title.trim().is_empty() { "Untitled".to_string() } else { c.title.clone() };
+            all.push(Entry { id: format!("chat:{}", c.id), group, title, keys: "", run });
         }
     }
     all.push(Entry { id: "window:keys".into(), group: "Window", title: "Keyboard shortcuts".into(), keys: "Ctrl+Shift+/", run: vec![Message::Sheet(true)] });

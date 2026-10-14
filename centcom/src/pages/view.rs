@@ -2,15 +2,20 @@
 //! organization's page, a thread, the reader's own page and organizations, and an organization's members.
 
 use alelyon_identity_client::pages::{
-    self, Education, Employment, Experience, Job, Kind, Me, Member, Membership, ModAct, ModAction, ModReport, ModTarget,
-    Notification, Org, Person, PersonPage, Poll, Post, Profile, Reason, ReplyRule, SearchKind, Target, Workplace,
+    self, Community, CommunitySummary, Education, Employment, Experience, Job, Joining, Kind, ListMembers, ListTarget, MediaMatch, Me,
+    Member, Membership, ModAct, ModAction, ModReport, ModTarget,
+    Notification, Org, PageList, Person, PersonPage, Photo, Poll, Post, Profile, Reaction, Reason, ReplyRule, SearchKind, Target, Workplace,
 };
 use alelyon_identity_client::social;
-use iced::widget::{Column, Row, button, checkbox, column, container, pick_list, rich_text, row, space, span, text_editor, text_input};
-use iced::{Alignment, Element, Length};
+use iced::widget::{
+    Column, Row, button, checkbox, column, container, image, pick_list, rich_text, row, space, span, text_editor, text_input,
+};
+use iced::{Alignment, ContentFit, Element, Length};
 
+use super::photos::Picture;
 use super::{
-    AsWho, EduField, EmploymentPick, ExpField, HomeFeed, JobDays, ModView, Msg, PollLength, Screen, State, TitleOrg, WorkplacePick,
+    AsWho, CommunityField, EduField, EmploymentPick, ExpField, HomeFeed, InWhere, JobDays, ModView, Msg, NewCommunity, PhotoFor,
+    PollLength, Screen, State, TitleOrg, WorkplacePick,
 };
 use crate::catalogue::Section;
 use crate::theme::{self, fonts};
@@ -98,6 +103,11 @@ pub fn view(s: &State, phase: f32) -> El<'_> {
         Screen::OrgExperience(_) => org_experience(s),
         Screen::Jobs => jobs(s),
         Screen::Applicants(_) => applicants(s),
+        Screen::Communities => communities(s),
+        Screen::Community(_) => community(s),
+        Screen::CommunityMembers(_) => community_members(s),
+        Screen::Lists => lists(s),
+        Screen::List(_) => list(s),
     };
     page.push(body).into()
 }
@@ -124,6 +134,96 @@ fn name_line<'a>(p: &'a Person) -> El<'a> {
     line = line.push(label(p.handle(), 12.0, theme::TEXT_FAINT));
     line.wrap().into()
 }
+
+// ------------------------------------------------------------------- photos
+
+/// A face or a logo, `px` across: the photo once it is drawn, else a frame with the name's first letter.
+fn face<'a>(s: &'a State, url: &str, name: &str, px: f32) -> El<'a> {
+    if let Some(Picture::Ready(h)) = s.photos.get(url) {
+        return image(h.clone()).width(px).height(px).content_fit(ContentFit::Cover).border_radius(px / 2.0).into();
+    }
+    let first: String = name.chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+    container(label(first, px * 0.42, theme::TEXT_DIM)).center(px).style(theme::well).into()
+}
+
+/// A card's byline with the face before it, when there is one.
+fn with_face<'a>(s: &'a State, url: Option<&'a String>, name: &'a str, line: El<'a>) -> El<'a> {
+    match url {
+        Some(u) => row![face(s, u, name, 36.0), line].spacing(10).align_y(Alignment::Center).into(),
+        None => line,
+    }
+}
+
+/// A post's photos: one at its own shape, two side by side, three or four two to a row.
+fn photo_grid<'a>(s: &'a State, photos: &'a [Photo]) -> El<'a> {
+    if let [one] = photos {
+        return photo_cell(s, one, None);
+    }
+    let height = if photos.len() == 2 { 260.0 } else { 180.0 };
+    let mut grid = Column::new().spacing(4);
+    for pair in photos.chunks(2) {
+        grid = grid.push(Row::with_children(pair.iter().map(|p| photo_cell(s, p, Some(height)))).spacing(4));
+    }
+    grid.into()
+}
+
+/// One photo: at its own shape (at most 480 high) when `height` is None, else cropped to fill `height`. A photo not
+/// drawn shows its description in a frame.
+fn photo_cell<'a>(s: &'a State, p: &'a Photo, height: Option<f32>) -> El<'a> {
+    let state = s.photos.get(&p.url);
+    if let Some(Picture::Ready(h)) = state {
+        let shown = image(h.clone()).width(Length::Fill).border_radius(6.0);
+        return match height {
+            Some(px) => shown.height(px).content_fit(ContentFit::Cover).into(),
+            None => container(shown).max_height(480.0).into(),
+        };
+    }
+    let why = match state {
+        Some(Picture::Failed) => "The photo could not be loaded.",
+        _ => "Loading the photo\u{2026}",
+    };
+    let alt = if p.alt.is_empty() { "A photo without a description." } else { p.alt.as_str() };
+    container(column![label(alt, 13.0, theme::TEXT), label(why, 11.5, theme::TEXT_FAINT)].spacing(4))
+        .padding(12)
+        .width(Length::Fill)
+        .height(height.unwrap_or(110.0))
+        .style(theme::well)
+        .into()
+}
+
+/// A small square of a photo being attached, or a frame until it is drawn.
+fn thumb<'a>(s: &'a State, url: &str, px: f32) -> El<'a> {
+    match s.photos.get(url) {
+        Some(Picture::Ready(h)) => image(h.clone()).width(px).height(px).content_fit(ContentFit::Cover).border_radius(4.0).into(),
+        _ => container(label("Photo", 11.0, theme::TEXT_FAINT)).center(px).style(theme::well).into(),
+    }
+}
+
+/// A page's or an organization's banner, cropped to fill; nothing until it is drawn.
+fn banner<'a>(s: &'a State, url: Option<&String>) -> Option<El<'a>> {
+    let Some(Picture::Ready(h)) = s.photos.get(url?) else { return None };
+    Some(image(h.clone()).width(Length::Fill).height(150).content_fit(ContentFit::Cover).border_radius(6.0).into())
+}
+
+/// Change or remove a photo and a banner: each part, what it is called, and whether it is set.
+fn photo_controls<'a>(s: &'a State, parts: [(PhotoFor, &'static str, bool); 2]) -> El<'a> {
+    let free = s.uploading == 0;
+    let mut r = Row::new().spacing(6).align_y(Alignment::Center);
+    for (target, what, set) in parts {
+        r = r.push(small(format!("Change {what}"), free.then(|| Msg::PickPhotos(target.clone()))));
+        if set {
+            r = r.push(small(format!("Remove {what}"), Some(Msg::ClearPhoto(target))));
+        }
+    }
+    if !free {
+        r = r.push(label("Uploading\u{2026}", 12.0, theme::TEXT_DIM));
+    }
+    r.wrap().into()
+}
+
+/// What a photo becomes when it is uploaded, said where photos are chosen.
+const PHOTO_RULE: &str = "Photos are public: JPEG, PNG or WebP, at most 5 MB each. Before one is stored, its location and \
+    other details are removed and it is checked against known illegal imagery.";
 
 /// What a confirmed title means, said where the mark is explained.
 fn verified_note<'a>(p: &'a Person) -> Option<El<'a>> {
@@ -173,7 +273,11 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
     let admin = p.org.as_ref().is_some_and(|o| admin_of(s, &o.ticker));
     let mut col = Column::new().spacing(8);
     if let Some(o) = &p.org {
-        let mut head = Row::new().spacing(8).align_y(Alignment::Center).push(org_button(o));
+        let mut head = Row::new().spacing(8).align_y(Alignment::Center);
+        if let Some(logo) = &o.logo {
+            head = head.push(face(s, logo, &o.name, 36.0));
+        }
+        head = head.push(org_button(o));
         if let Some(a) = &p.author {
             head = head.push(label(format!("posted by {}", a.name()), 12.0, theme::TEXT_FAINT));
         }
@@ -183,13 +287,19 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
             col = col.push(label(flag.words(), 12.0, theme::CAUTION));
         }
     } else if let Some(a) = &p.author {
-        col = col.push(name_line(a));
+        col = col.push(with_face(s, a.avatar.as_ref(), a.name(), name_line(a)));
     }
     let mut stamp = when(&p.created_at);
     if p.edited_at.is_some() {
         stamp.push_str(" \u{00B7} edited");
     }
-    col = col.push(label(stamp, 11.5, theme::TEXT_FAINT));
+    col = col.push(match &p.community {
+        Some(c) => row![label(stamp, 11.5, theme::TEXT_FAINT), label("in", 11.5, theme::TEXT_FAINT), community_link(c)]
+            .spacing(5)
+            .align_y(Alignment::Center)
+            .into(),
+        None => El::from(label(stamp, 11.5, theme::TEXT_FAINT)),
+    });
     if p.deleted {
         return container(col.push(note("Deleted."))).padding([12.0, 16.0]).width(Length::Fill).style(theme::panel).into();
     }
@@ -198,6 +308,9 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
     }
     if !p.text.is_empty() {
         col = col.push(post_text(p.text.as_str(), 14.0));
+    }
+    if !p.media.is_empty() {
+        col = col.push(photo_grid(s, &p.media));
     }
     if p.repost_of_id.is_some() {
         col = col.push(match p.repost_of.as_deref() {
@@ -216,12 +329,27 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
     if let Some(job) = &p.job {
         col = col.push(job_view(s, p, job, admin));
     }
+    // How people reacted, when any did otherwise than with a plain like.
+    if p.reactions.iter().any(|(r, _)| *r != Reaction::Like) {
+        let words: Vec<String> = p.reactions.iter().map(|(r, n)| format!("{n} {r}")).collect();
+        col = col.push(label(words.join(" \u{00B7} "), 11.5, theme::TEXT_FAINT));
+    }
     let heart = if p.liked { "\u{2665}" } else { "\u{2661}" };
     let mut actions = row![
         small(format!("Reply {}", p.replies), Some(Msg::Go(Screen::Thread(p.id.clone())))),
         small(format!("Repost {}", p.reposts), (!mine).then(|| Msg::Repost(p.id.clone()))),
         small("Quote", Some(Msg::Quote(p.clone()))),
         small(format!("{heart} {}", p.likes), Some(Msg::Like(p.id.clone(), !p.liked))),
+        pick_list(Reaction::ALL, p.your_reaction, {
+            let id = p.id.clone();
+            move |r| Msg::React(id.clone(), r)
+        })
+        .placeholder("React")
+        .padding([3.0, 8.0])
+        .text_size(12.0)
+        .font(fonts().ui)
+        .style(theme::picker)
+        .menu_style(theme::picker_menu),
         small(if p.bookmarked { "Saved" } else { "Save" }, Some(Msg::Bookmark(p.id.clone(), !p.bookmarked))),
     ]
     .spacing(4);
@@ -239,6 +367,10 @@ fn post_card<'a>(s: &'a State, p: &'a Post) -> El<'a> {
             actions = actions.push(small("Hide (moderator)", Some(Msg::ModAct(ModAct::HidePost, Some(Target::Post(p.id.clone())), None))));
         }
         actions = actions.push(small("Report", Some(Msg::Reporting(Some(Target::Post(p.id.clone()))))));
+    }
+    // The community's owners and moderators take a conversation out of it (its first post).
+    if p.community.as_ref().is_some_and(|c| s.keeps(&c.handle)) {
+        actions = actions.push(small("Take out of the community", Some(Msg::TakeOut(p.id.clone()))));
     }
     col = col.push(actions.align_y(Alignment::Center));
     if s.reporting == Some(Target::Post(p.id.clone())) {
@@ -342,6 +474,11 @@ fn quoted<'a>(p: &'a Post) -> El<'a> {
         col = col.push(strong(title.as_str(), 14.0, theme::TEXT));
     }
     col = col.push(label(ui::cut(&p.text, 400), 13.0, theme::TEXT_DIM));
+    match p.media.len() {
+        0 => {}
+        1 => col = col.push(label("1 photo", 11.5, theme::TEXT_FAINT)),
+        n => col = col.push(label(format!("{n} photos"), 11.5, theme::TEXT_FAINT)),
+    }
     button(container(col).padding([8.0, 12.0]).width(Length::Fill).style(theme::well))
         .padding(0)
         .on_press(Msg::Go(Screen::Thread(p.id.clone())))
@@ -529,6 +666,21 @@ fn composer(s: &State) -> El<'_> {
                 .menu_style(theme::picker_menu),
         );
     }
+    // Post in one of the reader's communities: one's own post, not an organization's, and not a quote.
+    let joined: Vec<InWhere> =
+        s.my_communities.iter().flatten().filter(|m| m.you_belong()).map(|m| InWhere(Some(m.community.handle.clone()))).collect();
+    if !joined.is_empty() && c.as_who.is_none() && c.quoting.is_none() {
+        let mut choices = vec![InWhere(None)];
+        choices.extend(joined);
+        top = top.push(label("Post in", 12.0, theme::TEXT_DIM)).push(
+            pick_list(choices, Some(InWhere(c.in_community.clone())), Msg::InCommunity)
+                .padding(6)
+                .text_size(12.5)
+                .font(fonts().ui)
+                .style(theme::picker)
+                .menu_style(theme::picker_menu),
+        );
+    }
     let mut col = column![top].spacing(10);
     if c.kind == Kind::Article {
         col = col.push(text_input("Title", &c.title).on_input(Msg::Title).padding(8).size(15).style(ui::input_style));
@@ -558,9 +710,38 @@ fn composer(s: &State) -> El<'_> {
     .spacing(8)
     .align_y(Alignment::Center);
     if c.kind == Kind::Post && c.quoting.is_none() {
-        extras = extras.push(small(if c.poll_on { "Remove the poll" } else { "Add a poll" }, Some(Msg::PollToggle)));
+        // a post carries a poll or photos, not both
+        extras = extras.push(small(if c.poll_on { "Remove the poll" } else { "Add a poll" }, (c.poll_on || c.photos.is_empty()).then_some(Msg::PollToggle)));
+    }
+    let room = c.photos.len() + s.uploading < pages::POST_MAX_PHOTOS;
+    extras = extras.push(small("Add photos", (room && !c.poll_on).then_some(Msg::PickPhotos(PhotoFor::Post))));
+    if s.uploading > 0 {
+        extras = extras.push(label("Uploading\u{2026}", 12.0, theme::TEXT_DIM));
     }
     col = col.push(extras);
+    if !c.photos.is_empty() {
+        let mut list = Column::new().spacing(8);
+        for (i, photo) in c.photos.iter().enumerate() {
+            list = list.push(
+                row![
+                    thumb(s, &photo.url, 64.0),
+                    column![
+                        label(photo.name.as_str(), 12.0, theme::TEXT_DIM),
+                        text_input("Describe the photo for people who cannot see it (optional)", &photo.alt)
+                            .on_input(move |t| Msg::PhotoAlt(i, t))
+                            .padding(8)
+                            .size(13)
+                            .style(ui::input_style),
+                    ]
+                    .spacing(4),
+                    small("Remove", Some(Msg::RemovePhoto(i))),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            );
+        }
+        col = col.push(list.push(note(PHOTO_RULE)));
+    }
     if c.poll_on && c.kind == Kind::Post && c.quoting.is_none() {
         let mut poll = Column::new().spacing(6);
         for (i, option) in c.poll_options.iter().enumerate() {
@@ -627,7 +808,7 @@ fn composer(s: &State) -> El<'_> {
         row![
             label(format!("{count} / {}", c.limit()), 11.5, if over { theme::CAUTION } else { theme::TEXT_FAINT }),
             space().width(Length::Fill),
-            ui::primary(if c.sending { "Posting\u{2026}" } else { "Post" }, c.ready().then_some(Msg::Submit)),
+            ui::primary(if c.sending { "Posting\u{2026}" } else { "Post" }, (c.ready() && s.uploading == 0).then_some(Msg::Submit)),
         ]
         .align_y(Alignment::Center),
     );
@@ -687,7 +868,14 @@ fn person(s: &State) -> El<'_> {
     let Some(page) = &s.person else { return space().into() };
     let p = &page.person;
     let mine = p.id == me_id(s);
-    let mut head = Column::new().spacing(8).push(name_line(p));
+    let mut head = Column::new().spacing(8);
+    if let Some(b) = banner(s, page.banner.as_ref()) {
+        head = head.push(b);
+    }
+    head = head.push(match &p.avatar {
+        Some(u) => row![face(s, u, p.name(), 72.0), name_line(p)].spacing(14).align_y(Alignment::Center).into(),
+        None => name_line(p),
+    });
     if let Some(n) = verified_note(p) {
         head = head.push(n);
     }
@@ -704,11 +892,16 @@ fn person(s: &State) -> El<'_> {
         });
         acts = acts.push(small(if page.you_mute { "Unmute" } else { "Mute" }, Some(Msg::Mute(u.clone(), !page.you_mute))));
         acts = acts.push(small(if page.you_block { "Unblock" } else { "Block" }, Some(Msg::Block(u.clone(), !page.you_block))));
+        let target = ListTarget::Person(u.clone());
+        acts = acts.push(lists_button(s, &target, !page.you_block));
         if moderator(s) {
             acts = acts.push(small("Suspend page (moderator)", Some(Msg::ModAct(ModAct::SuspendPage, Some(Target::Person(u.clone())), None))));
         }
         acts = acts.push(small("Report", Some(Msg::Reporting(Some(Target::Person(u.clone()))))));
         head = head.push(acts.align_y(Alignment::Center));
+        if let Some(picker) = list_picker(s, &target) {
+            head = head.push(picker);
+        }
         if s.reporting == Some(Target::Person(u.clone())) {
             head = head.push(report_reasons(Target::Person(u.clone())));
         }
@@ -888,7 +1081,15 @@ fn org(s: &State) -> El<'_> {
     let Some(page) = &s.org else { return space().into() };
     let o = &page.org;
     let ticker = o.ticker.clone();
-    let mut head = Column::new().spacing(8).push(row![strong(o.name.as_str(), 20.0, theme::TEXT), label(format!("({})", o.ticker), 16.0, theme::GOLD)].spacing(8).align_y(Alignment::Center));
+    let mut head = Column::new().spacing(8);
+    if let Some(b) = banner(s, page.banner.as_ref()) {
+        head = head.push(b);
+    }
+    let mut title = Row::new().spacing(8).align_y(Alignment::Center);
+    if let Some(u) = &o.logo {
+        title = title.push(face(s, u, &o.name, 72.0));
+    }
+    head = head.push(title.push(strong(o.name.as_str(), 20.0, theme::TEXT)).push(label(format!("({})", o.ticker), 16.0, theme::GOLD)));
     if !page.about.is_empty() {
         head = head.push(label(page.about.as_str(), 14.0, theme::TEXT));
     }
@@ -910,11 +1111,22 @@ fn org(s: &State) -> El<'_> {
         acts = acts.push(small("Flagged posts", Some(Msg::Go(Screen::Flagged(ticker.clone())))));
         acts = acts.push(small("Experience to confirm", Some(Msg::Go(Screen::OrgExperience(ticker.clone())))));
     }
+    let target = ListTarget::Org(ticker.clone());
+    acts = acts.push(lists_button(s, &target, true));
     if moderator(s) {
         acts = acts.push(small("Suspend organization (moderator)", Some(Msg::ModAct(ModAct::SuspendOrg, Some(Target::Org(ticker.clone())), None))));
     }
     acts = acts.push(small("Report", Some(Msg::Reporting(Some(Target::Org(ticker.clone()))))));
     head = head.push(acts);
+    if let Some(picker) = list_picker(s, &target) {
+        head = head.push(picker);
+    }
+    if page.you_admin() {
+        head = head.push(photo_controls(
+            s,
+            [(PhotoFor::Org(ticker.clone(), "logo"), "logo", o.logo.is_some()), (PhotoFor::Org(ticker.clone(), "banner"), "banner", page.banner.is_some())],
+        ));
+    }
     if s.reporting == Some(Target::Org(ticker.clone())) {
         head = head.push(report_reasons(Target::Org(ticker)));
     }
@@ -1048,7 +1260,14 @@ fn notification_words(n: &Notification) -> String {
     let who = n.actor.as_ref().map(|a| a.name()).unwrap_or("Someone");
     let org = n.org.as_ref().map(|o| format!("{} ({})", o.name, o.ticker)).unwrap_or_else(|| "an organization".into());
     match n.kind.as_str() {
-        "like" => format!("{who} liked your post"),
+        "like" => match n.detail.as_deref().and_then(Reaction::from_word) {
+            Some(Reaction::Celebrate) => format!("{who} celebrated your post"),
+            Some(Reaction::Support) => format!("{who} supported your post"),
+            Some(Reaction::Love) => format!("{who} loved your post"),
+            Some(Reaction::Insightful) => format!("{who} found your post insightful"),
+            Some(Reaction::Funny) => format!("{who} found your post funny"),
+            _ => format!("{who} liked your post"),
+        },
         "reply" => format!("{who} replied to your post"),
         "repost" => format!("{who} reposted your post"),
         "quote" => format!("{who} quoted your post"),
@@ -1058,8 +1277,18 @@ fn notification_words(n: &Notification) -> String {
         "org-request" => format!("{who} asked to join {org}"),
         "org-joined" => format!("{who} accepted you into {org}"),
         "title-confirmed" => format!("{org} confirmed your title"),
+        "endorsed" => format!("{who} endorsed your skill {}", n.detail.as_deref().unwrap_or("")),
+        "experience-confirmed" => format!("{org} confirmed your position as {}", n.detail.as_deref().unwrap_or("")),
+        "job-application" => format!("{who} applied for a job at {org}"),
+        "community-request" => format!("{who} asked to join {}", community_words(n.community.as_ref())),
+        "community-joined" => format!("{who} accepted you into {}", community_words(n.community.as_ref())),
         _ => format!("{who} did something that concerns you"),
     }
+}
+
+/// A community in a sentence: `c/handle`.
+fn community_words(c: Option<&Community>) -> String {
+    c.map(|c| format!("c/{}", c.handle)).unwrap_or_else(|| "a community".into())
 }
 
 fn notification_card<'a>(n: &'a Notification) -> El<'a> {
@@ -1070,6 +1299,9 @@ fn notification_card<'a>(n: &'a Notification) -> El<'a> {
     head = head.push(strong(notification_words(n), 13.5, theme::TEXT)).push(label(when(&n.at), 11.5, theme::TEXT_FAINT));
     // Where it leads: the post; a request to the members; the organization; the person who followed.
     let go = match (n.kind.as_str(), &n.post, &n.org) {
+        ("community-request", _, _) => n.community.as_ref().map(|c| Msg::Go(Screen::CommunityMembers(c.handle.clone()))),
+        ("community-joined", _, _) => n.community.as_ref().map(|c| Msg::Go(Screen::Community(c.handle.clone()))),
+        ("job-application", Some(p), _) => Some(Msg::Go(Screen::Applicants(p.id.clone()))),
         (_, Some(p), _) => Some(Msg::Go(Screen::Thread(p.id.clone()))),
         ("org-request", None, Some(o)) => Some(Msg::Go(Screen::Members(o.ticker.clone()))),
         (_, None, Some(o)) => Some(Msg::Go(Screen::Org(o.ticker.clone()))),
@@ -1163,10 +1395,17 @@ fn mine(s: &State) -> El<'_> {
     let m = &s.mine;
     let mut orgs: Vec<TitleOrg> = vec![TitleOrg(None)];
     orgs.extend(me.active().map(|ms| TitleOrg(Some(ms.org.clone()))));
-    let mut card = Column::new().spacing(10).push(subheading("How your name reads")).push(name_line(&me.me));
+    let mut card = Column::new().spacing(10).push(subheading("How your name reads")).push(match &me.me.avatar {
+        Some(u) => row![face(s, u, me.me.name(), 56.0), name_line(&me.me)].spacing(12).align_y(Alignment::Center).into(),
+        None => name_line(&me.me),
+    });
     if let Some(n) = verified_note(&me.me) {
         card = card.push(n);
     }
+    // The service does not say whether the page has a banner here: removing one that is not there changes nothing.
+    card = card
+        .push(photo_controls(s, [(PhotoFor::Page("avatar"), "photo", me.me.avatar.is_some()), (PhotoFor::Page("banner"), "banner", true)]))
+        .push(note(PHOTO_RULE));
     let current = me.me.display_name.as_str();
     let name_ok = social::tidy_display_name(&m.name) == current || social::valid_display_name(&m.name);
     card = card
@@ -1425,6 +1664,405 @@ fn member_row<'a>(ticker: &'a str, m: &'a Member, mine: &'a str, my_role: &'a st
         .into()
 }
 
+// ------------------------------------------------------------------- communities (ADR-0053)
+
+fn community_link<'a>(c: &'a Community) -> El<'a> {
+    button(label(format!("c/{}", c.handle), 12.0, theme::GOLD))
+        .padding(0)
+        .on_press(Msg::Go(Screen::Community(c.handle.clone())))
+        .style(theme::ghost_button)
+        .into()
+}
+
+fn members_words(n: u64) -> String {
+    if n == 1 { "1 member".into() } else { format!("{n} members") }
+}
+
+fn community_role_title(role: &str) -> &'static str {
+    match role {
+        "owner" => "Owner",
+        "moderator" => "Moderator",
+        _ => "Member",
+    }
+}
+
+/// What the reader can do about a community: join or ask to, withdraw a request, leave; or why not.
+fn community_action<'a>(s: &'a State, c: &'a CommunitySummary) -> El<'a> {
+    let handle = c.community.handle.clone();
+    let has_page = s.me.as_ref().is_some_and(|m| m.me.has_page && !m.suspended);
+    match c.your_state.as_deref() {
+        Some("active") => small("Leave", Some(Msg::LeaveCommunity(handle))),
+        Some("requested") => small("Withdraw my request", Some(Msg::LeaveCommunity(handle))),
+        Some(_) => label("Its moderators removed you", 12.0, theme::CAUTION).into(),
+        None => ui::primary(
+            if c.joining == Joining::Request { "Ask to join" } else { "Join" },
+            has_page.then_some(Msg::JoinCommunity(handle)),
+        ),
+    }
+}
+
+/// A community in a list: its name and handle, its members, the reader's part in it, and what it is about.
+fn community_row<'a>(s: &'a State, c: &'a CommunitySummary) -> El<'a> {
+    let handle = c.community.handle.clone();
+    let mut head = Row::new()
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .push(button(strong(c.community.name.as_str(), 14.0, theme::TEXT)).padding(0).on_press(Msg::Go(Screen::Community(handle))).style(theme::ghost_button))
+        .push(label(format!("c/{}", c.community.handle), 12.5, theme::GOLD))
+        .push(label(members_words(c.members), 12.0, theme::TEXT_FAINT));
+    if let Some(role) = c.your_role.as_deref().filter(|r| c.you_belong() && *r != "member") {
+        head = head.push(chip(community_role_title(role), theme::GOLD));
+    }
+    if c.your_state.as_deref() == Some("requested") {
+        head = head.push(chip("Asked to join", theme::TEXT_DIM));
+    }
+    let mut col = Column::new().spacing(4).push(row![head.wrap(), space().width(Length::Fill), community_action(s, c)].align_y(Alignment::Center));
+    if !c.about.is_empty() {
+        col = col.push(label(ui::cut(&c.about, 240), 13.0, theme::TEXT_DIM));
+    }
+    container(col).padding([10.0, 14.0]).width(Length::Fill).style(theme::panel).into()
+}
+
+/// The Communities tab: the reader's own, the others with the most members, and starting one.
+fn communities(s: &State) -> El<'_> {
+    let mut col = Column::new().spacing(12);
+    if let Some(mine) = s.my_communities.as_ref().filter(|m| !m.is_empty()) {
+        col = col.push(subheading("Yours"));
+        for c in mine {
+            col = col.push(community_row(s, c));
+        }
+    }
+    if let Some(list) = &s.communities {
+        let others: Vec<&CommunitySummary> = list.iter().filter(|c| c.your_state.is_none()).collect();
+        col = col.push(subheading("Communities"));
+        if others.is_empty() && !s.loading {
+            col = col.push(note("No other community yet. Start one below."));
+        }
+        for c in others {
+            col = col.push(community_row(s, c));
+        }
+    }
+    if !s.me.as_ref().is_some_and(|m| m.me.has_page) {
+        return col.push(ui::notice("Open your page to join or start a community: My page, above.", theme::GOLD)).into();
+    }
+    let n = &s.new_community;
+    let create = column![
+        subheading("Start a community"),
+        ui::fact(
+            "Handle",
+            text_input("engines", &n.handle).on_input(|t| Msg::NewCommunityField(CommunityField::Handle, t)).padding(8).size(13).width(220).style(ui::input_style)
+        ),
+        ui::fact(
+            "Name",
+            text_input("Analytical Engines", &n.name).on_input(|t| Msg::NewCommunityField(CommunityField::Name, t)).padding(8).size(13).width(320).style(ui::input_style)
+        ),
+        ui::fact("About", text_input("What it is for", &n.about).on_input(|t| Msg::NewCommunityField(CommunityField::About, t)).padding(8).size(13).style(ui::input_style)),
+        ui::fact(
+            "Rules",
+            text_input("How members treat each other (optional)", &n.rules)
+                .on_input(|t| Msg::NewCommunityField(CommunityField::Rules, t))
+                .padding(8)
+                .size(13)
+                .style(ui::input_style)
+        ),
+        ui::fact(
+            "Joining",
+            pick_list(Joining::ALL, Some(n.joining), Msg::NewCommunityJoining)
+                .padding(6)
+                .text_size(12.5)
+                .font(fonts().ui)
+                .style(theme::picker)
+                .menu_style(theme::picker_menu)
+        ),
+        note(
+            "The handle is its address, c/handle: 3-30 lower-case letters, digits or _, beginning with a letter. A community \
+             is public: anyone can read it, its members and its posts. You become its owner."
+        ),
+        ui::primary("Start it", n.ready().then_some(Msg::CreateCommunity)),
+    ]
+    .spacing(10);
+    col.push(container(create).padding(16).width(Length::Fill).style(theme::panel)).into()
+}
+
+/// The edit form of the community on show, for its owners: its name, about, rules and how it is joined.
+fn community_editor(form: &NewCommunity) -> El<'_> {
+    column![
+        ui::fact("Name", text_input("Name", &form.name).on_input(|t| Msg::EditCommunityField(CommunityField::Name, t)).padding(8).size(13).width(320).style(ui::input_style)),
+        ui::fact("About", text_input("What it is for", &form.about).on_input(|t| Msg::EditCommunityField(CommunityField::About, t)).padding(8).size(13).style(ui::input_style)),
+        ui::fact("Rules", text_input("Rules (optional)", &form.rules).on_input(|t| Msg::EditCommunityField(CommunityField::Rules, t)).padding(8).size(13).style(ui::input_style)),
+        ui::fact(
+            "Joining",
+            pick_list(Joining::ALL, Some(form.joining), Msg::EditCommunityJoining)
+                .padding(6)
+                .text_size(12.5)
+                .font(fonts().ui)
+                .style(theme::picker)
+                .menu_style(theme::picker_menu)
+        ),
+        row![ui::primary("Save", (!form.name.trim().is_empty()).then_some(Msg::SaveCommunity)), small("Cancel", Some(Msg::EditCommunity(false)))]
+            .spacing(8)
+            .align_y(Alignment::Center),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// A community: its name, handle, members, about and rules; joining; its keepers' tools; and its posts, with the
+/// composer for its members.
+fn community(s: &State) -> El<'_> {
+    let Some(page) = &s.community else { return space().into() };
+    let sum = &page.summary;
+    let c = &sum.community;
+    let handle = c.handle.clone();
+    let mut head = Column::new()
+        .spacing(8)
+        .push(row![strong(c.name.as_str(), 20.0, theme::TEXT), label(format!("c/{}", c.handle), 15.0, theme::GOLD)].spacing(8).align_y(Alignment::Center))
+        .push(label(format!("{} \u{00B7} {}", members_words(sum.members), sum.joining.label()), 12.5, theme::TEXT_DIM));
+    if !sum.about.is_empty() {
+        head = head.push(label(sum.about.as_str(), 14.0, theme::TEXT));
+    }
+    if !page.rules.is_empty() {
+        head = head.push(subheading("Rules")).push(label(page.rules.as_str(), 13.0, theme::TEXT_DIM));
+    }
+    let members = match page.requests.filter(|n| *n > 0) {
+        Some(n) => format!("Members \u{00B7} {n} asking to join"),
+        None => "Members".to_string(),
+    };
+    let mut acts = Row::new()
+        .spacing(6)
+        .align_y(Alignment::Center)
+        .push(community_action(s, sum))
+        .push(small(members, Some(Msg::Go(Screen::CommunityMembers(handle.clone())))));
+    if sum.you_own() {
+        acts = acts.push(small(if s.edit_community.is_some() { "Close the editor" } else { "Edit" }, Some(Msg::EditCommunity(s.edit_community.is_none()))));
+    }
+    if moderator(s) {
+        acts = acts.push(small("Suspend community (moderator)", Some(Msg::ModCommunity(handle, true))));
+    }
+    head = head.push(acts.wrap());
+    if let Some(form) = &s.edit_community {
+        head = head.push(community_editor(form));
+    }
+    let mut col = column![container(head).padding(16).width(Length::Fill).style(theme::panel)].spacing(14);
+    if sum.you_belong() && s.me.as_ref().is_some_and(|m| m.me.has_page && !m.suspended) {
+        col = col.push(composer(s));
+    }
+    col.push(posts_list(s, &page.posts.posts, page.posts.more, "No posts yet. Members post here, and only members reply.")).into()
+}
+
+/// A community's members: requests first for its keepers, then members with their roles, then bans.
+fn community_members(s: &State) -> El<'_> {
+    let Some((handle, list)) = &s.community_members else { return space().into() };
+    let handle = handle.as_str();
+    let mine = s.my_communities.iter().flatten().find(|c| c.community.handle == handle);
+    let keeper = mine.is_some_and(CommunitySummary::you_keep);
+    let owner = mine.is_some_and(CommunitySummary::you_own);
+    let me = me_id(s);
+    let mut col = Column::new().spacing(10);
+    for (state, title) in [("requested", "Asking to join"), ("active", "Members"), ("banned", "Kept from joining")] {
+        let rows: Vec<&Member> = list.iter().filter(|m| m.state == state).collect();
+        if rows.is_empty() {
+            continue;
+        }
+        col = col.push(subheading(title));
+        for m in rows {
+            col = col.push(community_member_row(handle, m, me, keeper, owner));
+        }
+    }
+    if !keeper {
+        col = col.push(note("Members are public. Requests and bans are seen only by the community's owners and moderators."));
+    }
+    col.into()
+}
+
+fn community_member_row<'a>(handle: &'a str, m: &'a Member, me: &'a str, keeper: bool, owner: bool) -> El<'a> {
+    let h = || handle.to_string();
+    let id = m.person.id.clone();
+    let mut info = Column::new().spacing(4).push(name_line(&m.person));
+    let mut acts = Row::new().spacing(4).align_y(Alignment::Center);
+    match m.state.as_str() {
+        "requested" if keeper => {
+            acts = acts.push(small("Approve", Some(Msg::DecideRequest(h(), id.clone(), true)))).push(small("Refuse", Some(Msg::DecideRequest(h(), id, false))));
+        }
+        "banned" if keeper => acts = acts.push(small("Lift the ban", Some(Msg::RemoveFromCommunity(h(), id, false)))),
+        "active" => {
+            if m.role != "member" {
+                info = info.push(label(community_role_title(&m.role), 11.5, theme::TEXT_FAINT));
+            }
+            if owner && m.person.id != me {
+                for role in ["owner", "moderator", "member"].into_iter().filter(|r| *r != m.role) {
+                    acts = acts.push(small(format!("Make {role}"), Some(Msg::CommunityRole(h(), id.clone(), role))));
+                }
+            }
+            if keeper && m.person.id != me && m.role != "owner" && (m.role == "member" || owner) {
+                acts = acts
+                    .push(small("Remove", Some(Msg::RemoveFromCommunity(h(), id.clone(), false))))
+                    .push(small("Remove and ban", Some(Msg::RemoveFromCommunity(h(), id, true))));
+            }
+        }
+        _ => {}
+    }
+    container(row![info, space().width(Length::Fill), acts.wrap()].spacing(10).align_y(Alignment::Center))
+        .padding([10.0, 14.0])
+        .width(Length::Fill)
+        .style(theme::panel)
+        .into()
+}
+
+// ------------------------------------------------------------------- lists (ADR-0054)
+
+fn list_counts(l: &PageList) -> String {
+    let people = if l.people == 1 { "1 person".to_string() } else { format!("{} people", l.people) };
+    let orgs = if l.orgs == 1 { "1 organization".to_string() } else { format!("{} organizations", l.orgs) };
+    format!("{people} \u{00B7} {orgs}")
+}
+
+/// A list in the Lists tab: its name (which opens it), who is on it, and what it is for.
+fn list_row(l: &PageList) -> El<'_> {
+    let mut col = Column::new().spacing(4).push(
+        row![
+            button(strong(l.name.as_str(), 14.0, theme::TEXT)).padding(0).on_press(Msg::Go(Screen::List(l.id.clone()))).style(theme::ghost_button),
+            label(list_counts(l), 12.0, theme::TEXT_FAINT),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    if !l.about.is_empty() {
+        col = col.push(label(l.about.as_str(), 13.0, theme::TEXT_DIM));
+    }
+    container(col).padding([10.0, 14.0]).width(Length::Fill).style(theme::panel).into()
+}
+
+/// The Lists tab: the reader's lists, by name, and making one.
+fn lists(s: &State) -> El<'_> {
+    let mut col = Column::new().spacing(12);
+    if let Some(found) = &s.lists {
+        col = col.push(subheading("Your lists"));
+        if found.is_empty() && !s.loading {
+            col = col.push(note("No list yet. Make one below, then add people and organizations from their pages."));
+        }
+        for l in found {
+            col = col.push(list_row(l));
+        }
+    }
+    let (name, about) = &s.new_list;
+    let make = column![
+        subheading("Make a list"),
+        ui::fact("Name", text_input("Engine people", name).on_input(Msg::NewListName).on_submit(Msg::CreateList).padding(8).size(13).width(320).style(ui::input_style)),
+        ui::fact(
+            "About",
+            text_input("What it is for (optional)", about).on_input(Msg::NewListAbout).on_submit(Msg::CreateList).padding(8).size(13).style(ui::input_style)
+        ),
+        note(
+            "A list is yours alone: nobody else sees it, and nobody on it is told. It shows the posts of the people and \
+             organizations on it, newest first, whether or not you follow them."
+        ),
+        ui::primary("Make it", (!name.trim().is_empty()).then_some(Msg::CreateList)),
+    ]
+    .spacing(10);
+    col.push(container(make).padding(16).width(Length::Fill).style(theme::panel)).into()
+}
+
+/// A list: its name, counts and line; who is on it (when asked for), each with Take off; deleting it; and its stream.
+fn list(s: &State) -> El<'_> {
+    let Some(page) = &s.list else { return space().into() };
+    let l = &page.list;
+    let mut head = Column::new().spacing(8).push(strong(l.name.as_str(), 20.0, theme::TEXT)).push(label(list_counts(l), 12.5, theme::TEXT_DIM));
+    if !l.about.is_empty() {
+        head = head.push(label(l.about.as_str(), 14.0, theme::TEXT));
+    }
+    let members = s.list_members.as_ref().filter(|(of, _)| *of == l.id).map(|(_, m)| m);
+    let editing = s.edit_list.as_ref().filter(|(of, _, _)| *of == l.id);
+    let confirming = s.confirm_delete_list.as_deref() == Some(l.id.as_str());
+    head = head.push(
+        row![
+            small(if members.is_some() { "Hide who is on it" } else { "Who is on it" }, Some(Msg::ShowListMembers(members.is_none()))),
+            small(if editing.is_some() { "Close the editor" } else { "Edit" }, Some(Msg::EditList(editing.is_none()))),
+            small(if confirming { "Delete it: press again" } else { "Delete list" }, Some(Msg::DeleteList(l.id.clone()))),
+        ]
+        .spacing(6)
+        .align_y(Alignment::Center),
+    );
+    if let Some((_, name, about)) = editing {
+        head = head.push(list_editor(name, about));
+    }
+    if let Some(m) = members {
+        head = head.push(list_members(&l.id, m));
+    }
+    head = head.push(note("Only you see this list, and nobody on it is told."));
+    column![
+        container(head).padding(16).width(Length::Fill).style(theme::panel),
+        posts_list(s, &page.posts.posts, page.posts.more, "No posts yet. The posts of the people and organizations on this list show here."),
+    ]
+    .spacing(14)
+    .into()
+}
+
+/// The edit form of the list on show: its name and line.
+fn list_editor<'a>(name: &'a str, about: &'a str) -> El<'a> {
+    column![
+        ui::fact("Name", text_input("Name", name).on_input(Msg::EditListName).on_submit(Msg::SaveList).padding(8).size(13).width(320).style(ui::input_style)),
+        ui::fact(
+            "About",
+            text_input("What it is for (optional)", about).on_input(Msg::EditListAbout).on_submit(Msg::SaveList).padding(8).size(13).style(ui::input_style)
+        ),
+        row![ui::primary("Save", (!name.trim().is_empty()).then_some(Msg::SaveList)), small("Cancel", Some(Msg::EditList(false)))]
+            .spacing(8)
+            .align_y(Alignment::Center),
+    ]
+    .spacing(8)
+    .into()
+}
+
+/// Who is on a list, people then organizations, each with Take off.
+fn list_members<'a>(list_id: &'a str, m: &'a ListMembers) -> El<'a> {
+    if m.people.is_empty() && m.orgs.is_empty() {
+        return note("Nobody is on it yet. Add people and organizations from their pages.");
+    }
+    let take_off = |target: Option<ListTarget>| small("Take off", target.map(|t| Msg::ListTakeOff(list_id.to_string(), t)));
+    let mut col = Column::new().spacing(6);
+    if !m.people.is_empty() {
+        col = col.push(subheading("People"));
+        for p in &m.people {
+            col = col.push(row![name_line(p), space().width(Length::Fill), take_off(p.username.clone().map(ListTarget::Person))].align_y(Alignment::Center));
+        }
+    }
+    if !m.orgs.is_empty() {
+        col = col.push(subheading("Organizations"));
+        for o in &m.orgs {
+            col = col.push(row![org_button(o), space().width(Length::Fill), take_off(Some(ListTarget::Org(o.ticker.clone())))].align_y(Alignment::Center));
+        }
+    }
+    col.into()
+}
+
+/// "Add to list" on a person's or an organization's page; it closes the offer when the offer is open.
+fn lists_button<'a>(s: &State, target: &ListTarget, allowed: bool) -> El<'a> {
+    if s.list_picker.as_ref().is_some_and(|(t, _)| t == target) {
+        small("Close lists", Some(Msg::PickLists(None)))
+    } else {
+        small("Add to list", allowed.then(|| Msg::PickLists(Some(target.clone()))))
+    }
+}
+
+/// The reader's lists offered for a person or organization, each with a box that puts it on the list or takes it off.
+fn list_picker<'a>(s: &'a State, target: &ListTarget) -> Option<El<'a>> {
+    let (shown, found) = s.list_picker.as_ref().filter(|(t, _)| t == target)?;
+    let mut col = Column::new().spacing(6).push(subheading("Your lists"));
+    if found.is_empty() {
+        col = col.push(note("You have no list yet. Make one in Lists, above."));
+    }
+    for l in found {
+        let id = l.id.clone();
+        col = col.push(
+            checkbox(l.has == Some(true))
+                .label(format!("{}  \u{00B7}  {}", l.name, list_counts(l)))
+                .on_toggle(move |add| Msg::ListAdd(id.clone(), shown.clone(), add)),
+        );
+    }
+    Some(col.push(note("Nobody is told when you put them on a list.")).into())
+}
+
 // ------------------------------------------------------------------- moderation (moderators only)
 
 /// What a suspended person reads where the page's own controls would be.
@@ -1447,7 +2085,7 @@ fn moderation(s: &State) -> El<'_> {
         );
     }
     let mut col = Column::new().spacing(12).push(views.wrap());
-    if s.mod_view != ModView::Log {
+    if matches!(s.mod_view, ModView::Open | ModView::Closed) {
         col = col
             .push(text_input("A note for the log (optional)", &s.mod_note).on_input(Msg::ModNote).padding(8).size(13).style(ui::input_style))
             .push(note(
@@ -1456,6 +2094,17 @@ fn moderation(s: &State) -> El<'_> {
             ));
     }
     let more = match s.mod_view {
+        ModView::Matches => {
+            let Some(list) = &s.mod_matches else { return col.into() };
+            col = col.push(note(MATCHES));
+            if list.is_empty() {
+                col = col.push(note("No photo matches to act on."));
+            }
+            for m in list {
+                col = col.push(match_card(m));
+            }
+            false
+        }
         ModView::Log => {
             let Some((actions, more)) = &s.mod_log else { return col.into() };
             if actions.is_empty() {
@@ -1481,6 +2130,33 @@ fn moderation(s: &State) -> El<'_> {
         col = col.push(ui::secondary("Load more", Some(Msg::More)));
     }
     col.into()
+}
+
+/// What the photo matches are, said above them.
+const MATCHES: &str = "A screen matched each upload below to known illegal imagery. It was refused and never shown; its \
+    bytes are kept privately as evidence for a year, and the account cannot upload photos until it is cleared. The \
+    operator reports each match to NCMEC's CyberTipline: mark it reported once that is done.";
+
+/// A screen's match: who uploaded it, which screen matched and when, whether it was reported; Mark reported, Clear.
+fn match_card(m: &MediaMatch) -> El<'_> {
+    let mut head = Row::new()
+        .spacing(8)
+        .align_y(Alignment::Center)
+        .push(chip(m.provider.as_str(), theme::CAUTION))
+        .push(label(format!("matched {}", when(&m.matched_at)), 12.0, theme::TEXT_FAINT));
+    if let Some(at) = &m.reported_at {
+        head = head.push(chip(format!("Reported {}", when(at)), theme::TEXT_DIM));
+    }
+    let who: El<'_> = match &m.person {
+        Some(p) => name_line(p),
+        None => note("An account that is no longer available."),
+    };
+    let mut acts = Row::new().spacing(6).align_y(Alignment::Center);
+    if m.reported_at.is_none() {
+        acts = acts.push(ui::primary("Mark reported", Some(Msg::MarkMatch(m.id.clone(), true, false))));
+    }
+    acts = acts.push(ui::secondary("Clear: the account may upload again", Some(Msg::MarkMatch(m.id.clone(), false, true))));
+    container(column![head.wrap(), who, acts].spacing(8)).padding([12.0, 16.0]).width(Length::Fill).style(theme::panel).into()
 }
 
 fn reason_words(reason: &str) -> &str {
@@ -1594,7 +2270,28 @@ fn log_row(a: &ModAction) -> El<'_> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mention_pieces, tag_pieces};
+    use super::{mention_pieces, notification_words, tag_pieces};
+    use alelyon_identity_client::pages::{Notification, Org, Person};
+
+    #[test]
+    fn the_later_kinds_of_notification_say_what_happened() {
+        let ada = Person { display_name: "Ada".into(), ..Person::default() };
+        let babg = Org { name: "Babbage Engines".into(), ticker: "BABG".into(), ..Org::default() };
+        let said = |kind: &str, detail: Option<&str>| {
+            notification_words(&Notification {
+                kind: kind.into(),
+                actor: Some(ada.clone()),
+                org: Some(babg.clone()),
+                detail: detail.map(str::to_string),
+                ..Notification::default()
+            })
+        };
+        assert_eq!(said("endorsed", Some("Engines")), "Ada endorsed your skill Engines");
+        assert_eq!(said("experience-confirmed", Some("Analyst")), "Babbage Engines (BABG) confirmed your position as Analyst");
+        assert_eq!(said("job-application", None), "Ada applied for a job at Babbage Engines (BABG)");
+        assert_eq!(said("like", Some("insightful")), "Ada found your post insightful");
+        assert_eq!(said("like", None), "Ada liked your post");
+    }
 
     #[test]
     fn mentions_are_read_as_the_service_reads_them() {

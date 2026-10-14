@@ -13,7 +13,7 @@ use windows::Win32::UI::Shell::{
     FOS_ALLOWMULTISELECT, FOS_FILEMUSTEXIST, FOS_FORCEFILESYSTEM, FOS_PATHMUSTEXIST, FOS_PICKFOLDERS, FileOpenDialog,
     IFileOpenDialog, SIGDN_FILESYSPATH,
 };
-use windows::core::w;
+use windows::core::{PCWSTR, w};
 
 /// Show the picker (it blocks: call it on a thread of its own); `None` when the person cancels.
 pub fn pick_folder() -> Result<Option<PathBuf>, String> {
@@ -51,8 +51,23 @@ pub fn pick_folder() -> Result<Option<PathBuf>, String> {
 /// Windows' file picker for images to attach to a message (several at once); empty when the person cancels. The files
 /// are read and checked after (`super::attach`): the picker itself lists every file.
 pub fn pick_images() -> Result<Vec<PathBuf>, String> {
+    pick_files(w!("Attach images (PNG or JPEG)"), w!("Attach"), true)
+}
+
+/// Windows' file picker for photos on Pages: several to attach to a post (`many`), else one for a page's or an
+/// organization's photo or banner; empty when the person cancels. The files are read and checked after
+/// (`crate::pages`).
+pub fn pick_photos(many: bool) -> Result<Vec<PathBuf>, String> {
+    if many {
+        pick_files(w!("Add photos (JPEG, PNG or WebP)"), w!("Add"), true)
+    } else {
+        pick_files(w!("Choose a photo (JPEG, PNG or WebP)"), w!("Choose"), false)
+    }
+}
+
+fn pick_files(title: PCWSTR, ok: PCWSTR, many: bool) -> Result<Vec<PathBuf>, String> {
     // SAFETY: as `pick_folder`: COM for the dialog's life; each string the dialog hands back is freed once, after it
-    // is copied.
+    // is copied. `title` and `ok` are `w!` literals, alive for the program's life.
     unsafe {
         let init = CoInitializeEx(None, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
         if init.is_err() {
@@ -62,11 +77,10 @@ pub fn pick_images() -> Result<Vec<PathBuf>, String> {
             let dialog: IFileOpenDialog = CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER)
                 .map_err(|e| format!("Windows' file picker could not open ({e})."))?;
             let options = dialog.GetOptions().map_err(|e| e.to_string())?;
-            dialog
-                .SetOptions(options | FOS_ALLOWMULTISELECT | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST)
-                .map_err(|e| e.to_string())?;
-            let _ = dialog.SetTitle(w!("Attach images (PNG or JPEG)"));
-            let _ = dialog.SetOkButtonLabel(w!("Attach"));
+            let multiple = if many { FOS_ALLOWMULTISELECT } else { Default::default() };
+            dialog.SetOptions(options | multiple | FOS_FORCEFILESYSTEM | FOS_FILEMUSTEXIST).map_err(|e| e.to_string())?;
+            let _ = dialog.SetTitle(title);
+            let _ = dialog.SetOkButtonLabel(ok);
             if let Err(e) = dialog.Show(None) {
                 if e.code() == ERROR_CANCELLED.to_hresult() {
                     return Ok(Vec::new());
