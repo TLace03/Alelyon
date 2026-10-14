@@ -1,9 +1,11 @@
 //! Alelyon's own preferences on this PC: a small JSON object in `~/.alelyon/alelyon/preferences.json`
-//! (`CENTCOM_PREFERENCES_FILE` names another file). Today it holds four choices: whether the sign-in backdrop moves
+//! (`CENTCOM_PREFERENCES_FILE` names another file). Today it holds where the window was left (`"session"`, `session`)
+//! and four choices: whether the sign-in backdrop moves
 //! (`"backdrop_motion": true | false`), where the account panel's web pages open (`"web_pages": "lattice" |
 //! "yours"`, `signin::web`), the model of the person's own that Sinai's page talks to (`"sinai_model":
 //! "gguf:<name>" | "endpoint:<id>"`, `models`; never a key, which is Credential Manager's), and the model chosen for
-//! each of Sinai's parts (`"parts"`, a versioned object whose shape `sinai_parts` documents); each is absent when the person
+//! each of Sinai's parts (`"parts"`, a versioned object whose shape `sinai_parts` documents), and Auto configure's
+//! dials, paid allowances and previous setup (`"sinai_auto"`, `sinai_parts::auto`); each is absent when the person
 //! never chose, and each is written on its own, keeping the others.
 //!
 //! Read once at start. A missing, unreadable or malformed file is no preference at all (never an error on screen);
@@ -22,6 +24,7 @@ const MOTION: &str = "backdrop_motion";
 const WEB_PAGES: &str = "web_pages";
 const SINAI_MODEL: &str = "sinai_model";
 const PARTS: &str = "parts";
+const AUTO: &str = "sinai_auto";
 
 /// The version of the `"parts"` object this build writes. A file from a newer build keeps its higher number and every
 /// entry this build does not know; an object without a number is read as version 1.
@@ -122,6 +125,56 @@ pub fn save_part(at: &Path, part: &str, entry: Option<Value>, sinai_model: Optio
     if let Some(key) = sinai_model {
         map.insert(SINAI_MODEL.into(), Value::String(key.into()));
     }
+    write(at, map)
+}
+
+/// Auto configure's settings kept at `at` (`"sinai_auto"`, an object whose shape `sinai_parts::auto` documents); empty
+/// when none are kept or the file cannot be made sense of.
+pub fn load_auto(at: &Path) -> Map<String, Value> {
+    match object(at).remove(AUTO) {
+        Some(Value::Object(auto)) => auto,
+        _ => Map::new(),
+    }
+}
+
+/// Keep Auto configure's settings at `at`, with whatever else the file held.
+pub fn save_auto(at: &Path, auto: Map<String, Value>) -> Result<(), String> {
+    let mut map = object(at);
+    map.insert(AUTO.into(), Value::Object(auto));
+    write(at, map)
+}
+
+/// The parts' choices exactly as kept (the whole `"parts"` value and `"sinai_model"`), for putting back later.
+pub fn load_parts_whole(at: &Path) -> (Option<Value>, Option<String>) {
+    let map = object(at);
+    (map.get(PARTS).cloned(), map.get(SINAI_MODEL).and_then(Value::as_str).map(str::to_owned))
+}
+
+/// Put back the parts' choices and Auto configure's settings in one write (None removes the entry), with whatever
+/// else the file held.
+pub fn restore_parts(at: &Path, parts: Option<Value>, sinai_model: Option<String>, auto: Map<String, Value>) -> Result<(), String> {
+    let mut map = object(at);
+    match parts {
+        Some(v) => map.insert(PARTS.into(), v),
+        None => map.remove(PARTS),
+    };
+    match sinai_model {
+        Some(v) => map.insert(SINAI_MODEL.into(), Value::String(v)),
+        None => map.remove(SINAI_MODEL),
+    };
+    map.insert(AUTO.into(), Value::Object(auto));
+    write(at, map)
+}
+
+/// The value kept under `key` at `at`; None when there is none or no file to make sense of.
+pub fn load_value(at: &Path, key: &str) -> Option<Value> {
+    object(at).remove(key)
+}
+
+/// Keep `value` under `key` at `at`, with whatever else the file held.
+pub fn save_value(at: &Path, key: &str, value: Value) -> Result<(), String> {
+    let mut map = object(at);
+    map.insert(key.into(), value);
     write(at, map)
 }
 

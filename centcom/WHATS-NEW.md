@@ -3,6 +3,38 @@
 Shown by the account menu's "What's New" (src/signin/mod.rs reads this file at build time). Newest first. Each
 release is a `## ` heading (a date, then an optional title after " — "), followed by `- ` lines in plain words.
 
+## 2026-10-14 — Checklists from agents in Lattice
+
+- An agent you run inside Lattice can now give you a checklist of things to do yourself, like any other agent: it is pinned above the chat's composer, and you check each step there.
+- The agent sees which steps you checked, and can wait until you are done. There is nothing to set up.
+
+## 2026-10-14 — Agents' file edits wait for your review
+
+- When an agent you run in Lattice's chat writes a file in the chat's folder through Lattice, the change now waits in the Changes panel, as the built-in agent's do. Nothing reaches the disk until you keep it.
+- Each change shows under the turn that made it. Lattice also lets the agent read files as the chat sees them, including changes still waiting for review.
+- Files outside the chat's folder are refused, and Ask mode or an untrusted folder still refuse every change.
+- An agent can still change files with its own tools, such as its shell. Lattice cannot stop those writes: they are on disk at once, and are listed after the turn as changes already made.
+
+## 2026-10-11 — Friends messages are sealed
+
+- New messages to friends are sealed on this PC before they reach Alelyon, for your friend's devices and yours, so the service keeps them in a form it cannot open. An independent review of this is pending, and there is no forward secrecy yet.
+- Sealed messages carry a "sealed" mark. Messages from before, and messages to a friend who has not yet opened Friends on an updated app or the website, are plain text.
+- When a friend adds a new device, the chat says so.
+
+## 2026-10-10 — Sinai uses the models you choose
+
+- Where Sinai's own loop is installed, it now uses the models you choose for its eyes, embeddings, voice and hearing: its hearing, embeddings and voice from its next start, and its eyes the next time they open.
+- It runs what it can run on this PC: a GGUF file, a speech model file, a voice model file. A vision model needs its vision projector (an mmproj file) beside it; without one, the card says so and Sinai keeps its own eyes. For an endpoint or a cloud model, Sinai keeps its own model for now, and the card says so.
+- Change Sinai's embedding model: once that model has been measured for recall, Sinai codes its saved conversations once for it, and switching back needs no coding again. Until it is measured, Sinai finds memories by their words, and the embeddings card says it is measuring the model first.
+- Before Sinai's memory changes to keep a code per model, it is backed up beside itself; if the backup cannot be made, the memory stays as it was.
+- The voice picker lists Kokoro voice model files (.onnx) from the voice folder, ~/.alelyon/angel/voices, where installing Sinai also links its own voice. Alelyon never downloads them.
+
+## 2026-10-10 — Your status and the friends bar
+
+- Choose your status: Online, Away, Do not disturb, or Appear offline. Pick it in the Friends panel; it stays as you set it until you change it.
+- Friends who chose Do not disturb show a red dot.
+- A friends bar along the bottom of every page shows your status, who is online and your unread messages; press it to open or close Friends.
+
 ## 2026-10-10 — Free cloud models for Sinai's parts
 
 - Each of Sinai's parts can now use a free cloud model on your own account: OpenRouter's free open models for its mind, Groq for its ears, Cloudflare Workers AI for its embeddings and voice, and Cloudflare for its eyes once you turn them on.

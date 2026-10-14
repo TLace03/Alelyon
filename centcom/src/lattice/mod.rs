@@ -23,6 +23,7 @@ pub mod morphometry_store;
 pub mod probes;
 pub mod stages;
 pub mod obligations;
+pub mod place;
 pub mod system;
 pub mod training;
 mod view;
@@ -293,6 +294,8 @@ pub struct State {
     pub fleet_tabs: Vec<(&'static str, &'static str)>,
     /// A Fleet tab the jump menu picked: the window takes it and shows that tab of the Fleet page.
     pub jump_out: Option<&'static str>,
+    /// What of the place the person left Lattice in still waits to be put back (`place`).
+    pub restoring: Option<place::Pending>,
 
     pub list: Option<ChatList>,
     pub listing: bool,
@@ -457,6 +460,7 @@ impl State {
             web_said: None,
             fleet_tabs: Vec::new(),
             jump_out: None,
+            restoring: None,
             list: None,
             listing: false,
             status: None,
@@ -713,6 +717,8 @@ impl State {
                 }
                 // The agent's browser: on or off, for the composer and the Tools view.
                 let mut tasks = vec![self.refresh(), self.read_browser(), self.read_completion(), ide::outside_steps::read_outside()];
+                // The folder left open last time is handed on as one named on the command line (which wins).
+                self.restore_folder();
                 // A folder named on the command line opens once the services run.
                 if let Some((folder, _)) = &self.ide.startup {
                     self.ide.folder_path = folder.clone();
@@ -794,6 +800,8 @@ impl State {
                             let tasks: Vec<_> = grid_photo.into_iter().map(|id| self.grid(ide::grid::GridMsg::Add(id))).collect();
                             return Task::batch(tasks);
                         }
+                        // The chat left open last time, when it is still listed.
+                        return self.restore_chat();
                     }
                     Err(why) => self.problem = Some(why),
                 }

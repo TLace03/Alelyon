@@ -117,7 +117,7 @@ fn header<'a>(state: &'a State) -> El<'a> {
     if let Some(c) = state.conversation() {
         line = line.push(icon("\u{2399}", "Archive this chat (it is never deleted)", Some(Msg::Archive(c.id().to_string()))));
     }
-    line = line.push(icon("+", "New chat", Some(Msg::New)));
+    line = line.push(icon("+", "New chat (Ctrl+N)", Some(Msg::New)));
     let mut col = Column::new().push(container(line).padding([8.0, 12.0]));
     if let Some(stages) = state.conversation().and_then(|c| stage_line(c, state.changes.as_ref())) {
         col = col.push(container(stages).padding(Padding { top: 0.0, right: 12.0, bottom: 7.0, left: 12.0 }));
@@ -242,7 +242,7 @@ pub(super) fn transcript<'a>(c: &'a Conversation, state: &'a State, phase: f32) 
         col = col.push(activity_view(activity, state));
     }
     if let Some(live) = &c.live {
-        col = col.push(markdown::view(live.items(), crate::lattice::view::settings()).map(|_| Msg::Link));
+        col = col.push(markdown::view_with(live.items(), crate::lattice::view::settings(), &Answer));
     }
     if c.dropped > 0 {
         col = col.push(note(format!("{} pieces of the streamed answer were not shown; the saved answer is whole.", c.dropped)));
@@ -327,9 +327,13 @@ fn answer<'a>(c: &'a Conversation, i: usize, turn: &'a ChatTurn) -> El<'a> {
     if let (Some(p), Some(q)) = (turn.prompt_tokens, turn.completion_tokens) {
         who = who.push(label(format!("{p} in · {q} out"), 11.0, theme::TEXT_FAINT));
     }
+    if !turn.text.trim().is_empty() {
+        who = who.push(space().width(Length::Fill));
+        who = who.push(ui::tip(ghost("Copy", Some(go(IdeMsg::CopyText(turn.text.clone())))), "Copy the answer as written (Markdown)"));
+    }
     col = col.push(who);
     if let Some(content) = c.rendered(i) {
-        col = col.push(markdown::view(content.items(), crate::lattice::view::settings()).map(|_| Msg::Link));
+        col = col.push(markdown::view_with(content.items(), crate::lattice::view::settings(), &Answer));
     }
     if !turn.error.is_empty() {
         col = col.push(ui::notice(turn.error.as_str(), theme::CAUTION));
@@ -338,6 +342,25 @@ fn answer<'a>(c: &'a Conversation, i: usize, turn: &'a ChatTurn) -> El<'a> {
         col = col.push(note(format!("Figures no tool backs: {}", turn.unsupported.join(", "))));
     }
     col.into()
+}
+
+/// How an answer's Markdown is drawn: as iced draws it, with each code block headed by its language and a Copy.
+struct Answer;
+
+impl<'a> markdown::Viewer<'a, Msg> for Answer {
+    fn on_link_click(_url: markdown::Uri) -> Msg {
+        Msg::Link
+    }
+
+    fn code_block(&self, settings: markdown::Settings, language: Option<&'a str>, code: &'a str, lines: &'a [markdown::Text]) -> El<'a> {
+        let head = row![
+            label(language.unwrap_or(""), 11.0, theme::TEXT_FAINT),
+            space().width(Length::Fill),
+            ui::tip(ghost("Copy", Some(go(IdeMsg::CopyText(code.to_string())))), "Copy this code"),
+        ]
+        .align_y(Alignment::Center);
+        column![head, markdown::code_block(settings, lines, Self::on_link_click)].spacing(2).into()
+    }
 }
 
 /// While the agent works: what it is doing and for how long (Esc in the composer stops it).
@@ -1026,6 +1049,11 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
     let listing = super::slash::open(state);
     // The files list, likewise, when an `@` is being typed (and no command is).
     let mentioning = !listing && super::mention::open(state);
+    let editing = state.ide.editing_turn.is_some();
+    // Up in an empty box edits the last message sent, as in the chat apps
+    let last_mine = (!running && !editing && state.composer.text().trim().is_empty())
+        .then(|| state.conversation().and_then(|c| c.turns.iter().rev().find(|t| t.role == Role::User && !t.id.is_empty())).map(|t| t.id.clone()))
+        .flatten();
     card = card.push(
         text_editor(&state.composer)
             .id(super::composer_id())
@@ -1035,7 +1063,7 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
             .max_height(220)
             .padding(4)
             .size(13.5)
-            .key_binding(move |press| composer_keys(press, running, listing, mentioning))
+            .key_binding(move |press| composer_keys(press, running, editing, last_mine.clone(), listing, mentioning))
             .style(|_, _| text_editor::Style {
                 background: Background::Color(Color::TRANSPARENT),
                 border: Border::default(),
@@ -1052,12 +1080,17 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
     }
     for (mode, words) in [(Mode::Agent, "Agent"), (Mode::Ask, "Ask")].into_iter().filter(|_| !state.planning()) {
         let on = state.mode == mode;
-        bottom = bottom.push(
+        let what = match mode {
+            Mode::Agent => "Agent: may stage edits for you to review, and ask to run commands",
+            Mode::Ask => "Ask: reads and answers; writes nothing",
+        };
+        bottom = bottom.push(ui::tip(
             button(label(words, 12.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
                 .padding([3.0, 9.0])
                 .style(theme::segment_button(on))
                 .on_press(Msg::Mode(mode)),
-        );
+            what,
+        ));
     }
     let labels: Vec<String> = state.choices.iter().map(choice_label).collect();
     let chosen = state.choices.iter().find(|c| c.id == state.choice).map(choice_label);
@@ -1075,15 +1108,25 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
         bottom = bottom.push(crate::spinner::spinner(phase, 14.0));
     }
     if running {
-        bottom = bottom.push(
-            button(label("\u{25A0}", 12.0, theme::TEXT))
-                .padding([5.0, 10.0])
-                .style(theme::secondary_button)
-                .on_press(Msg::Stop),
-        );
+        bottom = bottom.push(ui::tip(
+            button(label("\u{25A0}", 12.0, theme::TEXT)).padding([5.0, 10.0]).style(theme::secondary_button).on_press(Msg::Stop),
+            "Stop the turn (Esc)",
+        ));
     }
-    let can_send = !state.sending && !state.composer.text().trim().is_empty() && state.services_ready();
-    bottom = bottom.push(
+    let empty = state.composer.text().trim().is_empty();
+    let can_send = !state.sending && !empty && state.services_ready();
+    let send_tip = if state.sending {
+        "Sending\u{2026}"
+    } else if !state.services_ready() {
+        "Lattice is starting: send once it is ready."
+    } else if empty {
+        "Type a message first. Enter sends; Shift+Enter is a new line."
+    } else if running {
+        "Queue it: sent when the running turn ends (Enter)"
+    } else {
+        "Send (Enter). Shift+Enter is a new line."
+    };
+    bottom = bottom.push(ui::tip(
         button(label(if running { "Queue \u{2191}" } else { "\u{2191}" }, 14.0, theme::ON_GOLD))
             .padding([4.0, 12.0])
             .style(|t, s| {
@@ -1092,7 +1135,8 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
                 style
             })
             .on_press_maybe(can_send.then_some(Msg::Send)),
-    );
+        send_tip,
+    ));
     card = card.push(bottom);
     let mut col = Column::new().spacing(4);
     // The commands list, over the composer.
@@ -1131,11 +1175,14 @@ pub fn choice_label(c: &lattice_protocol::chat::ChatChoice) -> String {
     if c.ready { c.label.clone() } else { format!("{}{NOT_READY}", c.label) }
 }
 
-/// The composer's keys: Enter sends, Shift+Enter breaks the line, Esc stops a running turn. While the commands list
-/// is open (`listing`), Enter and Tab choose, Up and Down move, and Esc closes it.
+/// The composer's keys: Enter sends, Shift+Enter breaks the line, Esc stops a running turn (or, with none running,
+/// leaves a message being edited as it was); Up in an empty box edits the last message sent (`last_mine`). While the
+/// commands list is open (`listing`), Enter and Tab choose, Up and Down move, and Esc closes it.
 fn composer_keys(
     press: text_editor::KeyPress,
     running: bool,
+    editing: bool,
+    last_mine: Option<String>,
     listing: bool,
     mentioning: bool,
 ) -> Option<text_editor::Binding<Msg>> {
@@ -1172,6 +1219,11 @@ fn composer_keys(
     match press.key.as_ref() {
         Key::Named(Named::Enter) if !press.modifiers.shift() => Some(Binding::Custom(Msg::Send)),
         Key::Named(Named::Escape) if running => Some(Binding::Custom(Msg::Stop)),
+        // Esc while a message is being edited leaves it as it was, as the Cancel beside it does.
+        Key::Named(Named::Escape) if editing => Some(Binding::Custom(Msg::Ide(IdeMsg::CancelEditTurn))),
+        Key::Named(Named::ArrowUp) if last_mine.is_some() && press.modifiers.is_empty() => {
+            last_mine.map(|turn| Binding::Custom(Msg::Ide(IdeMsg::EditTurn(turn))))
+        }
         _ => Binding::from_key_press(press),
     }
 }
@@ -1393,4 +1445,43 @@ pub fn commands<'a>(state: &'a State, phase: f32) -> El<'a> {
         }
     };
     row![left, container(space().width(1)).height(Length::Fill).style(theme::line), container(right).width(Length::Fill).height(Length::Fill).style(|_| solid(theme::CANVAS))].into()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use iced::keyboard::{Key, Modifiers, key};
+
+    fn press(named: key::Named, modifiers: Modifiers) -> text_editor::KeyPress {
+        text_editor::KeyPress {
+            key: Key::Named(named),
+            modified_key: Key::Named(named),
+            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+            modifiers,
+            text: None,
+            status: text_editor::Status::Focused { is_hovered: false },
+        }
+    }
+
+    fn custom(b: Option<text_editor::Binding<Msg>>) -> Option<String> {
+        match b {
+            Some(text_editor::Binding::Custom(m)) => Some(format!("{m:?}")),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn up_in_an_empty_box_edits_the_last_message_and_esc_leaves_an_edit() {
+        let up = |last: Option<&str>, listing: bool| {
+            custom(composer_keys(press(key::Named::ArrowUp, Modifiers::empty()), false, false, last.map(str::to_string), listing, false))
+        };
+        assert!(up(Some("t7"), false).is_some_and(|m| m.contains("EditTurn") && m.contains("t7")));
+        assert_eq!(up(None, false), None, "a box with words in it (or nothing sent) keeps Up for the caret");
+        assert!(up(Some("t7"), true).is_some_and(|m| m.contains("Slash")), "the commands list takes Up first");
+        let shift_up = custom(composer_keys(press(key::Named::ArrowUp, Modifiers::SHIFT), false, false, Some("t7".into()), false, false));
+        assert_eq!(shift_up, None, "Shift+Up selects, as ever");
+        let esc = |running, editing| custom(composer_keys(press(key::Named::Escape, Modifiers::empty()), running, editing, None, false, false));
+        assert!(esc(true, true).is_some_and(|m| m == "Stop"), "a running turn stops first");
+        assert!(esc(false, true).is_some_and(|m| m.contains("CancelEditTurn")));
+    }
 }

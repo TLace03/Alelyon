@@ -32,6 +32,11 @@
 //! could pass 9,000, until 00:00 UTC, whatever plan the account is on; the eyes, embeddings and voice share the one
 //! count. A Cloudflare model the meter has no rate for is not offered.
 //!
+//! **Paid, only through Auto configure.** At a paid price tier, Auto configure may propose a paid model (an OpenRouter
+//! model whose price its live list carries). After the proposal's Agree, that part's card opens with the model chosen
+//! ([`Step::StartWith`]) and says its price and the monthly cap; only the card's own Agree keeps it. Its calls are
+//! counted against the cap, and at the cap the part pauses ("Monthly cap reached").
+//!
 //! **The eyes' licence.** Cloudflare's Llama 3.2 Vision asks each account to accept Meta's licence. The eyes' Agree
 //! card links it and has its own unticked "I accept the Llama 3.2 licence"; Agree stays off until it is ticked, and
 //! only then is the acceptance sent, once per account and model (remembered in `cloud-licences.json`).
@@ -200,7 +205,7 @@ pub struct Paused {
 }
 
 /// Beside the preferences: a file of this name. None in a test build, which keeps nothing.
-fn beside_prefs(name: &str) -> Option<PathBuf> {
+pub(crate) fn beside_prefs(name: &str) -> Option<PathBuf> {
     if cfg!(test) { None } else { crate::prefs::path().and_then(|p| p.parent().map(|d| d.join(name))) }
 }
 
@@ -249,7 +254,8 @@ pub fn now() -> i64 {
     crate::utc::now() as i64
 }
 
-/// `part` paused at `provider`'s free limit until `until` (seconds since 1970); a later time wins. Kept on disk.
+/// `part` paused at `provider`'s free limit until `until` (seconds since 1970); a later time wins. Kept on disk,
+/// merged into the pauses there now (the parts service keeps pauses there too), and the cache is read back from it.
 pub fn pause(part: Part, provider: &str, until: i64) {
     let mut paused = PAUSED.lock().unwrap_or_else(|e| e.into_inner());
     let entry = paused.entry(part).or_insert(Paused { provider: provider.to_string(), until });
@@ -257,11 +263,14 @@ pub fn pause(part: Part, provider: &str, until: i64) {
         *entry = Paused { provider: provider.to_string(), until };
     }
     if let Some(path) = beside_prefs("cloud-pauses.json") {
-        let _ = save_pauses(&path, &paused);
+        if pause_at(&path, part, provider, until, now()).is_ok() {
+            *paused = load_pauses(&path, now());
+        }
     }
 }
 
-/// When `part`'s pause ends, while it lasts at `now` (on any provider). A pause past its time is dropped.
+/// When `part`'s pause ends, while it lasts at `now` (on any provider). A pause past its time is dropped; the file
+/// is rewritten from what is on disk now, so a pause another process kept there is not lost.
 pub fn paused(part: Part, now: i64) -> Option<i64> {
     let mut paused = PAUSED.lock().unwrap_or_else(|e| e.into_inner());
     match paused.get(&part).map(|p| p.until) {
@@ -269,9 +278,12 @@ pub fn paused(part: Part, now: i64) -> Option<i64> {
         Some(_) => {
             paused.remove(&part);
             if let Some(path) = beside_prefs("cloud-pauses.json") {
-                let _ = save_pauses(&path, &paused);
+                let kept = load_pauses(&path, now);
+                if save_pauses(&path, &kept).is_ok() {
+                    *paused = kept;
+                }
             }
-            None
+            paused.get(&part).map(|p| p.until)
         }
         None => None,
     }
@@ -284,6 +296,22 @@ pub fn paused_on(part: Part, provider: &str, now: i64) -> Option<i64> {
         PAUSED.lock().unwrap_or_else(|e| e.into_inner()).get(&part).is_some_and(|p| p.provider == provider)
     });
     own.or_else(|| (provider == CLOUDFLARE.id).then(|| cloudflare_spent(now)).flatten())
+}
+
+/// `part` paused on `provider` until `until`, written into the pauses kept at `path` as they are on disk now (another
+/// process keeps pauses there too): a later time wins, and pauses past their time are dropped.
+pub fn pause_at(path: &Path, part: Part, provider: &str, until: i64, now: i64) -> Result<(), String> {
+    let mut kept = load_pauses(path, now);
+    let entry = kept.entry(part).or_insert(Paused { provider: provider.to_string(), until });
+    if entry.provider != provider || until > entry.until {
+        *entry = Paused { provider: provider.to_string(), until };
+    }
+    save_pauses(path, &kept)
+}
+
+/// When `part`'s pause on `provider`, as kept at `path` on disk now, ends; None when it does not last at `now`.
+pub fn paused_at(path: &Path, part: Part, provider: &str, now: i64) -> Option<i64> {
+    load_pauses(path, now).get(&part).filter(|p| p.provider == provider).map(|p| p.until)
 }
 
 // ------------------------------------------------------------------- Cloudflare's meter, as the cards read it
@@ -434,6 +462,9 @@ pub fn mind_route(pick: &CloudPick) -> Result<crate::models::byo::Route, String>
     if let Some(until) = paused_on(Part::Mind, &pick.provider, now()) {
         return Err(back_words(until, now()));
     }
+    if let Some(words) = super::auto::capped_words(Part::Mind, &pick.provider, &pick.model, now()) {
+        return Err(words);
+    }
     if !connected(cloud) {
         return Err(format!("Connect {} again in the mind's picker: no key is kept for it.", cloud.label));
     }
@@ -484,8 +515,10 @@ pub fn ears_env(choice: Option<&Choice>) -> Result<Option<(String, SecretString)
 /// A card for a part on a cloud model: its model, where it runs, its state.
 pub fn card_lines(part: Part, provider: &str, model: &str, now: i64) -> (String, String, super::Level, String) {
     let label = provider_label(provider);
+    let capped = super::auto::capped_words(part, provider, model, now);
     let (level, state) = match paused_on(part, provider, now) {
         Some(until) => (super::Level::Problem, back_words(until, now)),
+        None if capped.is_some() => (super::Level::Problem, capped.unwrap_or_default()),
         None if routes::cloud(provider).is_some_and(|c| !connected(c)) => {
             (super::Level::Problem, format!("Not connected: connect {label} again in this picker."))
         }
@@ -527,6 +560,17 @@ pub struct Flow {
     signing_in: Option<AbortHandle>,
     /// The person ticked "I accept the Llama 3.2 licence" (an offer with a licence only).
     pub licence_ticked: bool,
+    /// Opened from Auto configure with its model already chosen: after Connect it goes straight to Agree.
+    pub preset: bool,
+    /// The paid model this card agrees to, with the tier's monthly cap, where Auto configure's Agree allowed one.
+    pub paid: Option<(super::auto::PaidTerms, f64)>,
+}
+
+impl Flow {
+    /// Whether `model` may be agreed to here: a free model the part offers, or the paid model this card carries.
+    pub fn may_use(&self, model: &str) -> bool {
+        allowed(self.offer.part, self.offer.cloud.id, model) || self.paid.as_ref().is_some_and(|(t, _)| t.model == model)
+    }
 }
 
 impl Flow {
@@ -545,6 +589,8 @@ pub enum Field {
 pub enum Step {
     /// Begin the steps for this part on this provider.
     Start(Part, &'static str),
+    /// Begin them with this model already chosen (Auto configure's proposal): connect if needed, then Agree.
+    StartWith(Part, String, String),
     Typed(Field, String),
     KeyPage,
     Connect,
@@ -601,6 +647,31 @@ fn list(offer: Offer) -> Task<Step> {
 
 /// One step. `flow` is the steps open in the picker (None: closed).
 pub fn update(flow: &mut Option<Flow>, step: Step) -> Out {
+    if let Step::StartWith(part, cloud, model) = step {
+        let Some(offer) = offer(part, &cloud) else { return Out::Nothing };
+        let paid = super::auto::settings_now().paid_for(part, offer.cloud.id, &model).map(|(t, cap)| (t.clone(), cap));
+        let ready = connected(offer.cloud);
+        let f = Flow {
+            offer,
+            stage: if ready { Stage::Agree } else { Stage::Connect },
+            model: Some(model),
+            key: String::new(),
+            account: String::new(),
+            models: None,
+            busy: false,
+            said: None,
+            signing_in: None,
+            licence_ticked: false,
+            preset: true,
+            paid,
+        };
+        if !f.model.as_deref().is_some_and(|m| f.may_use(m)) {
+            *flow = None;
+            return Out::Nothing;
+        }
+        *flow = Some(f);
+        return Out::Nothing;
+    }
     if let Step::Start(part, cloud) = step {
         let Some(offer) = offer(part, cloud) else { return Out::Nothing };
         let ready = connected(offer.cloud);
@@ -615,12 +686,14 @@ pub fn update(flow: &mut Option<Flow>, step: Step) -> Out {
             said: None,
             signing_in: None,
             licence_ticked: false,
+            preset: false,
+            paid: None,
         });
         return if ready { Out::Task(list(offer)) } else { Out::Nothing };
     }
     let Some(f) = flow.as_mut() else { return Out::Nothing };
     match step {
-        Step::Start(..) => {}
+        Step::Start(..) | Step::StartWith(..) => {}
         Step::Typed(Field::Key, v) => f.key = v,
         Step::Typed(Field::Account, v) => f.account = v,
         Step::KeyPage => {
@@ -678,6 +751,11 @@ pub fn update(flow: &mut Option<Flow>, step: Step) -> Out {
             match result {
                 Ok(()) => {
                     f.account.clear();
+                    if f.preset && f.model.is_some() {
+                        // Auto configure chose the model: its Agree is next
+                        f.stage = Stage::Agree;
+                        return Out::Nothing;
+                    }
                     f.stage = Stage::Choose;
                     f.busy = true;
                     return Out::Task(list(f.offer));
@@ -697,7 +775,7 @@ pub fn update(flow: &mut Option<Flow>, step: Step) -> Out {
             f.models = Some(result);
         }
         Step::Pick(model) => {
-            if allowed(f.offer.part, f.offer.cloud.id, &model) {
+            if f.may_use(&model) {
                 f.model = Some(model);
                 f.stage = Stage::Agree;
             } else {
@@ -721,7 +799,7 @@ pub fn update(flow: &mut Option<Flow>, step: Step) -> Out {
             }
         }
         Step::Agree => {
-            let Some(model) = f.model.clone().filter(|m| allowed(f.offer.part, f.offer.cloud.id, m)) else {
+            let Some(model) = f.model.clone().filter(|m| f.may_use(m)) else {
                 f.said = Some("Choose a free model first.".into());
                 return Out::Nothing;
             };
@@ -880,7 +958,22 @@ pub fn view<'a>(f: &'a Flow, phase: f32) -> El<'a> {
             col = col.push(line("What is sent", label(sends(o.part), 13.0, theme::TEXT)));
             col = col.push(line("To whom", label(format!("{} ({model}), on your own account", cloud.label), 13.0, theme::TEXT)));
             col = col.push(line("Their data policy", label(cloud.policy, 13.0, theme::TEXT)));
-            col = col.push(line("The free limit", label(o.limit, 13.0, theme::TEXT)));
+            match &f.paid {
+                Some((t, cap)) => {
+                    col = col.push(line(
+                        "Price",
+                        label(
+                            format!(
+                                "Paid: ${:.2} for each million tokens sent and ${:.2} for each million written, charged by {} to your own account. It counts toward your monthly cap of ${cap:.2}; at the cap this part pauses until next month.",
+                                t.price.input_per_m, t.price.output_per_m, cloud.label
+                            ),
+                            13.0,
+                            theme::CAUTION,
+                        ),
+                    ));
+                }
+                None => col = col.push(line("The free limit", label(o.limit, 13.0, theme::TEXT))),
+            }
             if let Some((licence, url)) = o.licence {
                 col = col.push(line(
                     "Licence",

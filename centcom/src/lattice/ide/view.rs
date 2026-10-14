@@ -1257,15 +1257,18 @@ fn welcome<'a>(state: &'a State) -> El<'a> {
     ));
     let shortcut = |keys: &'a str, what: &'a str| row![container(mono(keys, 12.0, theme::GOLD)).width(110), label(what, 12.5, theme::TEXT_DIM)].spacing(10);
     let mut keys = Column::new().spacing(6);
+    keys = keys.push(shortcut("Ctrl+Shift+P", "Every command, page and chat (also F1)"));
     keys = keys.push(shortcut("Ctrl+P", "Go to a file"));
+    keys = keys.push(shortcut("Ctrl+Tab", "The next tab (Ctrl+Shift+T: reopen the last closed)"));
     keys = keys.push(shortcut("Ctrl+S", "Save the file you are editing"));
     keys = keys.push(shortcut("Ctrl+F, Ctrl+H", "Find, and replace, in the file"));
     keys = keys.push(shortcut("Ctrl+Shift+F", "Search the folder"));
     keys = keys.push(shortcut("Ctrl+K", "Ask the agent to edit the selected lines"));
-    keys = keys.push(shortcut("Ctrl+L", "Ask the agent"));
+    keys = keys.push(shortcut("Ctrl+L, Ctrl+N", "Ask the agent; a new chat"));
     keys = keys.push(shortcut("Ctrl+B", "Show or hide the side bar"));
     keys = keys.push(shortcut("Ctrl+J", "The agent's commands and your terminal"));
     keys = keys.push(shortcut("Enter", "Send (Shift+Enter: a new line; Esc: stop the agent)"));
+    keys = keys.push(shortcut("Ctrl+Shift+/", "Every key, on one sheet"));
     col = col.push(container(keys).padding(16).style(theme::panel));
     if state.ide.folder.is_none() {
         col = col.push(ui::primary("Open folder…", (state.services_ready() && !state.ide.picking).then(|| go(IdeMsg::Browse))));

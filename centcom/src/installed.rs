@@ -1,6 +1,7 @@
 //! What this build carries that is not a page, as [`crate::run`] was handed it: the receipt verifier's replay
 //! substrate, and where the programs the public app does not ship are found (Sinai's mind, voice enrolment's
-//! tools), and a build's own rule for the speech engine's program.
+//! tools), a build's own rule for the speech engine's program, and what a build asked to be told when Sinai's loop
+//! starts or stops answering ([`tell_sinai`]).
 //!
 //! The public build carries none of them. Its Trust page checks a receipt's signature, inputs and records but does
 //! not replay it (those checks say "not performed", and no receipt passes); its Sinai page says Sinai's mind is not
@@ -54,6 +55,13 @@ pub fn voice() -> Option<Result<VoiceTools, String>> {
     processes().and_then(|p| p.voice.as_ref()).map(|locate| locate())
 }
 
+/// Tell the build whether Sinai's loop answers, where it asked to be told ([`Registry::on_sinai`]); nothing otherwise.
+pub fn tell_sinai(up: bool) {
+    if let Some(told) = processes().and_then(|p| p.on_sinai.as_ref()) {
+        told(up);
+    }
+}
+
 /// The words for something this build does not carry.
 pub const SINAI_NOT_INSTALLED: &str = "Sinai's mind is not installed on this PC.";
 pub const VOICE_NOT_IN_BUILD: &str = "Voice enrolment is not in this build of Alelyon.";
@@ -68,5 +76,8 @@ mod tests {
     fn the_public_build_carries_nothing_that_is_not_a_page() {
         assert!(replay().is_none());
         assert!(sinai_mind().is_none() && ears().is_none() && voice().is_none());
+        // nothing asked to be told: telling is a no-op
+        tell_sinai(true);
+        tell_sinai(false);
     }
 }

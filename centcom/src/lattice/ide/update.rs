@@ -158,6 +158,8 @@ pub enum IdeMsg {
     ArtifactVersion(u64, u32),
     ArtifactSource(u64),
     ArtifactCopy(u64),
+    /// Text to the clipboard: an answer, or one of its code blocks.
+    CopyText(String),
     ArtifactPreview(String, u32),
     CancelQueued(String),
     // Checkpoints and standing approvals.
@@ -237,21 +239,42 @@ pub enum Key {
     FindNext,
     FindPrevious,
     Escape,
+    /// Esc that no widget took (the keyboard is on the transcript or nowhere): after the overlays, it cancels a message
+    /// being edited or stops the chat's turn.
+    EscapeFree,
     Up,
     Down,
+    /// Ctrl+Tab or Ctrl+PageDown, Ctrl+Shift+Tab or Ctrl+PageUp: the next or previous editor tab.
+    NextTab,
+    PreviousTab,
+    /// Ctrl+Shift+T: the file whose tab closed last opens again.
+    Reopen,
+    /// Ctrl+N: a new chat, the keyboard in its box.
+    NewChat,
 }
 
 /// The IDE's keyboard shortcuts: Ctrl+P quick open, Ctrl+S save, Ctrl+B the side bar, Ctrl+J or Ctrl+` the bottom
 /// panel, Ctrl+W close the tab, Ctrl+L the chat, Ctrl+F find, Ctrl+H replace, Ctrl+G go to line, Ctrl+K the inline
-/// edit, Ctrl+Shift+F search the folder, F3 and Shift+F3 the next and previous match, Escape and the arrows for the
-/// quick-open list.
+/// edit, Ctrl+N a new chat, Ctrl+Shift+F search the folder, Ctrl+Tab and Ctrl+Shift+Tab (or Ctrl+PageDown and Ctrl+PageUp) the next and
+/// previous tab, Ctrl+Shift+T the tab closed last, F3 and Shift+F3 the next and previous match, and the arrows for the
+/// quick-open list. Esc comes from the window ([`escape`]); Ctrl+Shift+P is the window's command palette.
 pub fn keys(event: iced::Event, status: iced::event::Status, _window: iced::window::Id) -> Option<Msg> {
     use iced::keyboard::key::Named;
     use iced::keyboard::{Event, Key as K};
     let iced::Event::Keyboard(Event::KeyPressed { key, modifiers, physical_key, .. }) = event else { return None };
     let captured = status == iced::event::Status::Captured;
+    if modifiers.command() && !modifiers.alt() {
+        match key {
+            K::Named(Named::Tab) => return Some(Msg::Ide(IdeMsg::Key(if modifiers.shift() { Key::PreviousTab } else { Key::NextTab }))),
+            K::Named(Named::PageDown) if !modifiers.shift() => return Some(Msg::Ide(IdeMsg::Key(Key::NextTab))),
+            K::Named(Named::PageUp) if !modifiers.shift() => return Some(Msg::Ide(IdeMsg::Key(Key::PreviousTab))),
+            _ => {}
+        }
+    }
     let key = if modifiers.command() {
         match key.to_latin(physical_key) {
+            Some('t') if modifiers.shift() => Key::Reopen,
+            Some('n') if !modifiers.shift() => Key::NewChat,
             Some('p') if !modifiers.shift() => Key::QuickOpen,
             Some('s') if !captured => Key::Save,
             Some('b') => Key::ToggleSide,
@@ -269,11 +292,6 @@ pub fn keys(event: iced::Event, status: iced::event::Status, _window: iced::wind
         if let K::Named(Named::F3) = key {
             return Some(Msg::Ide(IdeMsg::Key(if modifiers.shift() { Key::FindPrevious } else { Key::FindNext })));
         }
-        // Esc closes what is open over the page even from inside its box: a text box takes the key to give up its
-        // focus, and that must not keep the box itself open.
-        if let K::Named(Named::Escape) = key {
-            return Some(Msg::Ide(IdeMsg::Key(Key::Escape)));
-        }
         if captured {
             return None;
         }
@@ -284,6 +302,13 @@ pub fn keys(event: iced::Event, status: iced::event::Status, _window: iced::wind
         }
     };
     Some(Msg::Ide(IdeMsg::Key(key)))
+}
+
+/// Esc, as the window hands it on once nothing of its own lies over the page (app.rs: one Esc closes one thing). It
+/// closes what is open over the page even from inside its box: a text box takes the key to give up its focus, and that
+/// must not keep the box itself open. Only an Esc no box took (`captured` false) goes on to an edit or a running turn.
+pub fn escape(captured: bool) -> Key {
+    if captured { Key::Escape } else { Key::EscapeFree }
 }
 
 /// The pointer while a border is dragged.
@@ -475,7 +500,10 @@ impl State {
                         }
                         return self.read_listing();
                     }
-                    Err(why) => self.problem = Some(format!("{path}: {why}")),
+                    Err(why) => {
+                        self.restore_failed();
+                        self.problem = Some(format!("{path}: {why}"));
+                    }
                 }
             }
             IdeMsg::Refresh => return self.read_listing(),
@@ -484,10 +512,13 @@ impl State {
                 if self.ide.folder.as_ref().is_some_and(|f| f.id() == id) {
                     self.ide.listing = Some(*result);
                     self.rank_filter();
-                    // The file named on the command line opens with the folder's first listing.
+                    // The file named on the command line opens with the folder's first listing, and the files left
+                    // open last time with them.
+                    let restored = self.restore_files();
                     if let Some((_, Some(file))) = self.ide.startup.take() {
-                        return self.open_file(file);
+                        return Task::batch([restored, self.open_file(file)]);
                     }
+                    return restored;
                 }
             }
             IdeMsg::Dropped(path) => {
@@ -915,6 +946,7 @@ impl State {
                     *source = !*source;
                 }
             }
+            IdeMsg::CopyText(text) => return iced::clipboard::write(text),
             IdeMsg::ArtifactCopy(id) => {
                 if let Some(tab) = self.ide.tabs.iter().find(|t| t.id == id)
                     && let TabKind::Artifact { view: Some(Ok(v)), .. } = &tab.kind
@@ -2261,7 +2293,9 @@ impl State {
     fn key(&mut self, key: Key) -> Task<Msg> {
         // While a terminal has the keyboard its keys are its program's (Ctrl+S, Ctrl+W, Ctrl+L, Esc and the arrows
         // too): only the IDE's Ctrl+P, Ctrl+B and Ctrl+J or Ctrl+` act.
-        if self.ide.terminal_focused() && !matches!(key, Key::QuickOpen | Key::ToggleSide | Key::TogglePanel) {
+        if self.ide.terminal_focused()
+            && !matches!(key, Key::QuickOpen | Key::ToggleSide | Key::TogglePanel | Key::NextTab | Key::PreviousTab)
+        {
             return Task::none();
         }
         match key {
@@ -2288,7 +2322,21 @@ impl State {
             Key::Search => return self.ide_update(IdeMsg::SearchShow),
             Key::FindNext => return self.ide_update(IdeMsg::FindStep(true)),
             Key::FindPrevious => return self.ide_update(IdeMsg::FindStep(false)),
-            Key::Escape => {
+            Key::NextTab | Key::PreviousTab => {
+                self.ide.term_focus = false;
+                self.ide.cycle(key == Key::NextTab);
+            }
+            Key::Reopen => {
+                if let Some(path) = self.ide.closed.pop() {
+                    return self.open_file(path);
+                }
+            }
+            Key::NewChat => {
+                self.ide.term_focus = false;
+                let new = self.update(Msg::New);
+                return Task::batch([new, operation::focus(super::composer_id())]);
+            }
+            Key::Escape | Key::EscapeFree => {
                 if self.ide.jump.is_some() {
                     self.ide.jump = None;
                 } else if self.ide.quick.is_some() {
@@ -2303,6 +2351,12 @@ impl State {
                     return self.ide_update(IdeMsg::FindClose);
                 } else if self.ide.new_file.is_some() {
                     self.ide.new_file = None;
+                } else if key == Key::EscapeFree && self.ide.editing_turn.is_some() {
+                    return self.ide_update(IdeMsg::CancelEditTurn);
+                } else if key == Key::EscapeFree && self.open.as_ref().is_some_and(|c| c.running) {
+                    // The working line says "Esc to stop": it holds wherever the keyboard is, short of a box or the
+                    // editor, which take Esc for themselves.
+                    return self.update(Msg::Stop);
                 }
             }
             Key::Up | Key::Down => {
@@ -2579,9 +2633,63 @@ mod tests {
         assert_eq!(got(press(K::Character("p".into()), Modifiers::CTRL), ignored), Some(Key::QuickOpen));
         assert_eq!(got(press(K::Character("b".into()), Modifiers::CTRL), captured), Some(Key::ToggleSide));
         assert_eq!(got(press(K::Character("s".into()), Modifiers::CTRL), captured), None, "the editor saved it itself");
-        assert_eq!(got(press(K::Named(key::Named::Escape), Modifiers::empty()), ignored), Some(Key::Escape));
+        assert_eq!(got(press(K::Named(key::Named::Escape), Modifiers::empty()), ignored), None, "the window hands Esc on");
+        assert_eq!((escape(true), escape(false)), (Key::Escape, Key::EscapeFree), "no box took it: free");
         assert_eq!(got(press(K::Named(key::Named::ArrowDown), Modifiers::empty()), captured), None);
         assert_eq!(got(press(K::Character("x".into()), Modifiers::empty()), ignored), None);
+        assert_eq!(got(press(K::Named(key::Named::Tab), Modifiers::CTRL), captured), Some(Key::NextTab));
+        assert_eq!(got(press(K::Named(key::Named::Tab), Modifiers::CTRL | Modifiers::SHIFT), ignored), Some(Key::PreviousTab));
+        assert_eq!(got(press(K::Named(key::Named::PageDown), Modifiers::CTRL), ignored), Some(Key::NextTab));
+        assert_eq!(got(press(K::Named(key::Named::PageUp), Modifiers::CTRL), ignored), Some(Key::PreviousTab));
+        assert_eq!(got(press(K::Character("t".into()), Modifiers::CTRL | Modifiers::SHIFT), ignored), Some(Key::Reopen));
+        assert_eq!(got(press(K::Character("n".into()), Modifiers::CTRL), captured), Some(Key::NewChat));
+        assert_eq!(got(press(K::Character("p".into()), Modifiers::CTRL | Modifiers::SHIFT), ignored), None, "the window's palette");
+        assert_eq!(got(press(K::Named(key::Named::Tab), Modifiers::empty()), ignored), None, "plain Tab moves focus");
+    }
+
+    fn file_tab(state: &mut State, path: &str) -> u64 {
+        state.ide.push(TabKind::File { path: path.into(), lang: Lang::Rust, body: Body::Editing(Box::new(editing("x"))), note: None })
+    }
+
+    #[test]
+    fn ctrl_tab_cycles_the_tabs_and_ctrl_shift_t_brings_back_the_last_closed_even_one_closed_past_the_cap() {
+        let mut state = State::new();
+        let a = file_tab(&mut state, "a.rs");
+        let b = file_tab(&mut state, "b.rs");
+        let c = file_tab(&mut state, "c.rs");
+        assert_eq!(state.ide.active, Some(c));
+        let _ = state.ide_update(IdeMsg::Key(Key::NextTab));
+        assert_eq!(state.ide.active, Some(a), "past the last, round to the first");
+        let _ = state.ide_update(IdeMsg::Key(Key::PreviousTab));
+        let _ = state.ide_update(IdeMsg::Key(Key::PreviousTab));
+        assert_eq!(state.ide.active, Some(b));
+        let _ = state.ide_update(IdeMsg::Close(b));
+        assert_eq!(state.ide.closed, ["b.rs"]);
+        // Past the cap the oldest clean tab closes: it is remembered too, so nothing vanishes for good.
+        for i in 0..MAX_TABS {
+            file_tab(&mut state, &format!("more{i}.rs"));
+        }
+        assert!(state.ide.file_tab("a.rs").is_none());
+        assert_eq!(state.ide.closed.last().map(String::as_str), Some("c.rs"));
+        assert!(state.ide.closed.contains(&"a.rs".to_string()));
+        // Reopened (no folder here, so the editor says to open one; the path is taken off the list all the same).
+        let _ = state.ide_update(IdeMsg::Key(Key::Reopen));
+        assert!(!state.ide.closed.contains(&"c.rs".to_string()));
+    }
+
+    #[test]
+    fn a_free_esc_closes_an_overlay_first_then_cancels_an_edit() {
+        let mut state = State::new();
+        state.ide.editing_turn = Some("t1".into());
+        state.ide.jump = Some(super::super::jump::Jump::default());
+        let _ = state.ide_update(IdeMsg::Key(Key::EscapeFree));
+        assert!(state.ide.jump.is_none() && state.ide.editing_turn.is_some(), "the menu first");
+        let _ = state.ide_update(IdeMsg::Key(Key::EscapeFree));
+        assert!(state.ide.editing_turn.is_none(), "then the edit");
+        // Esc a box took never cancels the edit: the box was giving up its focus.
+        state.ide.editing_turn = Some("t1".into());
+        let _ = state.ide_update(IdeMsg::Key(Key::Escape));
+        assert!(state.ide.editing_turn.is_some());
     }
 
     /// A page showing terminal 7 (no shell behind it) with the keyboard, and a clean file open.
@@ -2943,8 +3051,8 @@ mod tests {
         assert_eq!(got(press(K::Character("k".into()), Modifiers::CTRL), ignored), Some(Key::Inline));
         assert_eq!(got(press(K::Named(key::Named::F3), Modifiers::SHIFT), captured), Some(Key::FindPrevious));
         assert_eq!(
-            got(press(K::Named(key::Named::Escape), Modifiers::empty()), captured),
-            Some(Key::Escape),
+            escape(true),
+            Key::Escape,
             "Esc in a box (which takes it to give up its focus) still closes what the box is in"
         );
         let (mut state, _) = with_terminal();

@@ -443,7 +443,10 @@ fn pane_composer<'a>(state: &'a State, tile: &'a Tile, phase: f32) -> El<'a> {
     }
     if running {
         top = top.push(
-            button(label("\u{25A0}", 12.0, theme::TEXT)).padding([5.0, 10.0]).style(theme::secondary_button).on_press(go(GridMsg::Stop(id.clone()))),
+            ui::tip(
+                button(label("\u{25A0}", 12.0, theme::TEXT)).padding([5.0, 10.0]).style(theme::secondary_button).on_press(go(GridMsg::Stop(id.clone()))),
+                "Stop this chat's turn",
+            ),
         );
     }
     let can_send = ready && !tile.sending && !tile.draft.trim().is_empty();

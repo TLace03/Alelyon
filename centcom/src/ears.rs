@@ -384,7 +384,7 @@ pub fn can_start() -> Start {
 /// puts in place, as Lattice's GGUF models are, and nothing is fetched for it.
 pub const MISSING_TITLE: &str = "Before the speech engine can start";
 pub const MISSING_NOTE: &str =
-    "Alelyon does not download speech models or programs: put the files in place, then start the engine here.";
+    "This page does not download speech models or programs: put the files in place (Auto configure Sinai can download a speech model after you agree), then start the engine here.";
 
 /// The engine CENTCOM started: it ends with the window (a job object closes it, a crash included).
 pub struct Engine {

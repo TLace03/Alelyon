@@ -208,6 +208,11 @@ pub fn rail_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button:
     }
 }
 
+/// Where the keyboard is when it is not in a box (the rail, after F6): a gold ring, as a focused box's edge.
+pub fn focus_ring(_: &Theme) -> container::Style {
+    container::Style { border: Border { color: GOLD, width: 2.0, radius: 11.0.into() }, ..container::Style::default() }
+}
+
 // ----------------------------------------------------------------- what is typed in, picked and scrolled
 
 /// The edge of something typed in or picked: a faint gold until the pointer is on it, gold with the focus.
