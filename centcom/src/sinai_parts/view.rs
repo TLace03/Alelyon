@@ -183,7 +183,7 @@ pub fn panel<'a>(
                 Some(snap) => {
                     let folder = snap.speech_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "the speech models folder".into());
                     if snap.speech.is_empty() {
-                        offers = offers.push(note(format!("No speech model files are in {folder}. Put a whisper.cpp model file (.bin) there; Alelyon does not download models.")));
+                        offers = offers.push(note(format!("No speech model files are in {folder}. Put a whisper.cpp model file (.bin) there, or let Auto configure Sinai download one after you agree.")));
                     } else {
                         offers = offers.push(note(format!("Speech model files in {folder}:")));
                     }
@@ -192,6 +192,26 @@ pub fn panel<'a>(
                         let in_use = current.as_ref() == Some(&choice);
                         let facts = vec![label(crate::ui::bytes(f.size), 12.0, theme::TEXT_FAINT).into(), label("on this PC (the speech engine)", 12.0, theme::TEXT_FAINT).into()];
                         offers = offers.push(offer(f.name.clone(), facts, Some((Level::Up, "Here, ready for the speech engine's next start.".to_string())), Some(choice), in_use, part, busy));
+                    }
+                }
+            },
+            Kind::VoiceFile => match &s.snapshot {
+                None => offers = offers.push(working(phase, "Reading the voice folder")),
+                Some(snap) => {
+                    let folder = snap.voice_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "the voice folder".into());
+                    if snap.voices.is_empty() {
+                        offers = offers.push(note(format!(
+                            "No voice model files are in {folder}. Put a Kokoro voice model (.onnx) there; Alelyon does not download voices."
+                        )));
+                    } else {
+                        offers = offers.push(note(format!("Voice model files in {folder}:")));
+                    }
+                    for f in &snap.voices {
+                        let choice = Choice::VoiceFile(f.name.clone());
+                        let in_use = current.as_ref() == Some(&choice);
+                        let facts = vec![label(crate::ui::bytes(f.size), 12.0, theme::TEXT_FAINT).into(), label("on this PC (Sinai's loop)", 12.0, theme::TEXT_FAINT).into()];
+                        let ready = if mind { "Here, ready for Sinai's own loop's next start." } else { "Here. Sinai's own loop, which comes with the official app, speaks with it." };
+                        offers = offers.push(offer(f.name.clone(), facts, Some((Level::Up, ready.to_string())), Some(choice), in_use, part, busy));
                     }
                 }
             },

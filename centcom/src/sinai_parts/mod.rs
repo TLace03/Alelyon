@@ -7,10 +7,10 @@
 //! model, where it runs and its state at the top, then the models it can use.
 //!
 //! **What a part can use, in this version**: a model on this PC (a GGUF file of the models folder; for the ears, a
-//! speech model file of the speech engine's models folder), an OpenAI-compatible endpoint the person set up in the
-//! Models panel, or a free cloud model on the person's own provider account ([`Kind::Cloud`], [`cloud`]: offered,
-//! connected and agreed to part by part before anything is sent); for the mind, also Sinai's own mind where the build
-//! carries it. Which kinds each part offers is [`offered`].
+//! speech model file of the speech engine's models folder; for the voice, a Kokoro voice model file of the voice
+//! folder), an OpenAI-compatible endpoint the person set up in the Models panel, or a free cloud model on the person's
+//! own provider account ([`Kind::Cloud`], [`cloud`]: offered, connected and agreed to part by part before anything is
+//! sent); for the mind, also Sinai's own mind where the build carries it. Which kinds each part offers is [`offered`].
 //!
 //! **What a choice changes**:
 //! - the mind: who answers on Sinai's page (`models::answering`). Without Sinai's mind, the chosen model answers.
@@ -20,7 +20,14 @@
 //!   [`ears_model_args`]); an engine already running keeps its model until it next starts;
 //! - the ears in the cloud: the speech engine starts with `--cloud <provider> --cloud-model <model>` and the
 //!   provider's key in its environment, and reads with the provider's model instead of starting whisper-server;
-//! - the eyes, embeddings and voice: kept for Sinai's own loop. Nothing in this window runs them; each card says so.
+//! - the eyes, embeddings and voice, and Sinai's own hearing: Sinai's own loop, where it is installed, reads the
+//!   choice when it starts that part (its hearing, embeddings and voice at its own start; its eyes each time they
+//!   open). It runs only what it can run itself: a GGUF file (for the eyes, with its vision projector beside it, see
+//!   [`projector_for`]), a speech model file, a voice model file. For an endpoint it keeps its own model. The loop
+//!   never calls a provider: an agreed cloud model of its eyes, embeddings or voice is used only through a build's
+//!   own service beside the loop, which checks each call with [`crate::parts_gate`] (these choices and records) and
+//!   makes it through the same metered routes; a build without one leaves the loop on its own model. Each card says
+//!   what uses the choice.
 //!
 //! **Where choices are kept**: Alelyon's preferences (`prefs`), one entry per part in a versioned object:
 //!
@@ -31,11 +38,12 @@
 //!   "eyes":       {"kind": "gguf", "name": "<stem>"} | {"kind": "endpoint", "id": "<id>"},
 //!   "ears":       {"kind": "speech-file", "file": "<file name>"},
 //!   "embeddings": {"kind": "gguf", "name": "<stem>"} | {"kind": "endpoint", "id": "<id>"},
-//!   "voice":      {"kind": "endpoint", "id": "<id>"}
+//!   "voice":      {"kind": "voice-file", "file": "<file name>"} | {"kind": "endpoint", "id": "<id>"}
 //!   any part:     {"kind": "cloud", "provider": "<id>", "model": "<id>", "agreed": "<UTC time>"}
 //! }
 //! ```
 //!
+//! `voice-file` joined version 1 without a new number: a build that does not know it keeps the entry as written.
 //! A part without an entry uses its default: the eyes are off; the ears use the speech engine's own model rule; the
 //! embeddings and voice are Sinai's loop's own; the mind follows the models panel's rule. A cloud entry is used only
 //! with its `"agreed"` stamp, which only the Agree step writes, for a provider the part offers and a free model; one
@@ -44,13 +52,19 @@
 //! `"sinai_model"`, the key older versions read (a cloud model as `cloud:<provider>/<model>`, which they read as no
 //! model); when the two disagree (an older version chose after this one), `"sinai_model"` wins.
 //!
+//! **Auto configure** ([`auto`]) proposes a model for every part from two dials (effort, price tier) and a quality
+//! catalogue that ships with the app, and sets them up only after the person's Agree. At a paid tier, a part may use a
+//! paid cloud model the person agreed to, at its known price and within the tier's monthly cap (the `"sinai_auto"`
+//! preferences' `"paid"` allowance); every other cloud choice stays free only.
+//!
 //! One action can fill several parts at once ([`Choices::set`] per part, one write each): the store holds a choice per
 //! part, never one shared model, so "one model for every part" is a later action over the same entries.
 //!
-//! **Live**: while a card or the picker is on show, the preferences file and the speech models folder are watched
-//! (`live`), and the window is told only when one changes; the models folder and the registry are the Models panel's
-//! watch. There is no Check again.
+//! **Live**: while a card or the picker is on show, the preferences file, the speech models folder, the voice folder
+//! and the models folder (for the eyes' vision projector) are watched (`live`), and the window is told only when one
+//! changes; the registry is the Models panel's watch. There is no Check again.
 
+pub mod auto;
 pub mod cloud;
 pub mod view;
 
@@ -136,6 +150,8 @@ pub enum Kind {
     Endpoint,
     /// A speech model file of the speech engine's models folder.
     SpeechFile,
+    /// A Kokoro voice model file (ONNX) of the voice folder.
+    VoiceFile,
     /// A free model of a hosted provider, on the person's own account, agreed to part by part ([`cloud`]).
     Cloud,
 }
@@ -149,8 +165,8 @@ pub fn offered(part: Part, mind: bool) -> Vec<Kind> {
         Part::Mind if mind => vec![Kind::SinaiMind, Kind::Gguf, Kind::Endpoint],
         Part::Mind | Part::Eyes | Part::Embeddings => vec![Kind::Gguf, Kind::Endpoint],
         Part::Ears => vec![Kind::SpeechFile],
-        // a voice model on this PC is not a GGUF file, and its files are not listed yet
-        Part::Voice => vec![Kind::Endpoint],
+        // a voice model on this PC is not a GGUF file: it is a voice model file of the voice folder
+        Part::Voice => vec![Kind::VoiceFile, Kind::Endpoint],
     };
     if CLOUD_OFFERED {
         kinds.push(Kind::Cloud);
@@ -166,6 +182,8 @@ pub enum Choice {
     Endpoint(String),
     /// A speech model file, by its file name, in the speech engine's models folder.
     SpeechFile(String),
+    /// A voice model file, by its file name, in the voice folder.
+    VoiceFile(String),
     /// A free model of a hosted provider; used only once agreed (`agreed`: when, in UTC).
     Cloud { provider: String, model: String, agreed: Option<String> },
     /// An entry of a kind this version does not know, kept as written.
@@ -179,6 +197,7 @@ impl Choice {
             Choice::Gguf(_) => Kind::Gguf,
             Choice::Endpoint(_) => Kind::Endpoint,
             Choice::SpeechFile(_) => Kind::SpeechFile,
+            Choice::VoiceFile(_) => Kind::VoiceFile,
             Choice::Cloud { .. } => Kind::Cloud,
             Choice::Unknown(_) => return None,
         })
@@ -191,6 +210,7 @@ impl Choice {
             Choice::Gguf(name) => json!({"kind": "gguf", "name": name}),
             Choice::Endpoint(id) => json!({"kind": "endpoint", "id": id}),
             Choice::SpeechFile(file) => json!({"kind": "speech-file", "file": file}),
+            Choice::VoiceFile(file) => json!({"kind": "voice-file", "file": file}),
             Choice::Cloud { provider, model, agreed } => {
                 let mut v = json!({"kind": "cloud", "provider": provider, "model": model});
                 if let Some(at) = agreed {
@@ -217,6 +237,14 @@ impl Choice {
                     return None;
                 }
                 Choice::SpeechFile(file)
+            }
+            "voice-file" => {
+                let file = field("file")?;
+                // a file name, never a path: the file is looked for in the voice folder only
+                if !plain_file_name(&file) {
+                    return None;
+                }
+                Choice::VoiceFile(file)
             }
             "cloud" => Choice::Cloud { provider: field("provider")?, model: field("model")?, agreed: field("agreed") },
             _ => Choice::Unknown(v.clone()),
@@ -248,6 +276,9 @@ fn plain_file_name(name: &str) -> bool {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Choices {
     chosen: HashMap<Part, Choice>,
+    /// The paid cloud model each part may use, by provider and model, while the price tier is a paid one
+    /// (`auto::Settings::paid_for`).
+    paid: HashMap<Part, (String, String)>,
 }
 
 impl Choices {
@@ -269,12 +300,26 @@ impl Choices {
                 }
             }
         }
-        Choices { chosen }
+        Choices { chosen, paid: HashMap::new() }
+    }
+
+    /// The same, with `part` allowed the paid `model` of `provider` (Auto configure's agreed allowance at a paid tier).
+    pub fn allow_paid(&mut self, part: Part, provider: &str, model: &str) {
+        self.paid.insert(part, (provider.to_string(), model.to_string()));
     }
 
     pub fn read(at: Option<&Path>) -> Choices {
         match at {
-            Some(at) => Choices::from_prefs(&crate::prefs::load_parts(at), crate::prefs::load_sinai_model(at).as_deref()),
+            Some(at) => {
+                let mut c = Choices::from_prefs(&crate::prefs::load_parts(at), crate::prefs::load_sinai_model(at).as_deref());
+                let s = auto::Settings::read(Some(at));
+                if s.cap().is_some() {
+                    for (part, t) in &s.paid {
+                        c.allow_paid(*part, &t.provider, &t.model);
+                    }
+                }
+                c
+            }
             None => Choices::default(),
         }
     }
@@ -287,7 +332,11 @@ impl Choices {
     /// the part offers and a free model.
     pub fn used(&self, part: Part) -> Option<&Choice> {
         self.get(part).filter(|c| match c {
-            Choice::Cloud { provider, model, agreed } => CLOUD_OFFERED && agreed.is_some() && cloud::allowed(part, provider, model),
+            Choice::Cloud { provider, model, agreed } => {
+                CLOUD_OFFERED
+                    && agreed.is_some()
+                    && (cloud::allowed(part, provider, model) || self.paid.get(&part).is_some_and(|(p, m)| p == provider && m == model))
+            }
             other => other.kind().is_some(),
         })
     }
@@ -382,6 +431,114 @@ pub fn chosen_ears_env() -> Result<Option<(String, lattice_core::keys::SecretStr
     cloud::ears_env(Choices::read(prefs.as_deref()).used(Part::Ears))
 }
 
+// ------------------------------------------------------------------- voice model files
+
+/// The voice folder, beside the speech models folder: `~/.alelyon/angel/voices` (`USERPROFILE`, else `HOME`). A
+/// folder of its own, because the speech models folder holds other ONNX files (the speaker and turn models) that are
+/// not voices. Sinai's loop looks for a chosen voice model file here, and only here.
+pub fn voice_dir() -> Option<PathBuf> {
+    speech_dir().and_then(|d| d.parent().map(|p| p.join("voices")))
+}
+
+/// The ModelProto fields an ONNX file can open with after its `ir_version` (field 1, a varint): producer_name (2),
+/// producer_version (3), domain (4), model_version (5), doc_string (6), graph (7), opset_import (8).
+const ONNX_SECOND_TAGS: [u8; 7] = [0x12, 0x1a, 0x22, 0x28, 0x32, 0x3a, 0x42];
+
+/// Whether `head`, a file's first bytes, opens as an ONNX model file does: a protobuf `ModelProto` starting with its
+/// `ir_version`, then one of its other fields.
+pub fn onnx_header(head: &[u8]) -> bool {
+    matches!(head, [0x08, version, tag, ..] if (1..=0x7f).contains(version) && ONNX_SECOND_TAGS.contains(tag))
+}
+
+/// The voice model files in `dir` (not below it): `.onnx` files that open as ONNX model files do, by name. Kokoro's
+/// voices file (`voices-*.bin`) beside one is the loop's to use; it is not a choice.
+pub fn voice_files(dir: &Path) -> Vec<SpeechFile> {
+    let Ok(entries) = std::fs::read_dir(dir) else { return Vec::new() };
+    let mut found: Vec<SpeechFile> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.to_lowercase().ends_with(".onnx") {
+                return None;
+            }
+            let meta = e.metadata().ok().filter(std::fs::Metadata::is_file)?;
+            let mut head = [0u8; 3];
+            let mut file = std::fs::File::open(e.path()).ok()?;
+            std::io::Read::read_exact(&mut file, &mut head).ok()?;
+            onnx_header(&head).then(|| SpeechFile { name, path: e.path(), size: meta.len() })
+        })
+        .collect();
+    found.sort_by_key(|f| f.name.to_lowercase());
+    found
+}
+
+// ------------------------------------------------------------------- the eyes' vision projector
+
+/// A GGUF file's stem without a leading `mmproj` and without its quantisation tag: what a vision model and its
+/// projector share (`mmproj-Qwen2.5-VL-7B-Instruct-Q8_0` and `Qwen2.5-VL-7B-Instruct-Q4_K_M` share
+/// `qwen2.5-vl-7b-instruct`). Sinai's loop matches by the same rule.
+fn projector_base(stem: &str) -> String {
+    let mut s = stem.to_lowercase();
+    if let Some(rest) = s.strip_prefix("mmproj") {
+        s = rest.trim_start_matches(['-', '_', '.', ' ']).to_string();
+    }
+    if let Some(at) = s.rfind(['-', '.']) {
+        let tag = &s[at + 1..];
+        let digit = |t: &str| t.chars().next().is_some_and(|c| c.is_ascii_digit());
+        let quant = tag.strip_prefix('q').is_some_and(digit)
+            || tag.strip_prefix("iq").is_some_and(digit)
+            || ["f16", "bf16", "f32", "fp16", "fp32"].contains(&tag);
+        if quant {
+            s.truncate(at);
+        }
+    }
+    s
+}
+
+fn file_stem(name: &str) -> &str {
+    match name.rfind('.') {
+        Some(at) if at > 0 && at < name.len() - 1 => &name[..at],
+        _ => name,
+    }
+}
+
+/// The vision projector for the vision model at `model`: an `mmproj*` GGUF file beside it whose name, without
+/// `mmproj` and the quantisation tag, is the model's own; the first by name when several are. Without one, Sinai's
+/// loop keeps its own vision model.
+pub fn projector_for(model: &Path) -> Option<PathBuf> {
+    let want = projector_base(file_stem(&model.file_name()?.to_string_lossy()));
+    if want.is_empty() {
+        return None;
+    }
+    let mut found: Vec<PathBuf> = std::fs::read_dir(model.parent()?)
+        .ok()?
+        .flatten()
+        .filter(|e| {
+            let name = e.file_name().to_string_lossy().to_lowercase();
+            name.starts_with("mmproj") && name.ends_with(".gguf") && projector_base(file_stem(&name)) == want
+        })
+        .map(|e| e.path())
+        .filter(|p| {
+            let mut magic = [0u8; 4];
+            std::fs::File::open(p).and_then(|mut f| std::io::Read::read_exact(&mut f, &mut magic)).is_ok() && &magic == b"GGUF"
+        })
+        .collect();
+    found.sort_by_key(|p| p.file_name().map(|n| n.to_string_lossy().to_lowercase()));
+    found.into_iter().next()
+}
+
+/// Whether Sinai's loop can open its eyes with the vision model chosen: the projector's file name, or why not.
+pub fn eyes_projector(model: &Path) -> Result<String, String> {
+    match projector_for(model) {
+        Some(p) => Ok(p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()),
+        None => Err(format!(
+            "no vision projector (an mmproj file) for {} is beside it in {}",
+            model.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+            model.parent().map(|p| p.display().to_string()).unwrap_or_default()
+        )),
+    }
+}
+
 // ------------------------------------------------------------------- a part's card
 
 /// How a card's state reads.
@@ -431,6 +588,10 @@ pub struct Facts<'a> {
     /// A local service's port: Some(true) when it answers, None before the first look.
     pub port: &'a dyn Fn(u16) -> Option<bool>,
     pub ears: EarsNow,
+    /// What the picker last read (the voice folder's files, the eyes' vision projector); None before the first read.
+    pub found: Option<&'a Snapshot>,
+    /// How recall by meaning is doing, as Sinai's loop reports it in its memory snapshot; None without one.
+    pub loop_meaning: Option<&'a str>,
 }
 
 /// Where a model runs, in words.
@@ -474,16 +635,55 @@ fn own(pick: &Pick, f: &Facts<'_>) -> (String, String, Level, String) {
     (name, runs_at(pick, f.catalog), level, state)
 }
 
+/// What uses the eyes', embeddings' or voice's choice: Sinai's own loop where the build carries it, which reads the
+/// choice when it starts that part and runs only what it can run itself; nothing in a build without it.
+fn loop_use(part: Part, kept: Option<&Choice>, f: &Facts<'_>) -> String {
+    if !f.mind {
+        return "Nothing in this build uses it: Sinai's own loop, which comes with the official app, reads this choice."
+            .to_string();
+    }
+    let own = match part {
+        Part::Eyes => "vision model",
+        Part::Embeddings => "embedding model",
+        _ => "voice",
+    };
+    match (part, kept) {
+        (Part::Eyes, Some(Choice::Gguf(_))) => match f.found.and_then(|s| s.eyes_projector.as_ref()) {
+            Some(Ok(projector)) => format!("Sinai's own loop: its eyes open with this model and {projector}, each time they open."),
+            Some(Err(why)) => format!("Sinai's own loop keeps its own vision model: {why}."),
+            None => "Sinai's own loop: its eyes open with this model each time they open, when its vision projector \
+                     (an mmproj file) is beside it."
+                .to_string(),
+        },
+        (Part::Embeddings, Some(Choice::Gguf(_))) => "Sinai's own loop: its embedding server starts with this model at \
+             the loop's next start. Recall by meaning uses a model other than Sinai's own only once the recall probe \
+             has measured it; until then Sinai recalls by words. A measured model codes Sinai's saved conversations \
+             once."
+            .to_string(),
+        (Part::Voice, Some(Choice::VoiceFile(_))) => "Sinai's own loop: it speaks with this voice model from its next start.".to_string(),
+        (_, Some(c)) => format!(
+            "Sinai's own loop uses its own {own} for {} in this version.",
+            match c.kind() {
+                Some(Kind::Endpoint) => "an endpoint",
+                Some(Kind::Cloud) => "a cloud choice",
+                _ => "this kind of choice",
+            }
+        ),
+        (Part::Eyes, None) => "Sinai's own loop, with its own vision model. A GGUF vision model chosen here, with its vision \
+             projector beside it, is used the next time its eyes open."
+            .to_string(),
+        (Part::Embeddings, None) => "Sinai's own loop, with its own embedding model. A GGUF file chosen here is used from \
+             its next start."
+            .to_string(),
+        (_, None) => "Sinai's own loop, with its own voice. A voice model file chosen here is used from its next start.".to_string(),
+    }
+}
+
 /// `part`'s card: its model, where it runs, its state, and what uses the choice in this build.
 pub fn card(part: Part, choices: &Choices, f: &Facts<'_>) -> Card {
     if let Some(card) = cloud_card(part, choices, f) {
         return card;
     }
-    let loop_note = if f.mind {
-        "Kept for Sinai's own loop, which does not read this choice yet: it runs a model of its own."
-    } else {
-        "Nothing in this build uses it yet: Sinai's own loop comes with the official app. The choice is kept for it."
-    };
     let chosen = |part| choices.used(part).and_then(Choice::pick);
     let (model, runs, level, state, used_by) = match part {
         Part::Mind => {
@@ -496,22 +696,22 @@ pub fn card(part: Part, choices: &Choices, f: &Facts<'_>) -> Card {
             match f.answering {
                 Answering::Mind => {
                     let (level, state) = port_state((f.port)(8179), "Running", "Not running: it starts with Sinai's loop.");
-                    ("Sinai's mind".to_string(), "on this PC".to_string(), level, state, used_by)
+                    ("Sinai's mind".to_string(), "on this PC".to_string(), level, state, used_by.to_string())
                 }
                 Answering::Own(pick) => {
                     let (name, runs, level, state) = own(pick, f);
-                    (name, runs, level, state, used_by)
+                    (name, runs, level, state, used_by.to_string())
                 }
                 Answering::Cloud(pick) => {
                     let (name, runs, level, state) = cloud::card_lines(Part::Mind, &pick.provider, &pick.model, cloud::now());
-                    (name, runs, level, state, used_by)
+                    (name, runs, level, state, used_by.to_string())
                 }
                 Answering::Nobody => (
                     "None chosen".to_string(),
                     String::new(),
                     Level::Off,
                     "Choose a model on this PC or an endpoint you set up.".to_string(),
-                    used_by,
+                    used_by.to_string(),
                 ),
             }
         }
@@ -535,36 +735,69 @@ pub fn card(part: Part, choices: &Choices, f: &Facts<'_>) -> Card {
                 }
             };
             let used_by = if f.mind {
-                "The speech engine (captions, dictation and files), when Alelyon starts it. Sinai's own hearing runs a \
-                 model of its own and does not read this choice yet."
+                "The speech engine (captions, dictation and files), when Alelyon starts it, and Sinai's own hearing, from \
+                 its loop's next start (with no choice here, its hearing keeps its own model)."
             } else {
                 "The speech engine (captions, dictation and files), when Alelyon starts it."
             };
-            (file, "on this PC (the speech engine)".to_string(), level, state, used_by)
+            (file, "on this PC (the speech engine)".to_string(), level, state, used_by.to_string())
         }
         Part::Eyes | Part::Embeddings | Part::Voice => {
-            let (model, runs, level, mut state) = match (chosen(part), part) {
-                (Some(pick), _) => own(&pick, f),
-                (None, Part::Eyes) => {
+            let kept = choices.used(part);
+            let (model, runs, mut level, mut state) = match (kept, chosen(part), part) {
+                (Some(Choice::VoiceFile(file)), _, _) => {
+                    let (level, state) = match f.found {
+                        None => (Level::Waiting, "Reading the voice folder".to_string()),
+                        Some(s) if s.voices.iter().any(|v| v.name == *file) => (Level::Up, "A voice model file on this PC.".to_string()),
+                        Some(s) => (
+                            Level::Problem,
+                            format!(
+                                "Not in the voice folder ({}): Sinai's own loop keeps its own voice.",
+                                s.voice_dir.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "not known".into())
+                            ),
+                        ),
+                    };
+                    (file.clone(), "on this PC (Sinai's loop)".to_string(), level, state)
+                }
+                (_, Some(pick), _) => own(&pick, f),
+                (_, None, Part::Eyes) => {
                     ("Off".to_string(), String::new(), Level::Off, "Off until you choose a vision model.".to_string())
                 }
-                (None, _) => ("Sinai's loop's own".to_string(), String::new(), Level::Off, String::new()),
+                (_, None, _) => ("Sinai's loop's own".to_string(), String::new(), Level::Off, String::new()),
             };
+            // a vision model Sinai's loop cannot open its eyes with, as it stands
+            if f.mind
+                && matches!(kept, Some(Choice::Gguf(_)))
+                && part == Part::Eyes
+                && matches!(f.found.and_then(|s| s.eyes_projector.as_ref()), Some(Err(_)))
+            {
+                level = Level::Problem;
+            }
             // what Sinai's own loop is doing, where the build carries it
             if f.mind {
                 let loop_now = match part {
-                    Part::Eyes => port_state((f.port)(8181), "Its own vision model is open.", "Its own vision model opens when it looks.").1,
-                    Part::Embeddings => port_state((f.port)(8182), "Its own embedding model is running.", "Its own embedding model is not running.").1,
+                    Part::Eyes => port_state((f.port)(8181), "Its eyes are open.", "Its eyes open when it looks.").1,
+                    Part::Embeddings => {
+                        port_state((f.port)(8182), "Its embedding server is running.", "Its embedding server is not running.").1
+                    }
                     _ => port_state((f.port)(8180), "It speaks through its loop, which is running.", "Its loop is not running.").1,
                 };
                 state = if state.is_empty() { loop_now } else { format!("{state} {loop_now}") };
+                // how recall by meaning is doing, as the loop reports it (for a model it has not measured yet:
+                // "recall by meaning: measuring <model> first", while recall by words goes on)
+                if part == Part::Embeddings
+                    && let Some(said) = f.loop_meaning.map(str::trim).filter(|s| !s.is_empty())
+                {
+                    let said = said.strip_prefix("recall by meaning: ").unwrap_or(said);
+                    state = format!("{state} Recall by meaning: {said}.");
+                }
             } else if state.is_empty() {
                 state = "Not in this build.".to_string();
             }
-            (model, runs, level, state, loop_note)
+            (model, runs, level, state, loop_use(part, kept, f))
         }
     };
-    Card { part, model, runs, level, state, used_by: used_by.to_string() }
+    Card { part, model, runs, level, state, used_by }
 }
 
 /// The card of a part on a cloud model: the mind while its cloud model answers, another part while its agreed cloud
@@ -586,8 +819,9 @@ fn cloud_card(part: Part, choices: &Choices, f: &Facts<'_>) -> Option<Card> {
         Part::Ears => format!(
             "The speech engine (captions, dictation and files), when Alelyon starts it: it reads with {label} instead of a model on this PC."
         ),
-        _ if f.mind => format!("Sinai's own loop, which sends to {label} only when it uses this part."),
-        _ => "Nothing in this build uses it yet: Sinai's own loop comes with the official app. The choice is kept for it.".to_string(),
+        // the loop is not given the cloud routes: only this window's metered path calls a provider
+        _ if f.mind => format!("Sinai's loop uses its own model for a cloud choice in this version: nothing is sent to {label} for it."),
+        _ => "Nothing in this build uses it: Sinai's own loop, which comes with the official app, reads this choice.".to_string(),
     };
     if part == Part::Ears && level == Level::Up {
         (level, state) = match &f.ears {
@@ -606,18 +840,60 @@ fn cloud_card(part: Part, choices: &Choices, f: &Facts<'_>) -> Option<Card> {
 
 // ------------------------------------------------------------------- the picker's state
 
-/// What the picker reads: the choices, and the speech models folder with its files.
+/// What the picker reads: the choices, the speech models folder and the voice folder with their files, and for a
+/// vision model chosen from the models folder, its projector or why there is none.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
 pub struct Snapshot {
     pub choices: Choices,
     pub speech_dir: Option<PathBuf>,
     pub speech: Vec<SpeechFile>,
+    pub voice_dir: Option<PathBuf>,
+    pub voices: Vec<SpeechFile>,
+    /// None when the eyes' choice is not a GGUF file of the models folder.
+    pub eyes_projector: Option<Result<String, String>>,
+}
+
+/// Where the picker reads from: the preferences file and the three folders (None: not known, nothing read there).
+#[derive(Clone, Debug, Default)]
+pub struct Places {
+    pub prefs: Option<PathBuf>,
+    pub speech_dir: Option<PathBuf>,
+    pub voice_dir: Option<PathBuf>,
+    pub models_dir: Option<PathBuf>,
+}
+
+impl Places {
+    /// This process's: Alelyon's own places. A test build keeps none.
+    pub fn real() -> Places {
+        if cfg!(test) {
+            return Places::default();
+        }
+        Places {
+            prefs: crate::prefs::path(),
+            speech_dir: speech_dir(),
+            voice_dir: voice_dir(),
+            models_dir: Some(lattice_core::llama::files::LlamaPaths::from_env(&lattice_core::ProcessEnv).models_dir),
+        }
+    }
 }
 
 /// Read what the cards and the picker show. Reads only.
-pub fn snapshot(prefs: Option<&Path>, speech_dir: Option<PathBuf>) -> Snapshot {
-    let speech = speech_dir.as_deref().map(speech_files).unwrap_or_default();
-    Snapshot { choices: Choices::read(prefs), speech_dir, speech }
+pub fn snapshot(at: &Places) -> Snapshot {
+    let choices = Choices::read(at.prefs.as_deref());
+    let eyes_projector = match (choices.used(Part::Eyes), at.models_dir.as_deref()) {
+        (Some(Choice::Gguf(name)), Some(dir)) => {
+            lattice_core::llama::files::resolve_model(name, dir).ok().map(|m| eyes_projector(&m.path))
+        }
+        _ => None,
+    };
+    Snapshot {
+        choices,
+        speech_dir: at.speech_dir.clone(),
+        speech: at.speech_dir.as_deref().map(speech_files).unwrap_or_default(),
+        voice_dir: at.voice_dir.clone(),
+        voices: at.voice_dir.as_deref().map(voice_files).unwrap_or_default(),
+        eyes_projector,
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -656,13 +932,16 @@ pub struct State {
     pub said: Option<Result<String, String>>,
     /// The steps of using a free cloud model, open in the picker.
     pub flow: Option<cloud::Flow>,
-    /// The preferences file (None: nothing is kept) and the speech models folder.
+    /// The preferences file (None: nothing is kept), the speech models folder, the voice folder and the models folder.
     prefs: Option<PathBuf>,
     speech_dir: Option<PathBuf>,
+    voice_dir: Option<PathBuf>,
+    models_dir: Option<PathBuf>,
 }
 
 impl Default for State {
     fn default() -> State {
+        let Places { prefs, speech_dir, voice_dir, models_dir } = Places::real();
         State {
             open: None,
             snapshot: None,
@@ -671,8 +950,10 @@ impl Default for State {
             working: false,
             said: None,
             flow: None,
-            prefs: if cfg!(test) { None } else { crate::prefs::path() },
-            speech_dir: if cfg!(test) { None } else { speech_dir() },
+            prefs,
+            speech_dir,
+            voice_dir,
+            models_dir,
         }
     }
 }
@@ -697,8 +978,13 @@ impl State {
             return Task::none();
         }
         self.reading = true;
-        let (prefs, dir) = (self.prefs.clone(), self.speech_dir.clone());
-        Task::perform(off_thread(move || snapshot(prefs.as_deref(), dir)), |s| Msg::Read(Box::new(s.unwrap_or_default())))
+        let at = Places {
+            prefs: self.prefs.clone(),
+            speech_dir: self.speech_dir.clone(),
+            voice_dir: self.voice_dir.clone(),
+            models_dir: self.models_dir.clone(),
+        };
+        Task::perform(off_thread(move || snapshot(&at)), |s| Msg::Read(Box::new(s.unwrap_or_default())))
     }
 
     /// Why `choice` cannot be used for `part`, if it cannot: a kind the part does not offer, a model not there.
@@ -713,8 +999,13 @@ impl State {
                 let there = self.snapshot.as_ref().is_some_and(|s| s.speech.iter().any(|f| f.name == *file));
                 (!there).then(|| "that speech model file is not in the speech models folder.".to_string())
             }
+            Choice::VoiceFile(file) => {
+                let there = self.snapshot.as_ref().is_some_and(|s| s.voices.iter().any(|f| f.name == *file));
+                (!there).then(|| "that voice model file is not in the voice folder.".to_string())
+            }
             Choice::Cloud { provider, model, agreed } => {
-                if !cloud::allowed(part, provider, model) {
+                let paid = self.choices().paid.get(&part).is_some_and(|(p, m)| p == provider && m == model);
+                if !cloud::allowed(part, provider, model) && !paid {
                     Some(format!("the {} offers no free model of that kind there.", part.title().to_lowercase()))
                 } else if agreed.is_none() {
                     Some("nothing is sent before you agree: use a free cloud model and agree on its card.".to_string())
@@ -797,6 +1088,10 @@ impl State {
                     Ok(()) => {
                         if let Some(s) = &mut self.snapshot {
                             s.choices.set(part, choice.clone());
+                            // the projector found was the old choice's: the watch's next read finds the new one's
+                            if part == Part::Eyes {
+                                s.eyes_projector = None;
+                            }
                         }
                         self.said = Some(Ok(match (part, &choice) {
                             (_, Some(Choice::Cloud { provider, .. })) => {
@@ -804,6 +1099,12 @@ impl State {
                             }
                             (Part::Ears, Some(_)) => "Kept. The speech engine uses it the next time Alelyon starts it.".to_string(),
                             (Part::Mind, _) => "Kept. Sinai's page uses it now.".to_string(),
+                            (Part::Eyes, Some(Choice::Gguf(_))) if mind => {
+                                "Kept. Sinai's own loop uses it the next time its eyes open.".to_string()
+                            }
+                            (Part::Embeddings, Some(Choice::Gguf(_))) | (Part::Voice, Some(Choice::VoiceFile(_))) if mind => {
+                                "Kept. Sinai's own loop uses it from its next start.".to_string()
+                            }
                             (_, None) => "Kept: the default.".to_string(),
                             _ => "Kept.".to_string(),
                         }));
@@ -827,6 +1128,13 @@ impl State {
         }
         if let Some(dir) = &self.speech_dir {
             sources.push(("the speech models folder".to_string(), Source::Folder { path: dir.clone(), subtree: false }));
+        }
+        if let Some(dir) = &self.voice_dir {
+            sources.push(("the voice folder".to_string(), Source::Folder { path: dir.clone(), subtree: false }));
+        }
+        // a vision projector put beside the chosen vision model, or taken away (one folder below, as models are)
+        if let Some(dir) = &self.models_dir {
+            sources.push(("the models folder".to_string(), Source::Folder { path: dir.clone(), subtree: true }));
         }
         if sources.is_empty() {
             return Subscription::none();

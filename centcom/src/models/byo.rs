@@ -9,7 +9,8 @@
 //!   (`models::build`: the key read at that moment from where lattice-core finds keys, no proxy for an address on this
 //!   PC, errors worded without the response, the key or the address's credentials);
 //! - **a free cloud model** on the person's own provider account, chosen and agreed in the mind's picker
-//!   (`sinai_parts::cloud`), asked through lattice-core's parts routes (`hosted::parts::chat`, a free model only).
+//!   (`sinai_parts::cloud`), asked through lattice-core's parts routes (`hosted::parts::chat`): a free model, or a paid
+//!   one only with the allowance and monthly cap Auto configure's Agree kept (`sinai_parts::auto::paid_reach`).
 //!   Its answer comes whole, not in pieces. At the provider's free limit the mind pauses until the time the provider
 //!   gives, and the page says when it is back; nothing is retried, switched or paid.
 //!
@@ -197,7 +198,8 @@ async fn answer(engine: Parts, target: Target, request: ModelRequest, tx: future
             };
             let keys = KeyStore::new(engine.env.clone(), &engine.state);
             let reach = match lattice_core::hosted::parts::Reach::found(cloud, &|name| keys.get(name)) {
-                Ok(reach) => reach,
+                // a paid model is called only with the person's agreed allowance and monthly cap (Auto configure)
+                Ok(reach) => crate::sinai_parts::auto::paid_reach(reach, crate::sinai_parts::Part::Mind, &model),
                 Err(why) => {
                     send(Event::Failed(why));
                     return;

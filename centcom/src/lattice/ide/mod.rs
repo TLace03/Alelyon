@@ -77,6 +77,8 @@ pub const LINE_HEIGHT: f32 = 19.0;
 pub const CODE_PAD: f32 = 8.0;
 /// The most tabs open at once: opening one more closes the oldest that has no unsaved edits.
 pub const MAX_TABS: usize = 12;
+/// How many closed files Ctrl+Shift+T can bring back.
+pub const CLOSED_KEPT: usize = 20;
 /// The most lines a page of a read-only file or an output shows.
 pub const PAGE_LINES: u32 = 400;
 /// How long a confirmation ignores input after it appears (as the core's dialogs do).
@@ -471,6 +473,8 @@ pub struct Ide {
     pub completion: complete::Completion,
     /// The checklists agents outside the chats gave the reader, not yet done (`outside_steps`).
     pub outside_steps: Vec<lattice_core::user_steps::ExternalList>,
+    /// Files whose tabs closed (by hand or past [`MAX_TABS`]), the latest last: Ctrl+Shift+T opens them again.
+    pub closed: Vec<String>,
 }
 
 impl Default for Ide {
@@ -539,6 +543,7 @@ impl Default for Ide {
             mention: mention::Mentioning::default(),
             completion: complete::Completion::default(),
             outside_steps: Vec::new(),
+            closed: Vec::new(),
         }
     }
 }
@@ -598,7 +603,8 @@ impl Ide {
         while self.tabs.len() > MAX_TABS {
             match self.tabs.iter().position(|t| t.id != id && !t.dirty()) {
                 Some(at) => {
-                    self.tabs.remove(at);
+                    let gone = self.tabs.remove(at);
+                    self.remember_closed(&gone);
                 }
                 None => break,
             }
@@ -609,11 +615,39 @@ impl Ide {
     /// Close a tab (the caller has asked about unsaved edits); the tab beside it is shown.
     pub fn close(&mut self, id: u64) {
         if let Some(at) = self.tabs.iter().position(|t| t.id == id) {
-            self.tabs.remove(at);
+            let gone = self.tabs.remove(at);
+            self.remember_closed(&gone);
             if self.active == Some(id) {
                 self.active = self.tabs.get(at).or_else(|| self.tabs.get(at.saturating_sub(1))).map(|t| t.id);
             }
         }
+    }
+
+    /// A file tab that closed is kept for Ctrl+Shift+T (at most [`CLOSED_KEPT`], once each).
+    fn remember_closed(&mut self, tab: &EditorTab) {
+        if let TabKind::File { path, .. } = &tab.kind {
+            self.closed.retain(|p| p != path);
+            self.closed.push(path.clone());
+            if self.closed.len() > CLOSED_KEPT {
+                self.closed.remove(0);
+            }
+        }
+    }
+
+    /// The tab after (or before) the one on show, wrapping round: Ctrl+Tab and Ctrl+Shift+Tab, Ctrl+PageDown and
+    /// Ctrl+PageUp.
+    pub fn cycle(&mut self, forward: bool) {
+        let n = self.tabs.len();
+        if n == 0 {
+            return;
+        }
+        let at = self.active.and_then(|id| self.tabs.iter().position(|t| t.id == id));
+        let next = match at {
+            Some(i) if forward => (i + 1) % n,
+            Some(i) => (i + n - 1) % n,
+            None => 0,
+        };
+        self.active = Some(self.tabs[next].id);
     }
 
     /// The confirmation on show, once its quiet time has passed.

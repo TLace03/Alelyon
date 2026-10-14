@@ -16,6 +16,7 @@ fn each_kind_is_kept_as_its_entry_and_read_back() {
         Choice::Gguf("qwen3-8b".into()),
         Choice::Endpoint("lm-studio".into()),
         Choice::SpeechFile("ggml-base.en.bin".into()),
+        Choice::VoiceFile("kokoro-v1.0.onnx".into()),
         Choice::Cloud { provider: "openrouter".into(), model: "meta/llama:free".into(), agreed: None },
         Choice::Cloud { provider: "groq".into(), model: "whisper-large-v3-turbo".into(), agreed: Some("2026-10-10T12:00:00Z".into()) },
     ] {
@@ -28,6 +29,7 @@ fn each_kind_is_kept_as_its_entry_and_read_back() {
     assert_eq!(Choice::from_entry(&json!({"name": "x"})), None, "no kind");
     for path in ["../ggml.bin", "C:/models/ggml.bin", "sub\\ggml.bin", ".."] {
         assert_eq!(Choice::from_entry(&json!({"kind": "speech-file", "file": path})), None, "{path}: a file name, never a path");
+        assert_eq!(Choice::from_entry(&json!({"kind": "voice-file", "file": path})), None, "{path}: a file name, never a path");
     }
 }
 
@@ -36,7 +38,7 @@ fn each_part_offers_its_kinds_with_a_free_cloud_model_last() {
     assert_eq!(offered(Part::Mind, true), [Kind::SinaiMind, Kind::Gguf, Kind::Endpoint, Kind::Cloud], "Sinai's mind first, where it is installed");
     assert_eq!(offered(Part::Mind, false), [Kind::Gguf, Kind::Endpoint, Kind::Cloud], "no Sinai's mind in a build without it");
     assert_eq!(offered(Part::Ears, true), [Kind::SpeechFile, Kind::Cloud]);
-    assert_eq!(offered(Part::Voice, false), [Kind::Endpoint, Kind::Cloud]);
+    assert_eq!(offered(Part::Voice, false), [Kind::VoiceFile, Kind::Endpoint, Kind::Cloud], "a voice model file first");
     for part in Part::ALL {
         for mind in [false, true] {
             assert_eq!(offered(part, mind).last(), Some(&Kind::Cloud), "{part:?}: a model on this PC comes first");
@@ -166,7 +168,10 @@ fn a_part_at_its_free_limit_pauses_and_its_card_says_when_it_is_back() {
     c.set(Part::Embeddings, Some(Choice::Cloud { provider: "cloudflare".into(), model: "@cf/baai/bge-m3".into(), agreed: Some("2026-10-10T12:00:00Z".into()) }));
     let card_now = card(Part::Embeddings, &c, &facts(false, &Answering::Nobody, None, &knocked, &down));
     assert_eq!((card_now.model.as_str(), card_now.runs.as_str()), ("@cf/baai/bge-m3", "in the cloud (Cloudflare Workers AI)"));
-    assert!(card_now.used_by.starts_with("Nothing in this build uses it yet"), "{}", card_now.used_by);
+    assert!(card_now.used_by.starts_with("Nothing in this build uses it"), "{}", card_now.used_by);
+    // the official build: Sinai's loop is not given the cloud routes, so it keeps its own model and sends nothing
+    let loop_card = card(Part::Embeddings, &c, &facts(true, &Answering::Mind, None, &knocked, &down));
+    assert!(loop_card.used_by.starts_with("Sinai's loop uses its own model for a cloud choice in this version"), "{}", loop_card.used_by);
     let until = cloud::now() + 3600;
     cloud::pause(Part::Embeddings, "cloudflare", until);
     let paused = card(Part::Embeddings, &c, &facts(false, &Answering::Nobody, None, &knocked, &down));
@@ -414,7 +419,7 @@ fn catalog(dir: &Path) -> Catalog {
 }
 
 fn facts<'a>(mind: bool, answering: &'a Answering, catalog: Option<&'a Catalog>, knocked: &'a HashMap<String, bool>, port: &'a dyn Fn(u16) -> Option<bool>) -> Facts<'a> {
-    Facts { mind, answering, catalog, knocked, port, ears: EarsNow::NotRunning }
+    Facts { mind, answering, catalog, knocked, port, ears: EarsNow::NotRunning, found: None, loop_meaning: None }
 }
 
 #[test]
@@ -444,7 +449,7 @@ fn each_card_says_its_model_where_it_runs_its_state_and_what_uses_it() {
     chosen.set(Part::Eyes, Some(Choice::Gguf("qwen".into())));
     let c = super::card(Part::Eyes, &chosen, &facts(true, &Answering::Mind, Some(&cat), &knocked, &down));
     assert_eq!((c.model.as_str(), c.runs.as_str()), ("qwen", "on this PC (llama.cpp)"));
-    assert!(c.used_by.contains("does not read this choice yet") && c.state.contains("opens when it looks"), "{c:?}");
+    assert!(c.used_by.contains("its eyes open with this model") && c.state.contains("open when it looks"), "{c:?}");
     // voice: the loop's own, in words for each build
     let c = super::card(Part::Voice, &none, &facts(false, &Answering::Nobody, None, &knocked, &down));
     assert_eq!((c.model.as_str(), c.state.as_str()), ("Sinai's loop's own", "Not in this build."));
@@ -519,4 +524,164 @@ fn every_part_card_on_the_overview_is_a_service_or_the_voice() {
     }
     assert_eq!(Part::of_port(8180), None, "Sinai's loop is a service, not a model");
     assert_eq!(Part::of_port(8186), None, "the speech engine's socket is a service");
+}
+
+/// The first bytes of Kokoro's own voice model: an ONNX `ModelProto` opening with `ir_version` 9 and its producer.
+const ONNX: &[u8] = b"\x08\x09\x12\x07pytorch\x1a\x052.6.0";
+
+#[test]
+fn an_onnx_file_is_known_by_its_header() {
+    assert!(onnx_header(ONNX));
+    assert!(!onnx_header(b"GGUF\x03\x00"), "a GGUF file renamed");
+    assert!(!onnx_header(b"\x08\x09"), "too short");
+    assert!(!onnx_header(b"\x08\x00\x12"), "no ir_version");
+    assert!(!onnx_header(b"\x08\x09\x99"), "not a ModelProto field");
+}
+
+#[test]
+fn only_onnx_voice_models_in_the_voice_folder_itself_are_listed() {
+    let dir = scratch("parts-voices");
+    std::fs::write(dir.join("kokoro-v1.0.onnx"), ONNX).unwrap();
+    std::fs::write(dir.join("Kokoro-int8.ONNX"), ONNX).unwrap();
+    std::fs::write(dir.join("voices-v1.0.bin"), b"\x93NUMPY").unwrap();
+    std::fs::write(dir.join("renamed.onnx"), b"GGUF\x03\x00\x00\x00").unwrap();
+    std::fs::create_dir_all(dir.join("below")).unwrap();
+    std::fs::write(dir.join("below").join("deep.onnx"), ONNX).unwrap();
+    let found = voice_files(&dir);
+    assert_eq!(found.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["Kokoro-int8.ONNX", "kokoro-v1.0.onnx"]);
+    assert_eq!(found[1].size, ONNX.len() as u64);
+    assert!(voice_files(&dir.join("nowhere")).is_empty());
+}
+
+#[test]
+fn the_voice_folder_is_beside_the_speech_models_folder() {
+    if let (Some(speech), Some(voices)) = (speech_dir(), voice_dir()) {
+        assert_eq!(voices.parent(), speech.parent());
+        assert_eq!(voices.file_name().and_then(|n| n.to_str()), Some("voices"));
+    }
+}
+
+#[test]
+fn a_vision_projector_matches_its_model_by_name_without_the_quantisation() {
+    // the same cases Sinai's loop is tested with: the two rules must agree
+    for (model, projector, matches) in [
+        ("Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", "mmproj-Qwen2.5-VL-7B-Instruct-Q8_0.gguf", true),
+        ("gemma-3-4b-it-Q4_K_M.gguf", "mmproj-gemma-3-4b-it-F16.gguf", true),
+        ("llava-v1.6-mistral-7b.Q4_K_M.gguf", "mmproj-llava-v1.6-mistral-7b.f16.gguf", true),
+        ("Qwen2.5-VL-7B-Instruct-Q4_K_M.gguf", "mmproj-Qwen2.5-VL-3B-Instruct-Q8_0.gguf", false),
+        ("gemma-3-4b-it-Q4_K_M.gguf", "mmproj-model-f16.gguf", false),
+    ] {
+        let dir = scratch(&format!("parts-proj-{}", projector.len() + model.len() + usize::from(matches)));
+        std::fs::write(dir.join(model), b"GGUF\x03\x00\x00\x00").unwrap();
+        std::fs::write(dir.join(projector), b"GGUF\x03\x00\x00\x00").unwrap();
+        assert_eq!(projector_for(&dir.join(model)) == Some(dir.join(projector)), matches, "{model} / {projector}");
+    }
+    let dir = scratch("parts-proj-fake");
+    std::fs::write(dir.join("Vision-Q4_K_M.gguf"), b"GGUF").unwrap();
+    std::fs::write(dir.join("mmproj-Vision-F16.gguf"), b"not a model").unwrap();
+    let why = eyes_projector(&dir.join("Vision-Q4_K_M.gguf")).unwrap_err();
+    assert!(why.contains("no vision projector") && why.contains("Vision-Q4_K_M.gguf"), "{why}");
+}
+
+#[test]
+fn the_snapshot_reads_the_voice_folder_and_the_chosen_vision_models_projector() {
+    let dir = scratch("parts-snapshot");
+    let (models, voices) = (dir.join("models"), dir.join("voices"));
+    std::fs::create_dir_all(&models).unwrap();
+    std::fs::create_dir_all(&voices).unwrap();
+    std::fs::write(voices.join("kokoro-v1.0.onnx"), ONNX).unwrap();
+    // a GGUF file as the models folder lists it: the magic, version 3, no tensors, no keys
+    let gguf = [&b"GGUF"[..], &3u32.to_le_bytes(), &0u64.to_le_bytes(), &0u64.to_le_bytes()].concat();
+    std::fs::write(models.join("Vision-Q4_K_M.gguf"), &gguf).unwrap();
+    let at = Places { prefs: Some(dir.join("preferences.json")), speech_dir: None, voice_dir: Some(voices.clone()), models_dir: Some(models.clone()) };
+    save(at.prefs.as_deref().unwrap(), Part::Eyes, Some(&Choice::Gguf("Vision-Q4_K_M".into()))).unwrap();
+    let snap = snapshot(&at);
+    assert_eq!(snap.voices.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["kokoro-v1.0.onnx"]);
+    assert!(matches!(&snap.eyes_projector, Some(Err(why)) if why.contains("no vision projector")), "{:?}", snap.eyes_projector);
+    std::fs::write(models.join("mmproj-Vision-F16.gguf"), &gguf).unwrap();
+    assert_eq!(snapshot(&at).eyes_projector, Some(Ok("mmproj-Vision-F16.gguf".to_string())));
+    save(at.prefs.as_deref().unwrap(), Part::Eyes, Some(&Choice::Endpoint("lm".into()))).unwrap();
+    assert_eq!(snapshot(&at).eyes_projector, None, "only a GGUF file of the models folder has a projector to find");
+}
+
+#[test]
+fn each_card_says_what_sinais_loop_does_with_the_choice() {
+    let cat = catalog(&PathBuf::from("models"));
+    let knocked = HashMap::new();
+    let down = |_: u16| Some(false);
+    let mut chosen = Choices::default();
+    chosen.set(Part::Eyes, Some(Choice::Gguf("qwen".into())));
+    chosen.set(Part::Voice, Some(Choice::VoiceFile("kokoro-v1.0.onnx".into())));
+    chosen.set(Part::Embeddings, Some(Choice::Endpoint("lm".into())));
+    let mut found = Snapshot { eyes_projector: Some(Err("no vision projector (an mmproj file) for qwen.gguf is beside it in models".into())), ..Snapshot::default() };
+    found.voice_dir = Some(PathBuf::from("voices"));
+    let mut f = facts(true, &Answering::Mind, Some(&cat), &knocked, &down);
+    f.found = Some(&found);
+    // eyes: a GGUF file without its projector is not opened; the card says why
+    let c = card(Part::Eyes, &chosen, &f);
+    assert_eq!(c.level, Level::Problem);
+    assert!(c.used_by.starts_with("Sinai's own loop keeps its own vision model: no vision projector"), "{}", c.used_by);
+    found.eyes_projector = Some(Ok("mmproj-qwen.gguf".into()));
+    let mut f = facts(true, &Answering::Mind, Some(&cat), &knocked, &down);
+    f.found = Some(&found);
+    let c = card(Part::Eyes, &chosen, &f);
+    assert!(c.used_by.contains("mmproj-qwen.gguf, each time they open"), "{}", c.used_by);
+    // voice: a voice model file not in the voice folder
+    let c = card(Part::Voice, &chosen, &f);
+    assert_eq!((c.model.as_str(), c.level), ("kokoro-v1.0.onnx", Level::Problem));
+    assert!(c.used_by.contains("speaks with this voice model from its next start"), "{}", c.used_by);
+    found.voices = vec![SpeechFile { name: "kokoro-v1.0.onnx".into(), path: "voices/kokoro-v1.0.onnx".into(), size: 1 }];
+    let mut f = facts(true, &Answering::Mind, Some(&cat), &knocked, &down);
+    f.found = Some(&found);
+    assert_eq!(card(Part::Voice, &chosen, &f).level, Level::Up);
+    // an endpoint: the loop keeps its own model for that kind
+    let c = card(Part::Embeddings, &chosen, &f);
+    assert_eq!(c.used_by, "Sinai's own loop uses its own embedding model for an endpoint in this version.");
+    // the ears: Sinai's own hearing reads it too
+    assert!(card(Part::Ears, &chosen, &f).used_by.contains("Sinai's own hearing, from its loop's next start"));
+    // the public build: honest that nothing here uses it
+    let mut f = facts(false, &Answering::Nobody, Some(&cat), &knocked, &down);
+    f.found = Some(&found);
+    for part in [Part::Eyes, Part::Embeddings, Part::Voice] {
+        assert!(card(part, &chosen, &f).used_by.starts_with("Nothing in this build uses it"), "{part:?}");
+    }
+    assert!(!card(Part::Ears, &chosen, &f).used_by.contains("hearing"));
+}
+
+#[test]
+fn a_voice_model_file_is_chosen_only_from_the_voice_folder() {
+    let mut s = State::at(None, None);
+    let pick = Choice::VoiceFile("kokoro-v1.0.onnx".into());
+    assert!(s.cannot_choose(Part::Voice, &pick, None, false).is_some(), "not listed");
+    assert!(s.cannot_choose(Part::Ears, &pick, None, false).is_some(), "the ears do not speak");
+    s.snapshot = Some(Snapshot {
+        voices: vec![SpeechFile { name: "kokoro-v1.0.onnx".into(), path: "v/kokoro-v1.0.onnx".into(), size: 1 }],
+        ..Snapshot::default()
+    });
+    assert!(s.cannot_choose(Part::Voice, &pick, None, false).is_none());
+    let then = s.update(Msg::Chosen(Part::Voice, Some(pick.clone()), Ok(())), None, true);
+    assert!(matches!(then, Then::Chosen(Part::Voice, Some(Choice::VoiceFile(_)))));
+    assert_eq!(s.said, Some(Ok("Kept. Sinai's own loop uses it from its next start.".to_string())));
+    assert_eq!(s.choices().used(Part::Voice), Some(&pick));
+}
+
+#[test]
+fn the_embeddings_card_says_when_sinais_loop_measures_a_model_first() {
+    let knocked = HashMap::new();
+    let down = |_: u16| Some(false);
+    let mut chosen = Choices::default();
+    chosen.set(Part::Embeddings, Some(Choice::Gguf("qwen".into())));
+    let cat = catalog(&PathBuf::from("models"));
+    let mut f = facts(true, &Answering::Mind, Some(&cat), &knocked, &down);
+    f.loop_meaning = Some("recall by meaning: measuring qwen first");
+    let c = card(Part::Embeddings, &chosen, &f);
+    assert!(c.state.ends_with("Recall by meaning: measuring qwen first."), "{}", c.state);
+    assert!(c.used_by.contains("only once the recall probe has measured it"), "{}", c.used_by);
+    f.loop_meaning = Some("on: 12 saved exchanges coded");
+    assert!(card(Part::Embeddings, &chosen, &f).state.ends_with("Recall by meaning: on: 12 saved exchanges coded."));
+    // only the embeddings card carries it, and not in the public build
+    assert!(!card(Part::Voice, &chosen, &f).state.contains("Recall by meaning"));
+    let mut f = facts(false, &Answering::Nobody, Some(&cat), &knocked, &down);
+    f.loop_meaning = Some("recall by meaning: measuring qwen first");
+    assert!(!card(Part::Embeddings, &chosen, &f).state.contains("Recall by meaning"));
 }

@@ -14,7 +14,9 @@ mod view;
 use std::future::Future;
 
 use alelyon_identity_client::pages::{
-    self, Kind, Me, Member, ModAct, ModAction, ModReport, NewPost, Org, OrgPage, PersonPage, Post, Posts, Reason, Target, Thread,
+    self, Applicant, Education, Employment, Experience, Found, JobsQuery, Kind, Me, Member, ModAct, ModAction, ModReport,
+    NewEducation, NewExperience, NewJob, NewPoll, NewPost, Notifications, Org, OrgPage, Person, PersonPage, Post, Posts, Reason,
+    ReplyRule, SearchKind, Suggestions, Tagged, Target, Thread, Trending, Workplace,
 };
 pub use alelyon_identity_client::pages::Problem;
 use alelyon_identity_client::social;
@@ -30,6 +32,8 @@ pub use view::view;
 pub enum Screen {
     Home,
     Explore,
+    Notifications,
+    Bookmarks,
     Mine,
     Orgs,
     Person(String),
@@ -38,17 +42,30 @@ pub enum Screen {
     Members(String),
     /// Owners and admins only: the posts made as the organization whose author is gone.
     Flagged(String),
+    /// The posts carrying a hashtag (lower case, without its #).
+    Tag(String),
+    /// What a search finds: people, organizations and posts.
+    Search(String),
+    /// Owners and admins only: the experience entries that name the organization, to confirm.
+    OrgExperience(String),
+    /// Open jobs, with what narrows them.
+    Jobs,
+    /// Owners and admins only: who applied for a job (its post's id).
+    Applicants(String),
     /// Moderators only: the reports, and the moderation log.
     Moderation,
 }
 
 impl Screen {
-    pub const TABS: [Screen; 4] = [Screen::Home, Screen::Explore, Screen::Mine, Screen::Orgs];
+    pub const TABS: [Screen; 7] =
+        [Screen::Home, Screen::Explore, Screen::Jobs, Screen::Notifications, Screen::Bookmarks, Screen::Mine, Screen::Orgs];
 
     pub fn title(&self) -> String {
         match self {
             Screen::Home => "Home".into(),
             Screen::Explore => "Explore".into(),
+            Screen::Notifications => "Notifications".into(),
+            Screen::Bookmarks => "Bookmarks".into(),
             Screen::Mine => "My page".into(),
             Screen::Orgs => "Organizations".into(),
             Screen::Person(u) => format!("@{u}"),
@@ -56,6 +73,11 @@ impl Screen {
             Screen::Thread(_) => "Post".into(),
             Screen::Members(t) => format!("({t}) members"),
             Screen::Flagged(t) => format!("({t}) flagged posts"),
+            Screen::Tag(t) => format!("#{t}"),
+            Screen::Search(q) => format!("Search: {q}"),
+            Screen::OrgExperience(t) => format!("({t}) experience to confirm"),
+            Screen::Jobs => "Jobs".into(),
+            Screen::Applicants(_) => "Applicants".into(),
             Screen::Moderation => "Moderation".into(),
         }
     }
@@ -84,6 +106,72 @@ impl ModView {
             ModView::Log => "Log",
         }
     }
+}
+
+/// Which feed Home shows: the ranked one, or that of the people and organizations followed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum HomeFeed {
+    ForYou,
+    #[default]
+    Following,
+}
+
+impl HomeFeed {
+    pub const ALL: [HomeFeed; 2] = [HomeFeed::ForYou, HomeFeed::Following];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            HomeFeed::ForYou => "For you",
+            HomeFeed::Following => "Following",
+        }
+    }
+}
+
+/// The reader's profile being written on My page: the entry in each form (an id set when changing one), and the skills
+/// as one comma-separated line.
+#[derive(Default)]
+pub struct ProfileForm {
+    pub experience: NewExperience,
+    pub education: NewEducation,
+    pub skills: String,
+    /// The skills line differs from what the service last said.
+    pub skills_dirty: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExpField {
+    Title,
+    Ticker,
+    OrgName,
+    Started,
+    Ended,
+    About,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EduField {
+    School,
+    Degree,
+    Field,
+    Started,
+    Ended,
+}
+
+/// Which part of the profile a save or a delete answered for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProfilePart {
+    Experience,
+    Education,
+    Skills,
+}
+
+/// `#Tag` typed into the finder, as the service spells a hashtag (lower case, without the #), when it is one.
+fn as_tag(typed: &str) -> Option<String> {
+    let tag = typed.strip_prefix('#')?;
+    let ok = (1..=50).contains(&tag.len())
+        && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
+        && tag.bytes().any(|b| b.is_ascii_alphabetic());
+    ok.then(|| tag.to_ascii_lowercase())
 }
 
 /// Who a new post is from: the person, or an organization they run.
@@ -122,6 +210,105 @@ pub struct Composer {
     /// The post being quoted.
     pub quoting: Option<Post>,
     pub sending: bool,
+    /// Who may reply to the post.
+    pub replies: ReplyRule,
+    /// A poll is being written: up to four options, and how long it stays open.
+    pub poll_on: bool,
+    pub poll_options: [String; 4],
+    pub poll_length: PollLength,
+    /// The article is a job opening (posted as an organization).
+    pub job_on: bool,
+    pub job: NewJob,
+    pub job_days: JobDays,
+}
+
+/// How long a poll stays open, as the composer offers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PollLength(pub u32);
+
+impl Default for PollLength {
+    fn default() -> Self {
+        PollLength(24)
+    }
+}
+
+impl PollLength {
+    pub const ALL: [PollLength; 4] = [PollLength(1), PollLength(24), PollLength(72), PollLength(168)];
+}
+
+impl std::fmt::Display for PollLength {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            1 => write!(f, "1 hour"),
+            24 => write!(f, "1 day"),
+            h if h % 24 == 0 => write!(f, "{} days", h / 24),
+            h => write!(f, "{h} hours"),
+        }
+    }
+}
+
+/// How long a job stays open, as the composer offers it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct JobDays(pub u32);
+
+impl Default for JobDays {
+    fn default() -> Self {
+        JobDays(30)
+    }
+}
+
+impl JobDays {
+    pub const ALL: [JobDays; 5] = [JobDays(7), JobDays(14), JobDays(30), JobDays(60), JobDays(90)];
+}
+
+impl std::fmt::Display for JobDays {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.0 {
+            7 => write!(f, "1 week"),
+            14 => write!(f, "2 weeks"),
+            d => write!(f, "{d} days"),
+        }
+    }
+}
+
+/// The Jobs tab's workplace filter: one workplace, or any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorkplacePick(pub Option<Workplace>);
+
+impl WorkplacePick {
+    pub const ALL: [WorkplacePick; 4] = [
+        WorkplacePick(None),
+        WorkplacePick(Some(Workplace::OnSite)),
+        WorkplacePick(Some(Workplace::Hybrid)),
+        WorkplacePick(Some(Workplace::Remote)),
+    ];
+}
+
+impl std::fmt::Display for WorkplacePick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.map_or("Any workplace", Workplace::label))
+    }
+}
+
+/// The Jobs tab's filter on the kind of employment: one kind, or any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EmploymentPick(pub Option<Employment>);
+
+impl EmploymentPick {
+    pub const ALL: [EmploymentPick; 6] = [
+        EmploymentPick(None),
+        EmploymentPick(Some(Employment::FullTime)),
+        EmploymentPick(Some(Employment::PartTime)),
+        EmploymentPick(Some(Employment::Contract)),
+        EmploymentPick(Some(Employment::Temporary)),
+        EmploymentPick(Some(Employment::Internship)),
+    ];
+}
+
+impl std::fmt::Display for EmploymentPick {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.0.map_or("Any kind", Employment::label))
+    }
 }
 
 impl Composer {
@@ -142,6 +329,18 @@ impl Composer {
         !self.sending
             && (1..=self.limit()).contains(&n)
             && (self.kind == Kind::Post || (1..=pages::ARTICLE_TITLE_MAX_CHARS).contains(&self.title.trim().chars().count()))
+            && (!self.poll_on || self.poll_choices().len() >= 2)
+            && (!self.job_wanted() || self.job.workplace == Workplace::Remote || !self.job.location.trim().is_empty())
+    }
+
+    /// The poll's options as typed, without the empty ones.
+    fn poll_choices(&self) -> Vec<String> {
+        self.poll_options.iter().map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect()
+    }
+
+    /// A job opening goes with an article posted as an organization only.
+    fn job_wanted(&self) -> bool {
+        self.job_on && self.kind == Kind::Article && self.as_who.is_some()
     }
 
     fn new_post(&self) -> NewPost {
@@ -152,6 +351,10 @@ impl Composer {
             reply_to: None,
             repost_of: self.quoting.as_ref().map(|p| p.id.clone()),
             as_org: self.as_who.clone(),
+            replies: self.replies,
+            poll: (self.poll_on && self.kind == Kind::Post && self.quoting.is_none())
+                .then(|| NewPoll { options: self.poll_choices(), hours: self.poll_length.0 }),
+            job: self.job_wanted().then(|| NewJob { days: self.job_days.0, ..self.job.clone() }),
         }
     }
 }
@@ -196,6 +399,34 @@ pub struct State {
     pub thread: Option<Thread>,
     pub members: Option<(String, Vec<Member>)>,
     pub flagged: Option<(String, Posts)>,
+    pub notifications: Option<Notifications>,
+    pub bookmarks: Option<Posts>,
+    /// Home's feed, and the ranked one with the number of its last page read.
+    pub home_feed: HomeFeed,
+    pub for_you: Option<(u32, Posts)>,
+    /// Explore's side: the trending hashtags, and who to follow.
+    pub trending: Option<Trending>,
+    pub suggestions: Option<Suggestions>,
+    /// The hashtag on show and its posts.
+    pub tagged: Option<Tagged>,
+    /// Which part of a search to read, and what the search on show found (its query and part).
+    pub search_kind: SearchKind,
+    pub found: Option<(String, SearchKind, Found)>,
+    /// My page's profile forms.
+    pub profile_form: ProfileForm,
+    /// Owners and admins only: an organization's experience entries to confirm.
+    pub org_experience: Option<(String, Vec<(Person, Experience)>)>,
+    /// Whom the reader muted (read with My page).
+    pub muted: Option<Vec<Person>>,
+    /// The Jobs tab: open jobs, and what narrows them.
+    pub jobs: Option<Posts>,
+    pub jobs_query: JobsQuery,
+    /// The job being applied for (its post's id) and the note.
+    pub applying: Option<(String, String)>,
+    /// Owners and admins only: who applied for a job (its post's id).
+    pub applicants: Option<(String, Vec<Applicant>)>,
+    /// The jobs the reader applied for (read with My page).
+    pub applications: Option<Vec<Post>>,
     pub composer: Composer,
     pub reply: String,
     pub find: String,
@@ -227,6 +458,80 @@ pub enum Msg {
     Thread(String, Result<Thread, Problem>),
     Members(String, Result<Vec<Member>, Problem>),
     Flagged(String, bool, Result<Posts, Problem>),
+    /// A page of notifications; `append` adds it under those on show.
+    Notifications(bool, Result<Notifications, Problem>),
+    /// How many notifications stay unread after some were marked read.
+    NotificationsRead(Result<u64, Problem>),
+    /// A page of the reader's bookmarks; `append` adds it under those on show.
+    Bookmarks(bool, Result<Posts, Problem>),
+    /// Save (true) or forget a post.
+    Bookmark(String, bool),
+    Pin(String),
+    Unpin,
+    /// Home shows the ranked feed or the followed one.
+    HomeFeed(HomeFeed),
+    /// A page of the ranked feed and its number; a page after the first adds under those on show.
+    ForYou(u32, Result<Posts, Problem>),
+    Trending(Result<Trending, Problem>),
+    Suggestions(Result<Suggestions, Problem>),
+    /// A page of a hashtag's posts; `append` adds it under those on show.
+    Tagged(String, bool, Result<Tagged, Problem>),
+    /// Which part of the search on show to read.
+    SearchKind(SearchKind),
+    /// What a search found, with the query and part it answers; `append` adds its posts under those on show.
+    Found(String, SearchKind, bool, Result<Found, Problem>),
+    // the professional profile
+    ExpField(ExpField, String),
+    /// Write this entry into the experience form, to change it.
+    ExpEdit(Experience),
+    EduField(EduField, String),
+    EduEdit(Education),
+    /// Empty both forms.
+    ProfileClear,
+    SaveExperience,
+    DeleteExperience(String),
+    SaveEducation,
+    DeleteEducation(String),
+    SkillsText(String),
+    SaveSkills,
+    /// A save or delete of that part answered.
+    ProfileSaved(ProfilePart, Result<(), Problem>),
+    /// Endorse (true) another's skill, or take that back: username, skill.
+    Endorse(String, String, bool),
+    /// Confirm (true) an entry naming the organization, or take that back: ticker, entry.
+    ConfirmExperience(String, String, bool),
+    OrgExperience(String, Result<Vec<(Person, Experience)>, Problem>),
+    // X's controls
+    Replies(ReplyRule),
+    PollToggle,
+    PollOption(usize, String),
+    PollHours(PollLength),
+    /// Vote for an option (0 first) in a post's poll.
+    Vote(String, usize),
+    /// Mute (true) or unmute someone, by username.
+    Mute(String, bool),
+    Muted(Result<Vec<Person>, Problem>),
+    // Jobs
+    Jobs(bool, Result<Posts, Problem>),
+    JobsWords(String),
+    JobsWorkplace(WorkplacePick),
+    JobsEmployment(EmploymentPick),
+    JobsSearch,
+    JobToggle,
+    JobLocation(String),
+    JobWorkplace(Workplace),
+    JobEmployment(Employment),
+    JobPay(String),
+    JobDays(JobDays),
+    /// Open (a job's post id) or close the note box for applying.
+    Applying(Option<String>),
+    ApplyNote(String),
+    Apply,
+    /// Withdraw an application (a job's post id).
+    Withdraw(String),
+    Applicants(String, Result<Vec<Applicant>, Problem>),
+    CloseJob(String),
+    Applications(Result<Vec<Post>, Problem>),
     FindText(String),
     Find,
     // writing
@@ -344,11 +649,51 @@ impl State {
     fn read(&self, screen: &Screen, before: Option<String>) -> Task<Msg> {
         let append = before.is_some();
         match screen.clone() {
+            Screen::Home if self.home_feed == HomeFeed::ForYou => self.read_for_you(0),
             Screen::Home => self.run(move |c, t| async move { pages::feed(&c, &t, before.as_deref()).await }, move |r| Msg::Feed(true, append, r)),
-            Screen::Explore => {
+            Screen::Explore if append => {
                 self.run(move |c, t| async move { pages::explore(&c, &t, before.as_deref()).await }, move |r| Msg::Feed(false, append, r))
             }
-            Screen::Mine | Screen::Orgs => self.fetch_me(),
+            Screen::Explore => Task::batch([
+                self.run(|c, t| async move { pages::explore(&c, &t, None).await }, |r| Msg::Feed(false, false, r)),
+                self.run(|c, t| async move { pages::trending(&c, &t).await }, Msg::Trending),
+                self.run(|c, t| async move { pages::suggestions(&c, &t).await }, Msg::Suggestions),
+            ]),
+            Screen::Tag(tag) => {
+                let key = tag.clone();
+                self.run(move |c, t| async move { pages::tag(&c, &t, &tag, before.as_deref()).await }, move |r| Msg::Tagged(key.clone(), append, r))
+            }
+            Screen::OrgExperience(ticker) => {
+                let key = ticker.clone();
+                self.run(move |c, t| async move { pages::org_experience(&c, &t, &ticker).await }, move |r| Msg::OrgExperience(key.clone(), r))
+            }
+            Screen::Search(query) => {
+                let (key, kind) = (query.clone(), self.search_kind);
+                self.run(move |c, t| async move { pages::search(&c, &t, &query, kind, before.as_deref()).await }, move |r| {
+                    Msg::Found(key.clone(), kind, append, r)
+                })
+            }
+            Screen::Orgs => self.fetch_me(),
+            Screen::Mine => Task::batch([
+                self.fetch_me(),
+                self.run(|c, t| async move { pages::mutes(&c, &t).await }, Msg::Muted),
+                self.run(|c, t| async move { pages::applications(&c, &t).await }, Msg::Applications),
+            ]),
+            Screen::Notifications => self.run(
+                move |c, t| async move { pages::notifications(&c, &t, before.as_deref()).await },
+                move |r| Msg::Notifications(append, r),
+            ),
+            Screen::Bookmarks => {
+                self.run(move |c, t| async move { pages::bookmarks(&c, &t, before.as_deref()).await }, move |r| Msg::Bookmarks(append, r))
+            }
+            Screen::Jobs => {
+                let query = self.jobs_query.clone();
+                self.run(move |c, t| async move { pages::jobs(&c, &t, &query, before.as_deref()).await }, move |r| Msg::Jobs(append, r))
+            }
+            Screen::Applicants(id) => {
+                let key = id.clone();
+                self.run(move |c, t| async move { pages::job_applicants(&c, &t, &id).await }, move |r| Msg::Applicants(key.clone(), r))
+            }
             Screen::Person(u) => {
                 let name = u.clone();
                 self.run(move |c, t| async move { pages::person(&c, &t, &u, before.as_deref()).await }, move |r| Msg::Person(name.clone(), append, r))
@@ -389,6 +734,11 @@ impl State {
         )
     }
 
+    /// One page of the ranked feed: 0 is the first.
+    fn read_for_you(&self, page: u32) -> Task<Msg> {
+        self.run(move |c, t| async move { pages::for_you(&c, &t, page).await }, move |r| Msg::ForYou(page, r))
+    }
+
     fn load(&mut self, screen: &Screen, keep: bool) -> Task<Msg> {
         if !keep {
             self.loading = true;
@@ -426,6 +776,11 @@ impl State {
             Screen::Person(_) => self.person.as_ref()?.posts.next(),
             Screen::Org(_) => self.org.as_ref()?.posts.next(),
             Screen::Flagged(_) => self.flagged.as_ref()?.1.next(),
+            Screen::Notifications => self.notifications.as_ref()?.next(),
+            Screen::Bookmarks => self.bookmarks.as_ref()?.next(),
+            Screen::Jobs => self.jobs.as_ref()?.next(),
+            Screen::Tag(_) => self.tagged.as_ref()?.posts.next(),
+            Screen::Search(_) if self.search_kind == SearchKind::Posts => self.found.as_ref()?.2.posts.next(),
             Screen::Moderation if self.mod_view == ModView::Log => {
                 let (actions, more) = self.mod_log.as_ref()?;
                 more.then(|| actions.last().map(|a| a.id.clone())).flatten()
@@ -487,6 +842,9 @@ impl State {
             }
             Msg::Me(Ok(me)) => {
                 let first = self.me.is_none();
+                if !self.profile_form.skills_dirty {
+                    self.profile_form.skills = me.profile.skills.iter().map(|s| s.skill.as_str()).collect::<Vec<_>>().join(", ");
+                }
                 self.me = Some(me);
                 if first || !self.mine.dirty {
                     self.refill_mine();
@@ -510,6 +868,12 @@ impl State {
                 }
             }
             Msg::More => {
+                if self.screen == Some(Screen::Home) && self.home_feed == HomeFeed::ForYou {
+                    return match &self.for_you {
+                        Some((page, shown)) if shown.more => self.read_for_you(page + 1),
+                        _ => Task::none(),
+                    };
+                }
                 if let (Some(screen), Some(before)) = (self.screen.clone(), self.next_page()) {
                     return self.read(&screen, Some(before));
                 }
@@ -565,6 +929,351 @@ impl State {
                     }
                 }
             }
+            Msg::Notifications(append, result) => {
+                if self.screen != Some(Screen::Notifications) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => {
+                        // What is on show has been seen: mark read up to the newest unread one shown.
+                        let newest_unread = page.items.iter().find(|n| !n.read).map(|n| n.id.clone()).filter(|_| !append);
+                        match self.notifications.as_mut().filter(|_| append) {
+                            Some(shown) => {
+                                shown.items.extend(page.items);
+                                shown.more = page.more;
+                                shown.unread = page.unread;
+                            }
+                            None => self.notifications = Some(page),
+                        }
+                        if let Some(up_to) = newest_unread {
+                            return self.run(
+                                move |c, t| async move { pages::notifications_read(&c, &t, Some(&up_to)).await },
+                                Msg::NotificationsRead,
+                            );
+                        }
+                    }
+                    Err(p) => {
+                        self.notifications = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::Jobs(append, result) => {
+                if self.screen != Some(Screen::Jobs) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.jobs.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.posts.extend(page.posts);
+                            shown.more = page.more;
+                        }
+                        None => self.jobs = Some(page),
+                    },
+                    Err(p) => {
+                        self.jobs = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::JobsWords(words) => self.jobs_query.words = words,
+            Msg::JobsWorkplace(pick) => {
+                self.jobs_query.workplace = pick.0;
+                return self.load(&Screen::Jobs, false);
+            }
+            Msg::JobsEmployment(pick) => {
+                self.jobs_query.employment = pick.0;
+                return self.load(&Screen::Jobs, false);
+            }
+            Msg::JobsSearch => return self.load(&Screen::Jobs, false),
+            Msg::JobToggle => self.composer.job_on = !self.composer.job_on,
+            Msg::JobLocation(text) => self.composer.job.location = text,
+            Msg::JobWorkplace(workplace) => self.composer.job.workplace = workplace,
+            Msg::JobEmployment(employment) => self.composer.job.employment = employment,
+            Msg::JobPay(text) => self.composer.job.pay = text,
+            Msg::JobDays(days) => self.composer.job_days = days,
+            Msg::Applying(post_id) => self.applying = post_id.map(|id| (id, String::new())),
+            Msg::ApplyNote(text) => {
+                if let Some((_, note)) = self.applying.as_mut() {
+                    *note = text;
+                }
+            }
+            Msg::Apply => {
+                if let Some((id, note)) = self.applying.take() {
+                    let words = "Applied. The organization's owners and admins see your page and your note.".to_string();
+                    return self.done(move |c, t| async move { pages::apply_job(&c, &t, &id, note.trim()).await }, words);
+                }
+            }
+            Msg::Withdraw(id) => {
+                return self.done(move |c, t| async move { pages::withdraw_application(&c, &t, &id).await }, "Application withdrawn.".into());
+            }
+            Msg::Applicants(id, result) => {
+                if self.screen != Some(Screen::Applicants(id.clone())) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(list) => self.applicants = Some((id, list)),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::CloseJob(id) => {
+                return self.done(move |c, t| async move { pages::close_job(&c, &t, &id).await }, "The job is closed.".into());
+            }
+            Msg::Applications(result) => match result {
+                Ok(posts) => self.applications = Some(posts),
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Bookmarks(append, result) => {
+                if self.screen != Some(Screen::Bookmarks) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.bookmarks.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.posts.extend(page.posts);
+                            shown.more = page.more;
+                        }
+                        None => self.bookmarks = Some(page),
+                    },
+                    Err(p) => {
+                        self.bookmarks = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::HomeFeed(feed) => {
+                if self.home_feed != feed {
+                    self.home_feed = feed;
+                    if self.screen == Some(Screen::Home) {
+                        return self.load(&Screen::Home, false);
+                    }
+                }
+            }
+            Msg::ForYou(page, result) => {
+                if self.screen != Some(Screen::Home) || self.home_feed != HomeFeed::ForYou {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(posts) => match self.for_you.as_mut().filter(|_| page > 0) {
+                        Some((shown_page, shown)) => {
+                            shown.posts.extend(posts.posts);
+                            shown.more = posts.more;
+                            *shown_page = page;
+                        }
+                        None => self.for_you = Some((page, posts)),
+                    },
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::Trending(result) => match result {
+                Ok(t) => self.trending = Some(t),
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Suggestions(result) => match result {
+                Ok(found) => self.suggestions = Some(found),
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Tagged(tag, append, result) => {
+                if self.screen != Some(Screen::Tag(tag)) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.tagged.as_mut().filter(|_| append) {
+                        Some(shown) => {
+                            shown.posts.posts.extend(page.posts.posts);
+                            shown.posts.more = page.posts.more;
+                        }
+                        None => self.tagged = Some(page),
+                    },
+                    Err(p) => {
+                        self.tagged = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::SearchKind(kind) => {
+                if self.search_kind != kind {
+                    self.search_kind = kind;
+                    if let Some(screen @ Screen::Search(_)) = self.screen.clone() {
+                        return self.load(&screen, false);
+                    }
+                }
+            }
+            Msg::Found(query, kind, append, result) => {
+                if self.screen.as_ref() != Some(&Screen::Search(query.clone())) || self.search_kind != kind {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(found) => match self.found.as_mut().filter(|_| append) {
+                        Some((_, _, shown)) => {
+                            shown.posts.posts.extend(found.posts.posts);
+                            shown.posts.more = found.posts.more;
+                        }
+                        None => self.found = Some((query, kind, found)),
+                    },
+                    Err(p) => {
+                        self.found = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::ExpField(field, text) => {
+                let e = &mut self.profile_form.experience;
+                *match field {
+                    ExpField::Title => &mut e.title,
+                    ExpField::Ticker => &mut e.ticker,
+                    ExpField::OrgName => &mut e.org_name,
+                    ExpField::Started => &mut e.started,
+                    ExpField::Ended => &mut e.ended,
+                    ExpField::About => &mut e.about,
+                } = text;
+            }
+            Msg::ExpEdit(entry) => {
+                let ticker = entry.org.as_ref().map(|o| o.ticker.clone()).unwrap_or_default();
+                self.profile_form.experience = NewExperience {
+                    org_name: if ticker.is_empty() { entry.org_name } else { String::new() },
+                    ticker,
+                    id: entry.id,
+                    title: entry.title,
+                    started: entry.started,
+                    ended: entry.ended.unwrap_or_default(),
+                    about: entry.about,
+                };
+            }
+            Msg::EduField(field, text) => {
+                let e = &mut self.profile_form.education;
+                *match field {
+                    EduField::School => &mut e.school,
+                    EduField::Degree => &mut e.degree,
+                    EduField::Field => &mut e.field,
+                    EduField::Started => &mut e.started,
+                    EduField::Ended => &mut e.ended,
+                } = text;
+            }
+            Msg::EduEdit(entry) => {
+                self.profile_form.education = NewEducation {
+                    id: entry.id,
+                    school: entry.school,
+                    degree: entry.degree,
+                    field: entry.field,
+                    started: entry.started.unwrap_or_default(),
+                    ended: entry.ended.unwrap_or_default(),
+                };
+            }
+            Msg::ProfileClear => {
+                self.profile_form.experience = NewExperience::default();
+                self.profile_form.education = NewEducation::default();
+            }
+            Msg::SaveExperience => {
+                let entry = self.profile_form.experience.clone();
+                return self.run(move |c, t| async move { pages::set_experience(&c, &t, &entry).await.map(|_| ()) }, |r| {
+                    Msg::ProfileSaved(ProfilePart::Experience, r)
+                });
+            }
+            Msg::DeleteExperience(id) => {
+                return self.run(move |c, t| async move { pages::delete_experience(&c, &t, &id).await.map(|_| ()) }, |r| {
+                    Msg::ProfileSaved(ProfilePart::Experience, r)
+                });
+            }
+            Msg::SaveEducation => {
+                let entry = self.profile_form.education.clone();
+                return self.run(move |c, t| async move { pages::set_education(&c, &t, &entry).await.map(|_| ()) }, |r| {
+                    Msg::ProfileSaved(ProfilePart::Education, r)
+                });
+            }
+            Msg::DeleteEducation(id) => {
+                return self.run(move |c, t| async move { pages::delete_education(&c, &t, &id).await.map(|_| ()) }, |r| {
+                    Msg::ProfileSaved(ProfilePart::Education, r)
+                });
+            }
+            Msg::SkillsText(text) => {
+                self.profile_form.skills = text;
+                self.profile_form.skills_dirty = true;
+            }
+            Msg::SaveSkills => {
+                let skills: Vec<String> =
+                    self.profile_form.skills.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                return self.run(move |c, t| async move { pages::set_skills(&c, &t, &skills).await.map(|_| ()) }, |r| {
+                    Msg::ProfileSaved(ProfilePart::Skills, r)
+                });
+            }
+            Msg::ProfileSaved(part, result) => match result {
+                Ok(()) => {
+                    match part {
+                        ProfilePart::Experience => self.profile_form.experience = NewExperience::default(),
+                        ProfilePart::Education => self.profile_form.education = NewEducation::default(),
+                        ProfilePart::Skills => self.profile_form.skills_dirty = false,
+                    }
+                    self.note = Some("Saved.".into());
+                    return self.fetch_me();
+                }
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Endorse(username, skill, endorse) => {
+                let words = if endorse { "Endorsed." } else { "Endorsement taken back." };
+                return self.done(move |c, t| async move { pages::endorse(&c, &t, &username, &skill, endorse).await }, words.into());
+            }
+            Msg::ConfirmExperience(ticker, entry, confirm) => {
+                let words = if confirm { "Confirmed." } else { "Confirmation taken back." };
+                return self.done(
+                    move |c, t| async move { pages::confirm_experience(&c, &t, &ticker, &entry, confirm).await },
+                    words.into(),
+                );
+            }
+            Msg::OrgExperience(ticker, result) => {
+                if self.screen != Some(Screen::OrgExperience(ticker.clone())) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(list) => self.org_experience = Some((ticker, list)),
+                    Err(p) => {
+                        self.org_experience = None;
+                        self.problem = Some(p);
+                    }
+                }
+            }
+            Msg::Replies(rule) => self.composer.replies = rule,
+            Msg::PollToggle => self.composer.poll_on = !self.composer.poll_on,
+            Msg::PollOption(i, text) => {
+                if let Some(option) = self.composer.poll_options.get_mut(i) {
+                    *option = text;
+                }
+            }
+            Msg::PollHours(length) => self.composer.poll_length = length,
+            Msg::Vote(id, option) => {
+                return self.done(move |c, t| async move { pages::vote(&c, &t, &id, option).await }, "Voted.".into());
+            }
+            Msg::Mute(username, mute) => {
+                let words = if mute { format!("Muted @{username}.") } else { format!("Unmuted @{username}.") };
+                return self.done(move |c, t| async move { pages::mute(&c, &t, &username, mute).await }, words);
+            }
+            Msg::Muted(result) => match result {
+                Ok(people) => self.muted = Some(people),
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::Bookmark(id, save) => {
+                let words = if save { "Saved to your bookmarks." } else { "Removed from your bookmarks." };
+                return self.done(move |c, t| async move { pages::bookmark(&c, &t, &id, save).await }, words.into());
+            }
+            Msg::Pin(id) => {
+                return self.done(move |c, t| async move { pages::pin(&c, &t, &id).await }, "Pinned to the top of your page.".into());
+            }
+            Msg::Unpin => {
+                return self.done(|c, t| async move { pages::unpin(&c, &t).await }, "Unpinned.".into());
+            }
+            Msg::NotificationsRead(result) => {
+                if let (Ok(unread), Some(me)) = (result, self.me.as_mut()) {
+                    me.unread_notifications = unread;
+                }
+            }
             Msg::Flagged(ticker, append, result) => {
                 if self.screen != Some(Screen::Flagged(ticker.clone())) {
                     return Task::none();
@@ -604,10 +1313,13 @@ impl State {
                     Screen::Org(ticker.trim().to_uppercase())
                 } else if let Some(name) = typed.strip_prefix('@') {
                     Screen::Person(name.trim().to_lowercase())
+                } else if let Some(tag) = as_tag(typed) {
+                    Screen::Tag(tag)
                 } else if !typed.is_empty() && typed.len() <= 5 && typed.chars().all(|c| c.is_ascii_uppercase()) {
                     Screen::Org(typed.to_string())
                 } else if !typed.is_empty() {
-                    Screen::Person(typed.to_lowercase())
+                    self.search_kind = SearchKind::All;
+                    Screen::Search(typed.to_string())
                 } else {
                     return Task::none();
                 };
@@ -954,11 +1666,13 @@ mod tests {
     }
 
     #[test]
-    fn find_opens_a_person_or_an_organization() {
+    fn find_opens_a_person_an_organization_a_hashtag_or_a_search() {
         let mut s = State::default();
         for (typed, screen) in [
             ("@Ada", Screen::Person("ada".into())),
-            ("ada", Screen::Person("ada".into())),
+            ("ada lovelace", Screen::Search("ada lovelace".into())),
+            ("#2026", Screen::Search("#2026".into())),
+            ("#Looms", Screen::Tag("looms".into())),
             ("(lace)", Screen::Org("LACE".into())),
             ("$lace", Screen::Org("LACE".into())),
             ("LACE", Screen::Org("LACE".into())),
@@ -972,10 +1686,152 @@ mod tests {
         let _ = s.update(Msg::Back);
         assert_eq!(s.screen, Some(Screen::Org("LACE".into())), "back goes to the screen before");
         let _ = s.update(Msg::Back);
-        assert_eq!(s.screen, Some(Screen::Person("ada".into())));
+        assert_eq!(s.screen, Some(Screen::Tag("looms".into())));
         let _ = s.update(Msg::Go(Screen::Explore));
         let _ = s.update(Msg::Back);
         assert_eq!(s.screen, Some(Screen::Explore), "a tab starts the way back afresh");
+    }
+
+    #[test]
+    fn home_shows_for_you_or_following_and_pages_the_ranked_feed_by_number() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Home));
+        assert_eq!(s.home_feed, HomeFeed::Following);
+        let _ = s.update(Msg::HomeFeed(HomeFeed::ForYou));
+        let post = |id: &str| Post { id: id.into(), ..Post::default() };
+        let _ = s.update(Msg::ForYou(0, Ok(Posts { posts: vec![post("pst_a")], more: true })));
+        let _ = s.update(Msg::ForYou(1, Ok(Posts { posts: vec![post("pst_b")], more: false })));
+        let (page, shown) = s.for_you.as_ref().expect("the ranked feed");
+        assert_eq!((*page, shown.posts.len(), shown.more), (1, 2, false));
+        let _ = s.update(Msg::HomeFeed(HomeFeed::Following));
+        let _ = s.update(Msg::ForYou(0, Ok(Posts::default())));
+        assert_eq!(s.for_you.as_ref().map(|(_, p)| p.posts.len()), Some(2), "an answer for the other feed is dropped");
+    }
+
+    #[test]
+    fn a_hashtag_and_a_search_page_on_and_drop_answers_for_another() {
+        let mut s = State::default();
+        let post = |id: &str| Post { id: id.into(), ..Post::default() };
+        let page = |ids: &[&str], more: bool| Posts { posts: ids.iter().map(|i| post(i)).collect(), more };
+        let _ = s.update(Msg::Go(Screen::Tag("looms".into())));
+        assert_eq!(s.screen.as_ref().map(Screen::title).as_deref(), Some("#looms"));
+        let _ = s.update(Msg::Tagged("mills".into(), false, Ok(Tagged { tag: "mills".into(), posts: page(&["pst_0"], false) })));
+        assert!(s.tagged.is_none(), "another tag's answer is dropped");
+        let _ = s.update(Msg::Tagged("looms".into(), false, Ok(Tagged { tag: "looms".into(), posts: page(&["pst_1"], true) })));
+        let _ = s.update(Msg::Tagged("looms".into(), true, Ok(Tagged { tag: "looms".into(), posts: page(&["pst_2"], false) })));
+        assert_eq!(s.tagged.as_ref().map(|t| t.posts.posts.len()), Some(2));
+        let _ = s.update(Msg::Go(Screen::Search("ada".into())));
+        let _ = s.update(Msg::SearchKind(SearchKind::Posts));
+        let _ = s.update(Msg::Found("ada".into(), SearchKind::All, false, Ok(Found::default())));
+        assert!(s.found.is_none(), "an answer for another part is dropped");
+        let _ = s.update(Msg::Found("ada".into(), SearchKind::Posts, false, Ok(Found { posts: page(&["pst_3"], true), ..Found::default() })));
+        assert_eq!(s.next_page().as_deref(), Some("pst_3"));
+        let _ = s.update(Msg::SearchKind(SearchKind::People));
+        assert_eq!(s.next_page(), None, "only a posts search pages on");
+    }
+
+    #[test]
+    fn a_new_article_as_an_organization_carries_a_job_only_when_asked() {
+        let mut s = State::default();
+        s.composer.kind = Kind::Article;
+        s.composer.title = "Engineer".into();
+        s.composer.body = text_editor::Content::with_text("Build the engine with us.");
+        s.composer.as_who = Some("BABG".into());
+        assert_eq!(s.composer.new_post().job, None);
+        let _ = s.update(Msg::JobToggle);
+        assert!(!s.composer.ready(), "an on-site job needs a place");
+        let _ = s.update(Msg::JobLocation("London".into()));
+        let _ = s.update(Msg::JobEmployment(Employment::Contract));
+        let _ = s.update(Msg::JobDays(JobDays(60)));
+        assert!(s.composer.ready());
+        let job = s.composer.new_post().job.expect("a job");
+        assert_eq!((job.location.as_str(), job.workplace, job.employment, job.days), ("London", Workplace::OnSite, Employment::Contract, 60));
+        let _ = s.update(Msg::JobWorkplace(Workplace::Remote));
+        let _ = s.update(Msg::JobLocation(String::new()));
+        assert!(s.composer.ready(), "a remote job needs no place");
+        s.composer.as_who = None;
+        assert_eq!(s.composer.new_post().job, None, "only an organization opens a job");
+        assert_eq!(JobDays::ALL.map(|d| d.to_string()), ["1 week", "2 weeks", "30 days", "60 days", "90 days"]);
+        assert_eq!(WorkplacePick::ALL[0].to_string(), "Any workplace");
+        let _ = s.update(Msg::JobsWorkplace(WorkplacePick(Some(Workplace::Hybrid))));
+        let _ = s.update(Msg::JobsWords("engine".into()));
+        assert_eq!((s.jobs_query.workplace, s.jobs_query.words.as_str()), (Some(Workplace::Hybrid), "engine"));
+        let _ = s.update(Msg::Applying(Some("pst_1".into())));
+        let _ = s.update(Msg::ApplyNote("I built the first one.".into()));
+        assert_eq!(s.applying, Some(("pst_1".into(), "I built the first one.".into())));
+        let _ = s.update(Msg::Apply);
+        assert_eq!(s.applying, None, "sent, the note box closes");
+        assert!(Screen::TABS.contains(&Screen::Jobs));
+    }
+
+    #[test]
+    fn a_new_post_carries_its_reply_rule_and_a_poll_only_when_complete() {
+        let mut s = State::default();
+        s.composer.body = text_editor::Content::with_text("Which engine?");
+        let _ = s.update(Msg::Replies(ReplyRule::Followers));
+        let _ = s.update(Msg::PollToggle);
+        let _ = s.update(Msg::PollOption(0, "Difference".into()));
+        assert!(!s.composer.ready(), "a poll needs two options");
+        let _ = s.update(Msg::PollOption(1, " Analytical ".into()));
+        let _ = s.update(Msg::PollHours(PollLength(72)));
+        assert!(s.composer.ready());
+        let new = s.composer.new_post();
+        assert_eq!(new.replies, ReplyRule::Followers);
+        assert_eq!(new.poll, Some(NewPoll { options: vec!["Difference".into(), "Analytical".into()], hours: 72 }));
+        let _ = s.update(Msg::PollToggle);
+        assert_eq!(s.composer.new_post().poll, None);
+        assert_eq!(PollLength::ALL.map(|l| l.to_string()), ["1 hour", "1 day", "3 days", "7 days"]);
+        let _ = s.update(Msg::Posted(Ok(Post::default())));
+        assert_eq!((s.composer.replies, s.composer.poll_on), (ReplyRule::Everyone, false), "a post sent starts the next afresh");
+    }
+
+    #[test]
+    fn the_profile_forms_fill_from_an_entry_and_empty_only_once_saved() {
+        let mut s = State::default();
+        let entry = Experience {
+            id: "exp_1".into(),
+            title: "Founder".into(),
+            org: Some(Org { id: "org_1".into(), ticker: "LACE".into(), name: "Lace Labs".into() }),
+            org_name: "Lace Labs".into(),
+            started: "2024-01".into(),
+            ..Experience::default()
+        };
+        let _ = s.update(Msg::ExpEdit(entry));
+        let f = &s.profile_form.experience;
+        assert_eq!((f.id.as_str(), f.ticker.as_str(), f.org_name.as_str(), f.ended.as_str()), ("exp_1", "LACE", "", ""));
+        let _ = s.update(Msg::ExpField(ExpField::Ended, "2025-06".into()));
+        let _ = s.update(Msg::ProfileSaved(ProfilePart::Experience, Err(Problem::Unreachable("down".into()))));
+        assert_eq!(s.profile_form.experience.ended, "2025-06", "a failed save keeps what was typed");
+        let _ = s.update(Msg::ProfileSaved(ProfilePart::Experience, Ok(())));
+        assert_eq!(s.profile_form.experience, NewExperience::default());
+        let _ = s.update(Msg::EduField(EduField::School, "UCL".into()));
+        let _ = s.update(Msg::ProfileClear);
+        assert_eq!(s.profile_form.education, NewEducation::default());
+    }
+
+    #[test]
+    fn the_skills_line_follows_the_service_until_it_is_edited() {
+        let mut s = State::default();
+        let me = |skills: &[&str]| Me {
+            profile: pages::Profile {
+                skills: skills.iter().map(|k| pages::Skill { skill: k.to_string(), ..pages::Skill::default() }).collect(),
+                ..pages::Profile::default()
+            },
+            ..Me::default()
+        };
+        let _ = s.update(Msg::Me(Ok(me(&["Mathematics", "Engines"]))));
+        assert_eq!(s.profile_form.skills, "Mathematics, Engines");
+        let _ = s.update(Msg::SkillsText("Looms".into()));
+        let _ = s.update(Msg::Me(Ok(me(&["Mathematics"]))));
+        assert_eq!(s.profile_form.skills, "Looms", "what is being typed stays");
+        let _ = s.update(Msg::ProfileSaved(ProfilePart::Skills, Ok(())));
+        let _ = s.update(Msg::Me(Ok(me(&["Looms"]))));
+        assert_eq!(s.profile_form.skills, "Looms");
+        let _ = s.update(Msg::Go(Screen::OrgExperience("LACE".into())));
+        let _ = s.update(Msg::OrgExperience("ABCD".into(), Ok(vec![])));
+        assert!(s.org_experience.is_none(), "another organization's answer is dropped");
+        let _ = s.update(Msg::OrgExperience("LACE".into(), Ok(vec![])));
+        assert_eq!(s.org_experience.as_ref().map(|(t, l)| (t.as_str(), l.len())), Some(("LACE", 0)));
     }
 
     #[test]
@@ -1017,6 +1873,44 @@ mod tests {
         assert!(!s.mine.dirty);
         let _ = s.update(Msg::MineName("Thomas Lacy".into()));
         assert!(s.mine.dirty && s.mine.name == "Thomas Lacy");
+    }
+
+    #[test]
+    fn notifications_are_a_tab_that_marks_what_it_shows_read() {
+        let mut s = State::default();
+        let mut me = me_showing(&[]);
+        me.unread_notifications = 2;
+        let _ = s.update(Msg::Me(Ok(me)));
+        let _ = s.update(Msg::Go(Screen::Notifications));
+        assert!(Screen::TABS.contains(&Screen::Notifications));
+        let _ = s.update(Msg::Back);
+        assert_eq!(s.screen, Some(Screen::Notifications), "a tab: nothing to go back to");
+        let unread = |id: &str| pages::Notification { id: id.into(), kind: "like".into(), ..pages::Notification::default() };
+        let page = Notifications { items: vec![unread("ntf_2"), unread("ntf_1")], more: true, unread: 2 };
+        let _ = s.update(Msg::Notifications(false, Ok(page)));
+        assert_eq!(s.next_page().as_deref(), Some("ntf_1"));
+        let _ = s.update(Msg::NotificationsRead(Ok(0)));
+        assert_eq!(s.me.as_ref().map(|m| m.unread_notifications), Some(0));
+        let _ = s.update(Msg::Notifications(true, Ok(Notifications { items: vec![unread("ntf_0")], more: false, unread: 0 })));
+        assert_eq!(s.notifications.as_ref().map(|n| (n.items.len(), n.more)), Some((3, false)));
+        let _ = s.update(Msg::Go(Screen::Home));
+        let _ = s.update(Msg::Notifications(false, Ok(Notifications::default())));
+        assert_eq!(s.notifications.as_ref().map(|n| n.items.len()), Some(3), "an answer for another screen is dropped");
+    }
+
+    #[test]
+    fn bookmarks_are_a_tab_that_pages_on() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Bookmarks));
+        assert!(Screen::TABS.contains(&Screen::Bookmarks));
+        let post = |id: &str| Post { id: id.into(), bookmarked: true, ..Post::default() };
+        let _ = s.update(Msg::Bookmarks(false, Ok(Posts { posts: vec![post("pst_2")], more: true })));
+        assert_eq!(s.next_page().as_deref(), Some("pst_2"));
+        let _ = s.update(Msg::Bookmarks(true, Ok(Posts { posts: vec![post("pst_1")], more: false })));
+        assert_eq!(s.bookmarks.as_ref().map(|b| (b.posts.len(), b.more)), Some((2, false)));
+        let _ = s.update(Msg::Go(Screen::Home));
+        let _ = s.update(Msg::Bookmarks(false, Ok(Posts::default())));
+        assert_eq!(s.bookmarks.as_ref().map(|b| b.posts.len()), Some(2), "an answer for another screen is dropped");
     }
 
     #[test]

@@ -51,6 +51,19 @@ pub fn view(app: &App) -> El<'_> {
 }
 
 fn content(app: &App) -> El<'_> {
+    let mut below = under_palette(app);
+    if app.sheet && app.signin.through() {
+        // the keyboard's sheet, over the window and its panels (the palette alone goes over it)
+        below = stack![below, crate::shortcuts::view(app)].into();
+    }
+    match &app.palette {
+        // the command palette, over everything else, the window and its panels alike
+        Some(p) if app.signin.through() => stack![below, crate::palette::view(app, p)].into(),
+        _ => below,
+    }
+}
+
+fn under_palette(app: &App) -> El<'_> {
     // Signing in comes before everything (`signin`); Use offline opens the window without an account.
     if !app.signin.through() {
         return crate::signin::view(&app.signin, app.mark.as_ref(), spinner(app.phase, 22.0)).map(Message::SignIn);
@@ -99,6 +112,10 @@ fn content(app: &App) -> El<'_> {
             .height(Length::Fill)
             .into()
     });
+    // the friends bar along the bottom of every page, while signed in (owner, 2026-10-10)
+    if app.social.active() && app.can(Capability::Friends) {
+        body = body.push(crate::social::bar(&app.social).map(Message::Social));
+    }
     // the rail lies on the page's own black, with no fill of its own, so the window reads as one surface from its
     // title bar down; the gold hairline stays between it and the page (2026-10-09)
     let main = row![rail(app), container(space().width(1)).height(Length::Fill).style(theme::line), body];
@@ -123,6 +140,15 @@ fn content(app: &App) -> El<'_> {
         .map(Message::Parts);
         return stack![main, crate::sinai_parts::view::scrim().map(Message::Parts), panel].into();
     }
+    if app.auto.open {
+        // Auto configure's proposal or setup, over the window; a press beside it closes it (downloads go on)
+        let scrim = button(space().width(Length::Fill).height(Length::Fill))
+            .padding(0)
+            .on_press(Message::Auto(crate::sinai_parts::auto::Msg::Close))
+            .style(|_, _| button::Style { background: Some(Background::Color(Color { a: 0.55, ..Color::BLACK })), ..button::Style::default() });
+        let panel = iced::widget::opaque(crate::sinai_parts::auto::view::panel(&app.auto, app.phase).map(Message::Auto));
+        return stack![main, scrim, panel].into();
+    }
     if app.hovering {
         stack![main, drop_overlay(app.section)].into()
     } else if app.signin.settings.is_some() {
@@ -144,8 +170,10 @@ fn content(app: &App) -> El<'_> {
             .align_bottom(Length::Fill);
         stack![main, scrim, menu].into()
     } else if app.social.open && app.social.active() && app.can(Capability::Friends) {
-        // the friends panel, over the window's right edge (after the Riot Client's)
-        let panel = container(crate::social::panel(&app.social).map(Message::Social)).align_right(Length::Fill).padding(8);
+        // the friends panel, over the window's right edge (after the Riot Client's), above the friends bar
+        let panel = container(crate::social::panel(&app.social).map(Message::Social))
+            .align_right(Length::Fill)
+            .padding(iced::Padding { top: 8.0, right: 8.0, bottom: crate::social::BAR_HEIGHT + 8.0, left: 8.0 });
         stack![main, panel].into()
     } else if app.signin.whats_new_open {
         let scrim = button(space().width(Length::Fill).height(Length::Fill))
@@ -237,13 +265,21 @@ fn rail(app: &App) -> El<'_> {
         if live {
             icon = icon.push(dot(theme::DANGER));
         }
-        items = items.push(
-            button(column![icon, label(section.short(), 10.5, color)].spacing(4).align_x(Alignment::Center).width(Length::Fill))
-                .width(Length::Fill)
-                .padding([9.0, 2.0])
-                .on_press(Message::Go(section))
-                .style(theme::rail_button(selected)),
-        );
+        let place = Section::ALL.iter().position(|s| *s == section).unwrap_or(0);
+        let focused = app.rail_focus == Some(place);
+        let item = button(column![icon, label(section.short(), 10.5, color)].spacing(4).align_x(Alignment::Center).width(Length::Fill))
+            .width(Length::Fill)
+            .padding([9.0, 2.0])
+            .on_press(Message::Go(section))
+            .style(theme::rail_button(selected));
+        // the keyboard's place on the rail (F6), ringed in gold
+        let item: El<'_> = if focused {
+            container(item).padding(1).style(theme::focus_ring).into()
+        } else {
+            item.into()
+        };
+        let keys = if place < 9 { format!(" \u{00B7} Ctrl+{}", place + 1) } else { String::new() };
+        items = items.push(ui::tip(item, format!("{}{keys}\n{}", section.title(), section.purpose())));
     }
     // The rail's empty space drags the window too.
     items = items.push(crate::chrome::drag(space().width(Length::Fill).height(Length::Fill), Message::Chrome));
@@ -560,7 +596,7 @@ fn toggle<'a>(on: bool, start: &'a str, stop: &'a str, message: Message, live: O
     } else if enabled {
         primary(start, message)
     } else {
-        secondary(start, None)
+        ui::secondary_why(start, None, "The speech engine is not connected: start it above.")
     };
     let status: El<'a> = match live {
         Some(device) if on => row![dot(theme::DANGER), label(format!("On air: {device}"), 13.0, theme::TEXT)].spacing(8).align_y(Alignment::Center).into(),
@@ -602,9 +638,9 @@ fn caption_box<'a>(app: &'a App, captions: &'a crate::app::Captions, empty: &'a 
 fn copy_clear<'a>(app: &'a App, text: String, clear: Message, save: Message) -> El<'a> {
     let has = !text.trim().is_empty();
     let buttons = row![
-        secondary("Save to library", has.then_some(save)),
-        secondary("Copy all", has.then_some(Message::Copy(text))),
-        secondary("Clear", has.then_some(clear)),
+        ui::secondary_why("Save to library", has.then_some(save), "Nothing to keep yet."),
+        ui::secondary_why("Copy all", has.then_some(Message::Copy(text)), "Nothing to copy yet."),
+        ui::secondary_why("Clear", has.then_some(clear), "Nothing to clear."),
     ]
     .spacing(8);
     match &app.kept {
@@ -705,7 +741,13 @@ fn files_tab(app: &App) -> El<'_> {
             .size(14)
             .font(fonts().ui)
             .style(input_style),
-        if app.connected() && !app.file_path.trim().is_empty() { primary("Transcribe", Message::Transcribe) } else { secondary("Transcribe", None) },
+        if app.connected() && !app.file_path.trim().is_empty() {
+            primary("Transcribe", Message::Transcribe)
+        } else if !app.connected() {
+            ui::secondary_why("Transcribe", None, "The speech engine is not connected: start it above.")
+        } else {
+            ui::secondary_why("Transcribe", None, "Drop an audio file on the window, or type its path.")
+        },
     ]
     .spacing(10)
     .align_y(Alignment::Center);
@@ -850,7 +892,11 @@ fn sinai(app: &App) -> El<'_> {
     if let Some(creator) = &app.creator {
         return crate::face::creator::view(creator, crate::appearance::Catalog::builtin()).map(Message::Creator);
     }
-    column![loop_card(app), docks(app)].spacing(16).height(Length::Fill).into()
+    // Auto configure's dials and button, between the loop's card and the docks
+    column![loop_card(app), crate::sinai_parts::auto::view::strip(&app.auto, app.phase).map(Message::Auto), docks(app)]
+        .spacing(16)
+        .height(Length::Fill)
+        .into()
 }
 
 /// The grants file, edited: each grant's fields, then a review of what the save adds and reduces, then the write.
@@ -937,7 +983,7 @@ fn grants_editor<'a>(app: &'a App, draft: &'a grants::Draft) -> El<'a> {
                 card = card.push(label(why.clone(), 13.0, theme::CAUTION));
             }
             let write: El<'_> = if blocked.is_some() {
-                secondary("Write the grants file", None)
+                ui::secondary_why("Write the grants file", None, "Not until what is said above in red is put right.")
             } else {
                 primary("Write the grants file", Message::GrantsWrite)
             };

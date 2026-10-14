@@ -131,8 +131,11 @@ impl Services {
             Arc::new(lattice_core::complete::Completer::new(env.clone(), state.clone(), local.clone(), Arc::new(wire)));
         let (tx, rx) = mpsc::unbounded();
         let attention = Arc::new(Attention::default());
-        let chat_config =
+        let mut chat_config =
             AgentConfig::new(state.clone(), env, local, Arc::new(WindowConfirm(tx)), attention.clone());
+        // Agents that run in Lattice over ACP are offered the checklist store as an MCP server: this program, started
+        // with `--steps-mcp` (`crate::run`).
+        chat_config.steps_server = std::env::current_exe().ok();
         let chat = Arc::new(AgentChat::new(chat_config, runtime.handle().clone()));
         let runs: Arc<dyn RunService> = {
             let _entered = runtime.enter();

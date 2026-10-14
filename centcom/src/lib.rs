@@ -65,13 +65,18 @@ mod models;
 mod pages;
 // Sinai's parts (mind, eyes, ears, embeddings, voice) and the model each uses: the part picker and its choices.
 mod sinai_parts;
+// What a call of a part's cloud model checks first, for a caller beside the window: the picker's own rules and records.
+pub mod parts_gate;
 // Alelyon's own preferences on this PC (preferences.json): the backdrop, web pages, Sinai's model and its parts.
+mod palette;
 mod prefs;
 mod probe;
 // The research archive: papers on a subject, followed through citations (crates/alelyon-research).
 mod research;
 mod signin;
 mod social;
+mod session;
+mod shortcuts;
 mod sinai;
 pub mod spinner;
 // Captures other windows through Win32 (PrintWindow and GDI), so it may use unsafe code, as the job object does.
@@ -119,6 +124,16 @@ pub fn run(registry: Registry) -> ExitCode {
             Err(_) => ExitCode::FAILURE,
         };
     }
+    // `--steps-mcp`: the reader's checklists (the store CENTCOM pins above Lattice's composer) as an MCP server on
+    // stdin and stdout, which every agent Lattice runs over ACP is offered (lattice-core's steps_mcp module). No
+    // console is joined and no window opens.
+    if std::env::args().nth(1).as_deref() == Some(lattice_core::steps_mcp::FLAG) {
+        let dir = lattice_core::user_steps::dir(&lattice_core::ProcessEnv);
+        return match lattice_core::steps_mcp::serve(&dir, std::io::stdin().lock(), std::io::stdout().lock()) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(_) => ExitCode::FAILURE,
+        };
+    }
     console::join_parent();
     let options = match app::Options::parse_with(std::env::args().skip(1), &registry) {
         Ok(options) => options,
@@ -128,6 +143,9 @@ pub fn run(registry: Registry) -> ExitCode {
         }
     };
     let screenshot = options.screenshot.is_some();
+    // the window as large as it was left, and maximised if it was (`session`); a photograph opens at the usual size
+    let kept = session::path(screenshot).map(|at| session::load(&at)).unwrap_or_default();
+    let size = kept.size.map(|(w, h)| Size::new(w.clamp(980.0, 7680.0), h.clamp(640.0, 4320.0))).unwrap_or(Size::new(1440.0, 900.0));
     prefer_opengl();
     lattice_app::theme::set_fonts(lattice_app::theme::Fonts::detect());
     theme::set_display(theme::detect_display());
@@ -137,7 +155,8 @@ pub fn run(registry: Registry) -> ExitCode {
         .theme(|_: &app::App| theme::theme())
         .style(|_: &app::App, t: &iced::Theme| theme::app_style(t))
         .window(window::Settings {
-            size: Size::new(1440.0, 900.0),
+            size,
+            maximized: kept.maximised,
             min_size: Some(Size::new(980.0, 640.0)),
             icon: brand::window_icon(),
             // no Windows frame: the title bar and edges are the window's own (src/chrome.rs)

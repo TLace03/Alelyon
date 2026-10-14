@@ -356,9 +356,27 @@ pub struct App {
     pub models: crate::models::State,
     /// Sinai's parts: the model each uses, and the picker a part's card opens (parts/).
     pub parts: crate::sinai_parts::State,
+    /// Auto configure: the dials on Sinai's page, the proposal and the setup (`sinai_parts::auto`).
+    pub auto: crate::sinai_parts::auto::State,
     /// A message for Sinai's page to send to the person's own model once it is known (a debug build's
     /// `CENTCOM_SINAI_SAY`, so the screenshot mode can photograph an answer).
     say_once: Option<String>,
+    /// The keyboard's sheet is open.
+    pub sheet: bool,
+    /// The keyboard is on the rail (F6), at this place in it.
+    pub rail_focus: Option<usize>,
+    /// The command palette, while it is open, and what it ran lately (latest first).
+    pub palette: Option<crate::palette::Palette>,
+    pub palette_recent: Vec<String>,
+    /// Where the window was left (`session`): the file it is kept in (none in a test or a photograph), the session as
+    /// last kept, and whether it has changed since.
+    session_path: Option<PathBuf>,
+    session_kept: crate::session::Session,
+    session_changed: bool,
+    /// The window's size when it was last not maximised, and the size a resize reported before the window said
+    /// whether it is maximised.
+    window_size: Option<iced::Size>,
+    resized_to: Option<iced::Size>,
     options: Options,
     shot_taken: bool,
 }
@@ -487,17 +505,33 @@ pub enum Message {
     Models(crate::models::Msg),
     /// A part's picker, opened from its card (`sinai_parts`).
     Parts(crate::sinai_parts::Msg),
+    /// Auto configure Sinai (`sinai_parts::auto`).
+    Auto(crate::sinai_parts::auto::Msg),
     /// The sign-in screen and the account menu (`signin`).
     SignIn(crate::signin::Msg),
     /// The window's own title bar and edges.
     Chrome(crate::chrome::Act),
     /// Tab (forward) or Shift+Tab (back) that no widget used: focus moves to the next or previous field.
     FocusMove(bool),
-    /// Esc, wherever the keyboard is: it closes the Settings panel when that is open, and does nothing else here.
-    Escape,
+    /// Esc, wherever the keyboard is (and whether a widget took it): it closes what lies topmost over the page (the
+    /// command palette, the Models panel, a part's picker, Settings, the account menu, the friends panel, What's new);
+    /// with none open, Lattice's Chat and IDE has it.
+    Escape(bool),
+    /// The command palette (Ctrl+Shift+P or F1).
+    Palette(crate::palette::PaletteMsg),
+    /// Ctrl+1 to Ctrl+9: the page in that place on the rail.
+    Shortcut(usize),
+    /// The keyboard's sheet (Ctrl+Shift+/) open or closed.
+    Sheet(bool),
+    /// F6: the keyboard to the rail, or back from it; then Up and Down (and Home, End) move along it, Enter opens.
+    RailFocus,
+    RailMove(i32),
+    RailEnter,
     WindowId(Option<window::Id>),
     Maximised(bool),
-    Resized,
+    Resized(iced::Size),
+    /// Where the window was left changed a second ago: it is kept (`session`).
+    SaveSession,
     Social(crate::social::Msg),
     Pages(crate::pages::Msg),
 }
@@ -634,10 +668,32 @@ impl App {
             },
             models: crate::models::State::default(),
             parts: crate::sinai_parts::State::default(),
+            auto: crate::sinai_parts::auto::State::default(),
             say_once: None,
+            sheet: false,
+            rail_focus: None,
+            palette: None,
+            palette_recent: Vec::new(),
+            session_path: None,
+            session_kept: crate::session::Session::default(),
+            session_changed: false,
+            window_size: None,
+            resized_to: None,
             options,
             shot_taken: false,
         };
+        app.restore_session();
+        // A debug build's photograph of the command palette (`CENTCOM_PALETTE=<typed>`): it opens with that typed.
+        #[cfg(debug_assertions)]
+        if let Ok(query) = std::env::var("CENTCOM_PALETTE") {
+            app.palette = Some(crate::palette::Palette { query, selected: 0 });
+        }
+        // ... and of the keyboard's sheet (`CENTCOM_SHEET`), and of the rail with the keyboard on it (`CENTCOM_RAIL=<place>`).
+        #[cfg(debug_assertions)]
+        {
+            app.sheet = std::env::var_os("CENTCOM_SHEET").is_some();
+            app.rail_focus = std::env::var("CENTCOM_RAIL").ok().and_then(|n| n.trim().parse().ok());
+        }
         // What the opening page reads first: the services' states, or the library (a page opened directly, as by
         // `--tab library`, reads what switching to it would have read).
         let mut first = Vec::new();
@@ -670,6 +726,26 @@ impl App {
         }
         if app.section == Section::Sinai {
             app.voice.refresh();
+            first.push(Task::done(Message::Auto(crate::sinai_parts::auto::Msg::Look)));
+            // A debug build's CENTCOM_AUTO=<effort>,<tier>[,<custom dollars>]: the dials set, and with a fourth field
+            // `propose`, the proposal opened, to be photographed.
+            #[cfg(debug_assertions)]
+            if let Ok(given) = std::env::var("CENTCOM_AUTO") {
+                use crate::sinai_parts::auto::{Budget, Msg as A, catalogue::Effort};
+                let mut f = given.split(',').map(str::trim);
+                if let Some(e) = f.next().and_then(Effort::of) {
+                    first.push(Task::done(Message::Auto(A::Effort(e))));
+                }
+                if let Some(b) = f.next().and_then(Budget::of) {
+                    first.push(Task::done(Message::Auto(A::Budget(b))));
+                }
+                if let Some(n) = f.next().filter(|n| !n.is_empty()) {
+                    first.push(Task::done(Message::Auto(A::CustomTyped(n.to_string()))));
+                }
+                if f.next() == Some("propose") {
+                    first.push(Task::done(Message::Auto(A::Propose)));
+                }
+            }
             // which model of the person's own Sinai's page would talk to, and whether it is ready
             first.push(app.models.read().map(Message::Models));
             // `--section sinai --tab models` opens the Models panel, so it can be photographed.
@@ -908,6 +984,8 @@ impl App {
             knocked: &self.models.knocked,
             port: &port,
             ears,
+            found: self.parts.snapshot.as_ref(),
+            loop_meaning: self.conversation.memory.as_ref().map(|m| m.meaning.as_str()),
         };
         crate::sinai_parts::card(part, &self.parts.choices(), &facts)
     }
@@ -926,12 +1004,59 @@ impl App {
         }
     }
 
+    /// What Auto configure needs from the window: each part's choice in effect, and its words.
+    fn auto_ctx(&self) -> crate::sinai_parts::auto::Ctx {
+        use crate::sinai_parts::Part;
+        let current = Part::ALL
+            .into_iter()
+            .map(|part| {
+                let card = self.part_card(part);
+                (part, (self.part_current(part), card.model))
+            })
+            .collect();
+        crate::sinai_parts::auto::Ctx { current }
+    }
+
+    /// One Auto configure message, and what it asks of the window.
+    fn auto_update(&mut self, msg: crate::sinai_parts::auto::Msg) -> Task<Message> {
+        use crate::sinai_parts::auto::Then;
+        let ctx = self.auto_ctx();
+        match self.auto.update(msg, &ctx) {
+            Then::Nothing => Task::none(),
+            Then::Task(task) => task.map(Message::Auto),
+            Then::Chosen(chosen) => {
+                // the parts' choices were written: read them again, and apply the mind's now
+                let reread = self.parts.read().map(Message::Parts);
+                let prefs = if cfg!(test) { None } else { crate::prefs::path() };
+                let choices = crate::sinai_parts::Choices::read(prefs.as_deref());
+                let mind = chosen
+                    .iter()
+                    .any(|(p, _)| *p == crate::sinai_parts::Part::Mind)
+                    .then(|| self.part_chosen(crate::sinai_parts::Part::Mind, choices.used(crate::sinai_parts::Part::Mind).cloned()));
+                if let Some(snap) = &mut self.parts.snapshot {
+                    snap.choices = choices;
+                }
+                Task::batch([reread, mind.unwrap_or_else(Task::none)])
+            }
+            Then::Card(part, provider, model) => {
+                use crate::sinai_parts::{Msg as P, cloud::Step};
+                let open = self.update(Message::Parts(P::Open(part)));
+                let card = self.update(Message::Parts(P::Cloud(Step::StartWith(part, provider, model))));
+                Task::batch([open, card])
+            }
+        }
+    }
+
     /// A part's choice was kept: what it changes now. The mind's decides who answers on Sinai's page (a model of the
     /// person's own picked here answers over Sinai's mind until Alelyon closes; Sinai's mind picked gives the page back
     /// to it); the ears' applies when the speech engine next starts; the others are kept for Sinai's own loop.
     fn part_chosen(&mut self, part: crate::sinai_parts::Part, choice: Option<crate::sinai_parts::Choice>) -> Task<Message> {
         use crate::sinai_parts::{Choice, Part};
         if part != Part::Mind {
+            // the build is told again, so what it runs beside the loop follows the new choice
+            if self.sinai_up == Some(true) {
+                crate::installed::tell_sinai(true);
+            }
             return Task::none();
         }
         let mind = self.can(Capability::SinaiMind);
@@ -1075,11 +1200,102 @@ impl App {
         }
     }
 
+    /// Where the window was left last time (`session`): Lattice as it was, the palette's recent runs and, unless the
+    /// command line names where to open, the page and its tab. A photograph (and a test) neither reads nor keeps it.
+    fn restore_session(&mut self) {
+        self.session_path = crate::session::path(self.options.screenshot.is_some());
+        let Some(at) = self.session_path.clone() else { return };
+        let kept = crate::session::load(&at);
+        let o = &self.options;
+        let named = o.section.is_some() || o.tab.is_some() || o.page.is_some() || o.verify.is_some() || o.folder.is_some();
+        if !named {
+            if let Some(section) = kept.section.as_deref().and_then(|t| Section::ALL.into_iter().find(|s| s.title() == t)) {
+                self.section = section;
+            }
+            if let Some(tab) = kept.words_tab.as_deref().and_then(|t| Tab::ALL.into_iter().find(|x| x.title() == t)) {
+                self.tab = tab;
+            }
+        }
+        // a folder the command line names wins over the one left open (`lattice::place`)
+        self.lattice.restore_place(kept.lattice.clone());
+        self.palette_recent = kept.recent.clone();
+        self.window_size = kept.size.map(|(w, h)| iced::Size::new(w, h));
+        self.maximised = kept.maximised;
+        self.session_kept = kept;
+    }
+
+    /// Where the window is now, as `session` keeps it.
+    fn session(&self) -> crate::session::Session {
+        crate::session::Session {
+            section: Some(self.section.title().to_string()),
+            words_tab: Some(self.tab.title().to_string()),
+            size: self.window_size.map(|s| (s.width, s.height)),
+            maximised: self.maximised,
+            lattice: self.lattice.session_place(),
+            recent: self.palette_recent.clone(),
+        }
+    }
+
+    /// A panel of the window's lies over the page (the palette aside): Esc closes it, and the page's keys wait.
+    fn overlay_open(&self) -> bool {
+        self.sheet
+            || self.models.open
+            || self.parts.open.is_some()
+            || self.signin.settings.is_some()
+            || self.signin.menu_open
+            || (self.social.open && self.social.active())
+            || self.signin.whats_new_open
+    }
+
+    fn palette_update(&mut self, msg: crate::palette::PaletteMsg) -> Task<Message> {
+        use crate::palette::{self, PaletteMsg};
+        match msg {
+            PaletteMsg::Toggle => {
+                if self.palette.take().is_none() && self.signin.through() {
+                    self.palette = Some(palette::Palette::default());
+                    return iced::widget::operation::focus(palette::INPUT);
+                }
+            }
+            PaletteMsg::Query(query) => {
+                if let Some(p) = &mut self.palette {
+                    p.query = query;
+                    p.selected = 0;
+                }
+            }
+            PaletteMsg::Move(by) => {
+                let Some(query) = self.palette.as_ref().map(|p| p.query.clone()) else { return Task::none() };
+                let n = palette::ranked(palette::entries(self), &query, &self.palette_recent).len().min(palette::SHOWN);
+                if let Some(p) = &mut self.palette
+                    && n > 0
+                {
+                    p.selected = (p.selected as i64 + by as i64).rem_euclid(n as i64) as usize;
+                }
+            }
+            PaletteMsg::Run(at) => {
+                let Some(p) = self.palette.take() else { return Task::none() };
+                let row = at.unwrap_or(p.selected);
+                let Some(entry) = palette::ranked(palette::entries(self), &p.query, &self.palette_recent).into_iter().nth(row) else {
+                    return Task::none();
+                };
+                palette::remember(&mut self.palette_recent, &entry.id);
+                let tasks: Vec<_> = entry.run.into_iter().map(|m| self.update(m)).collect();
+                return Task::batch(tasks);
+            }
+            PaletteMsg::Close => self.palette = None,
+        }
+        Task::none()
+    }
+
     pub fn update(&mut self, message: Message) -> Task<Message> {
         crate::frame_stats::message(&message);
+        // the spinners' tick changes nothing that is kept
+        let keeps = !matches!(message, Message::Tick | Message::SaveSession);
         self.sync_cloud_mind();
         let task = self.handle(message);
         self.sync_cloud_mind();
+        if keeps && self.session_path.is_some() && !self.session_changed && self.session() != self.session_kept {
+            self.session_changed = true;
+        }
         crate::frame_stats::section(self.section.short());
         task
     }
@@ -1110,7 +1326,8 @@ impl App {
                 };
                 if section == Section::Sinai {
                     self.voice.refresh();
-                    return Task::batch([self.read_listening(), cards]);
+                    let look = self.auto_update(crate::sinai_parts::auto::Msg::Look);
+                    return Task::batch([self.read_listening(), cards, look]);
                 }
                 if section == Section::Overview {
                     return cards;
@@ -1162,17 +1379,94 @@ impl App {
             Message::Compute(msg) => return self.compute.update(msg).map(Message::Compute),
             Message::Social(msg) => return self.social.update(msg).map(Message::Social),
             Message::Pages(msg) => return self.pages.update(msg).map(Message::Pages),
-            Message::Escape => {
-                if self.signin.settings.is_some() {
+            Message::Escape(captured) => {
+                // the topmost first, in the order the window draws them (view.rs)
+                if self.palette.is_some() {
+                    self.palette = None;
+                } else if self.sheet {
+                    self.sheet = false;
+                } else if self.rail_focus.is_some() {
+                    self.rail_focus = None;
+                } else if self.models.open {
+                    return self.update(Message::Models(crate::models::Msg::Close));
+                } else if self.parts.open.is_some() {
+                    return self.update(Message::Parts(crate::sinai_parts::Msg::Close));
+                } else if self.signin.settings.is_some() {
                     return self.update(Message::SignIn(crate::signin::Msg::SettingsClose));
+                } else if self.signin.menu_open {
+                    return self.update(Message::SignIn(crate::signin::Msg::Menu(false)));
+                } else if self.social.open && self.social.active() {
+                    return self.update(Message::Social(crate::social::Msg::Panel(false)));
+                } else if self.signin.whats_new_open {
+                    return self.update(Message::SignIn(crate::signin::Msg::WhatsNew(false)));
+                } else if self.section == Section::Lattice && self.lattice.tab == lattice::Tab::Chat {
+                    let key = lattice::ide::update::escape(captured);
+                    return self.update(Message::Lattice(lattice::Msg::Ide(lattice::ide::IdeMsg::Key(key))));
+                }
+            }
+            Message::Palette(msg) => return self.palette_update(msg),
+            Message::Sheet(open) => self.sheet = open && self.signin.through(),
+            Message::RailFocus => {
+                if self.rail_focus.take().is_none() && self.signin.through() {
+                    self.rail_focus = Section::ALL.iter().position(|s| *s == self.section);
+                    // no box keeps the keys meanwhile: a focus on an id no widget has takes it from every one
+                    return iced::widget::operation::focus(RAIL_FOCUS);
+                }
+            }
+            Message::RailMove(by) => {
+                if let Some(at) = &mut self.rail_focus {
+                    let n = Section::ALL.len() as i64;
+                    *at = match by {
+                        i32::MIN => 0,
+                        i32::MAX => (n - 1) as usize,
+                        by => (*at as i64 + by as i64).rem_euclid(n) as usize,
+                    };
+                }
+            }
+            Message::RailEnter => {
+                if let Some(at) = self.rail_focus.take()
+                    && let Some(section) = Section::ALL.get(at).copied().filter(|s| *s != self.section)
+                {
+                    return self.update(Message::Go(section));
+                }
+            }
+            Message::Shortcut(n) => {
+                if self.signin.through()
+                    && self.palette.is_none()
+                    && !self.overlay_open()
+                    && let Some(section) = Section::ALL.get(n).copied().filter(|s| *s != self.section)
+                {
+                    return self.update(Message::Go(section));
+                }
+            }
+            Message::SaveSession => {
+                if self.session_changed {
+                    self.session_changed = false;
+                    let now = self.session();
+                    if let Some(at) = &self.session_path {
+                        // a failure says so, and the next change tries again
+                        match crate::session::save(at, &now) {
+                            Ok(()) => self.session_kept = now,
+                            Err(e) => self.notice = Some(format!("Where the window was left was not kept: {e}")),
+                        }
+                    }
                 }
             }
             Message::FocusMove(back) => {
                 return if back { iced::widget::operation::focus_previous() } else { iced::widget::operation::focus_next() };
             }
             Message::WindowId(id) => self.window_id = id,
-            Message::Maximised(m) => self.maximised = m,
-            Message::Resized => {
+            Message::Maximised(m) => {
+                self.maximised = m;
+                // a size is kept only from a window that is not maximised (a maximised one is the screen's)
+                if let Some(size) = self.resized_to.take()
+                    && !m
+                {
+                    self.window_size = Some(size);
+                }
+            }
+            Message::Resized(size) => {
+                self.resized_to = Some(size);
                 if let Some(id) = self.window_id {
                     return window::is_maximized(id).map(Message::Maximised);
                 }
@@ -1244,9 +1538,16 @@ impl App {
                     Then::Nothing => {}
                     Then::Task(task) => return task.map(Message::Parts),
                     Then::OpenModels => return self.update(Message::Models(crate::models::Msg::Open)),
-                    Then::Chosen(part, choice) => return self.part_chosen(part, choice),
+                    Then::Chosen(part, choice) => {
+                        self.auto.chosen(part, &choice);
+                        return self.part_chosen(part, choice);
+                    }
                 }
             }
+            Message::Auto(msg) => return self.auto_update(msg),
+            // Under the palette or a panel of the window's, the IDE's own keys (Ctrl+P, the arrows...) do nothing.
+            Message::Lattice(lattice::Msg::Ide(lattice::ide::IdeMsg::Key(_)))
+                if self.palette.is_some() || self.overlay_open() || self.rail_focus.is_some() => {}
             Message::Lattice(msg) => {
                 let task = self.lattice.update(msg).map(Message::Lattice);
                 self.put_brain_in_sinai();
@@ -1372,6 +1673,10 @@ impl App {
             }
             Message::Sinai(feed) => match feed {
                 sinai::Feed::Unavailable | sinai::Feed::Lost => {
+                    // the build is told once when the loop stops answering, not at every retry
+                    if self.sinai_up == Some(true) {
+                        crate::installed::tell_sinai(false);
+                    }
                     self.sinai_up = Some(false);
                     self.sinai_commands = None;
                     self.sinai_works_gaps = false;
@@ -1383,6 +1688,9 @@ impl App {
                     self.held_change = None;
                 }
                 sinai::Feed::Connected(commands) => {
+                    if self.sinai_up != Some(true) {
+                        crate::installed::tell_sinai(true);
+                    }
                     self.sinai_up = Some(true);
                     self.sinai_commands = Some(commands);
                     self.watch_sent = false;
@@ -2046,6 +2354,7 @@ impl App {
             event::listen_with(files),
             event::listen_with(tab_keys),
             event::listen_with(escape_key),
+            event::listen_with(shell_keys),
         ];
         // Sinai's mind is a plug-in: the public build has none to connect to (installed.rs).
         if self.can(Capability::SinaiMind) {
@@ -2084,7 +2393,16 @@ impl App {
             subscriptions.push(self.signin.status_watch().map(Message::SignIn));
         }
         subscriptions.push(self.social.subscription().map(Message::Social));
-        subscriptions.push(window::resize_events().map(|_| Message::Resized));
+        subscriptions.push(window::resize_events().map(|(_, size)| Message::Resized(size)));
+        if self.palette.is_some() {
+            subscriptions.push(event::listen_with(crate::palette::nav_keys));
+        }
+        if self.rail_focus.is_some() {
+            subscriptions.push(event::listen_with(rail_keys));
+        }
+        if self.session_changed {
+            subscriptions.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::SaveSession));
+        }
         if let Some(every) = timers.voice {
             subscriptions.push(iced::time::every(every).map(|_| Message::VoiceTick));
         }
@@ -2128,6 +2446,7 @@ impl App {
                 .map(Message::Models),
         );
         subscriptions.push(self.parts.subscription(cards_on_show).map(Message::Parts));
+        subscriptions.push(self.auto.subscription(self.signin.through() && self.section == Section::Sinai).map(Message::Auto));
         // A harvest's progress is polled while it runs, whichever page is shown.
         subscriptions.push(self.research.subscription().map(Message::Research));
         // The dialogs Lattice's core asks for are answered whichever page is shown.
@@ -2222,11 +2541,59 @@ fn tab_keys(event: iced::Event, status: event::Status, _window: window::Id) -> O
     }
 }
 
-/// Esc, captured or not: the Settings panel's search box takes the keyboard, and Esc must still close the panel.
-fn escape_key(event: iced::Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+/// Esc, captured or not: the Settings panel's search box takes the keyboard, and Esc must still close the panel. Whether
+/// a widget took it goes with it (Lattice stops a chat's turn only on an Esc no box took).
+fn escape_key(event: iced::Event, status: event::Status, _window: window::Id) -> Option<Message> {
     use iced::keyboard::{Event, Key, key::Named};
     match event {
-        iced::Event::Keyboard(Event::KeyPressed { key: Key::Named(Named::Escape), .. }) => Some(Message::Escape),
+        iced::Event::Keyboard(Event::KeyPressed { key: Key::Named(Named::Escape), .. }) => {
+            Some(Message::Escape(status == event::Status::Captured))
+        }
+        _ => None,
+    }
+}
+
+/// The window's own keys, wherever the keyboard is: Ctrl+Shift+P or F1 the command palette, Ctrl+1 to Ctrl+9 the
+/// pages in their places on the rail (unless a widget took the key: a terminal's program may want it).
+fn shell_keys(event: iced::Event, status: event::Status, _window: window::Id) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Named};
+    let iced::Event::Keyboard(Event::KeyPressed { key, modifiers, physical_key, .. }) = event else { return None };
+    if let Key::Named(Named::F1) = key {
+        return (!modifiers.command() && !modifiers.alt()).then_some(Message::Palette(crate::palette::PaletteMsg::Toggle));
+    }
+    if let Key::Named(Named::F6) = key {
+        return (!modifiers.command() && !modifiers.alt()).then_some(Message::RailFocus);
+    }
+    if !modifiers.command() || modifiers.alt() {
+        return None;
+    }
+    match key.to_latin(physical_key) {
+        Some('p') if modifiers.shift() => Some(Message::Palette(crate::palette::PaletteMsg::Toggle)),
+        // Ctrl+Shift+/ (Ctrl+? on many keyboards); Ctrl+/ alone is the editor's comment
+        Some('/' | '?') if modifiers.shift() => Some(Message::Sheet(true)),
+        Some(d @ '1'..='9') if !modifiers.shift() && status == event::Status::Ignored => {
+            Some(Message::Shortcut(d as usize - '1' as usize))
+        }
+        _ => None,
+    }
+}
+
+/// An id no widget carries: focusing it takes the keyboard from every box (the rail has it, after F6).
+const RAIL_FOCUS: &str = "centcom-rail-focus";
+
+/// While the keyboard is on the rail: Up and Down move along it, Home and End to its ends, Enter or Space opens.
+fn rail_keys(event: iced::Event, _status: event::Status, _window: window::Id) -> Option<Message> {
+    use iced::keyboard::{Event, Key, key::Named};
+    let iced::Event::Keyboard(Event::KeyPressed { key: Key::Named(named), modifiers, .. }) = event else { return None };
+    if modifiers.command() || modifiers.alt() {
+        return None;
+    }
+    match named {
+        Named::ArrowUp => Some(Message::RailMove(-1)),
+        Named::ArrowDown => Some(Message::RailMove(1)),
+        Named::Home => Some(Message::RailMove(i32::MIN)),
+        Named::End => Some(Message::RailMove(i32::MAX)),
+        Named::Enter | Named::Space => Some(Message::RailEnter),
         _ => None,
     }
 }
@@ -2299,8 +2666,148 @@ mod tests {
         assert!(a.signin.settings_query.is_empty(), "the search starts empty next time");
         assert_eq!(a.section, Section::Fleet);
         // Esc with the panel closed changes nothing here.
-        let _ = a.update(Message::Escape);
+        let _ = a.update(Message::Escape(false));
         assert_eq!((a.section, a.signin.settings), (Section::Fleet, None));
+    }
+
+    fn key_press(key: iced::keyboard::Key, modifiers: iced::keyboard::Modifiers) -> iced::Event {
+        use iced::keyboard::{Event, Location, key};
+        iced::Event::Keyboard(Event::KeyPressed {
+            modified_key: key.clone(),
+            key,
+            physical_key: key::Physical::Unidentified(key::NativeCode::Unidentified),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    /// Every panel of the window's closes with Esc, the topmost first, one per press.
+    #[test]
+    fn esc_closes_each_panel_over_the_page_the_topmost_first() {
+        let mut a = quiet();
+        let _ = a.update(Message::SignIn(crate::signin::Msg::WhatsNew(true)));
+        let _ = a.update(Message::Models(crate::models::Msg::Open));
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Toggle));
+        assert!(a.palette.is_some() && a.models.open && a.signin.whats_new_open);
+        let _ = a.update(Message::Escape(true));
+        assert!(a.palette.is_none() && a.models.open, "the palette, drawn over everything, first");
+        let _ = a.update(Message::Escape(false));
+        assert!(!a.models.open && a.signin.whats_new_open, "then the Models panel");
+        let _ = a.update(Message::Escape(false));
+        assert!(!a.signin.whats_new_open, "then What's new");
+        let _ = a.update(Message::SignIn(crate::signin::Msg::Menu(true)));
+        let _ = a.update(Message::Escape(false));
+        assert!(!a.signin.menu_open, "and the account menu");
+    }
+
+    #[test]
+    fn the_windows_keys_open_the_palette_and_go_to_the_pages_by_their_places() {
+        use iced::keyboard::{Key, Modifiers, key::Named};
+        let w = window::Id::unique();
+        let ignored = event::Status::Ignored;
+        let palette = |m: Option<Message>| matches!(m, Some(Message::Palette(crate::palette::PaletteMsg::Toggle)));
+        assert!(palette(shell_keys(key_press(Key::Character("p".into()), Modifiers::CTRL | Modifiers::SHIFT), event::Status::Captured, w)));
+        assert!(palette(shell_keys(key_press(Key::Named(Named::F1), Modifiers::empty()), ignored, w)));
+        assert!(shell_keys(key_press(Key::Character("p".into()), Modifiers::CTRL), ignored, w).is_none(), "Ctrl+P is the IDE's");
+        assert!(matches!(shell_keys(key_press(Key::Character("4".into()), Modifiers::CTRL), ignored, w), Some(Message::Shortcut(3))));
+        assert!(shell_keys(key_press(Key::Character("4".into()), Modifiers::CTRL), event::Status::Captured, w).is_none(), "a terminal took it");
+        assert!(shell_keys(key_press(Key::Character("0".into()), Modifiers::CTRL), ignored, w).is_none());
+        let mut a = quiet();
+        let _ = a.update(Message::Shortcut(6));
+        assert_eq!(a.section, Section::ALL[6]);
+        let _ = a.update(Message::Shortcut(42));
+        assert_eq!(a.section, Section::ALL[6], "no page in that place");
+        // Not while a panel lies over the page.
+        let _ = a.update(Message::SignIn(crate::signin::Msg::WhatsNew(true)));
+        let _ = a.update(Message::Shortcut(0));
+        assert_eq!(a.section, Section::ALL[6]);
+    }
+
+    #[test]
+    fn the_palette_finds_a_page_by_a_few_letters_runs_it_and_remembers_it() {
+        use crate::palette::PaletteMsg as P;
+        let mut a = quiet();
+        let _ = a.update(Message::Palette(P::Toggle));
+        let _ = a.update(Message::Palette(P::Query("trst".into())));
+        let _ = a.update(Message::Palette(P::Run(None)));
+        assert!(a.palette.is_none(), "running closes it");
+        assert_eq!(a.section, Section::Trust);
+        assert_eq!(a.palette_recent.first().map(String::as_str), Some("go:trust"));
+        // Opened again with nothing typed, what ran last leads; Down and Up move round the rows.
+        let _ = a.update(Message::Palette(P::Toggle));
+        let first = crate::palette::ranked(crate::palette::entries(&a), "", &a.palette_recent).remove(0);
+        assert_eq!(first.id, "go:trust");
+        let _ = a.update(Message::Palette(P::Move(-1)));
+        assert_eq!(a.palette.as_ref().unwrap().selected, crate::palette::SHOWN - 1, "Up from the first goes round to the last");
+        let _ = a.update(Message::Palette(P::Toggle));
+        assert!(a.palette.is_none(), "the same keys close it");
+        // A row's press runs that row: Transcription's Library tab, from its group's name.
+        let _ = a.update(Message::Palette(P::Toggle));
+        let _ = a.update(Message::Palette(P::Query("library".into())));
+        let _ = a.update(Message::Palette(P::Run(Some(0))));
+        assert_eq!((a.section, a.tab), (Section::Transcription, Tab::Library));
+    }
+
+    #[test]
+    fn the_sheet_opens_from_its_keys_and_the_palette_and_esc_closes_it() {
+        use iced::keyboard::{Key, Modifiers};
+        let w = window::Id::unique();
+        let sheet = |m: Option<Message>| matches!(m, Some(Message::Sheet(true)));
+        assert!(sheet(shell_keys(key_press(Key::Character("/".into()), Modifiers::CTRL | Modifiers::SHIFT), event::Status::Captured, w)));
+        assert!(sheet(shell_keys(key_press(Key::Character("?".into()), Modifiers::CTRL | Modifiers::SHIFT), event::Status::Ignored, w)));
+        assert!(shell_keys(key_press(Key::Character("/".into()), Modifiers::CTRL), event::Status::Ignored, w).is_none(), "Ctrl+/ is the editor's comment");
+        let mut a = quiet();
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Toggle));
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Query("keyboard shortcuts".into())));
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Run(None)));
+        assert!(a.sheet && a.palette.is_none());
+        // On the Lattice page it lists the editor's, the chat's and the terminal's keys after the window's.
+        a.section = Section::Lattice;
+        a.lattice.tab = lattice::Tab::Chat;
+        let titles: Vec<_> = crate::shortcuts::groups(&a).iter().map(|g| g.title).collect();
+        assert_eq!(titles, [crate::shortcuts::WINDOW.title, crate::shortcuts::EDITOR.title, crate::shortcuts::CHAT.title, crate::shortcuts::TERMINAL.title]);
+        let _ = a.update(Message::Shortcut(0));
+        assert_eq!(a.section, Section::Lattice, "the pages' keys wait under the sheet");
+        let _ = a.update(Message::Escape(false));
+        assert!(!a.sheet);
+    }
+
+    #[test]
+    fn f6_puts_the_keyboard_on_the_rail_where_the_arrows_move_and_enter_opens() {
+        use iced::keyboard::{Key, Modifiers, key::Named};
+        let w = window::Id::unique();
+        assert!(matches!(shell_keys(key_press(Key::Named(Named::F6), Modifiers::empty()), event::Status::Captured, w), Some(Message::RailFocus)));
+        assert!(matches!(rail_keys(key_press(Key::Named(Named::ArrowDown), Modifiers::empty()), event::Status::Captured, w), Some(Message::RailMove(1))));
+        assert!(matches!(rail_keys(key_press(Key::Named(Named::Enter), Modifiers::empty()), event::Status::Ignored, w), Some(Message::RailEnter)));
+        let mut a = quiet();
+        let _ = a.update(Message::RailFocus);
+        assert_eq!(a.rail_focus, Some(0), "on the page on show");
+        let _ = a.update(Message::RailMove(-1));
+        assert_eq!(a.rail_focus, Some(Section::ALL.len() - 1), "round to the last");
+        let _ = a.update(Message::RailMove(i32::MIN));
+        let _ = a.update(Message::RailMove(2));
+        // The IDE's keys wait while the rail has the keyboard.
+        let _ = a.update(Message::Lattice(lattice::Msg::Ide(lattice::ide::IdeMsg::Key(lattice::ide::update::Key::ToggleSide))));
+        assert!(a.lattice.ide.side_open);
+        let _ = a.update(Message::RailEnter);
+        assert_eq!((a.section, a.rail_focus), (Section::ALL[2], None), "Enter opens it and the keyboard goes to the page");
+        let _ = a.update(Message::RailFocus);
+        let _ = a.update(Message::Escape(false));
+        assert_eq!(a.rail_focus, None, "Esc leaves the rail");
+    }
+
+    #[test]
+    fn under_the_palette_or_a_panel_the_ides_keys_wait() {
+        use crate::lattice::ide::{IdeMsg, update::Key};
+        let mut a = quiet();
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Toggle));
+        let _ = a.update(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(Key::ToggleSide))));
+        assert!(a.lattice.ide.side_open, "Ctrl+B under the palette did nothing");
+        let _ = a.update(Message::Palette(crate::palette::PaletteMsg::Close));
+        let _ = a.update(Message::Lattice(lattice::Msg::Ide(IdeMsg::Key(Key::ToggleSide))));
+        assert!(!a.lattice.ide.side_open);
     }
 
     /// The window past the sign-in screen (offline, as a `--screenshot` run opens it), on the Overview with its first look

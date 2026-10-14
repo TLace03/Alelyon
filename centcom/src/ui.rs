@@ -91,6 +91,24 @@ pub fn secondary<'a, M: Clone + 'a>(words: &'a str, message: Option<M>) -> Eleme
     button(text(words).size(13.0).font(fonts().ui)).padding([6.0, 12.0]).on_press_maybe(message).style(theme::secondary_button).into()
 }
 
+/// What `content` is, or does, on hover: its name and key, or why it cannot act now.
+pub fn tip<'a, M: 'a>(content: impl Into<Element<'a, M>>, words: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    iced::widget::tooltip(
+        content,
+        iced::widget::container(label(words, 12.0, theme::TEXT)).padding([4.0, 8.0]).max_width(360).style(theme::card),
+        iced::widget::tooltip::Position::Bottom,
+    )
+    .gap(4)
+    .into()
+}
+
+/// A plain button that, when it cannot act (`message` None), says why on hover rather than only fading.
+pub fn secondary_why<'a, M: Clone + 'a>(words: &'a str, message: Option<M>, why: &'a str) -> Element<'a, M> {
+    let disabled = message.is_none();
+    let b = secondary(words, message);
+    if disabled { tip(b, why) } else { b }
+}
+
 /// A row of tabs: each a segment, the chosen one gold.
 pub fn tabs<'a, M: Clone + 'a, T: Copy + PartialEq>(
     all: &[T],

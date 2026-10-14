@@ -11,7 +11,8 @@
 //!
 //! A build can also carry what is not a page: the receipt verifier's replay substrate ([`Registry::replay`]), and
 //! where the programs the public app does not ship are found ([`Processes`]: Sinai's mind, voice enrolment's tools),
-//! or its own rule for one the app finds itself (the speech engine). Each is a plug-in id: [`Registry::ids`].
+//! or its own rule for one the app finds itself (the speech engine). Each is a plug-in id: [`Registry::ids`]. A build
+//! can also be told whether Sinai answers ([`Registry::on_sinai`]), to start or stop what it runs beside it.
 
 use std::any::Any;
 use std::fmt;
@@ -272,6 +273,10 @@ pub struct Processes {
     pub ears: Option<Locate<PathBuf>>,
     /// Voice enrolment's tools.
     pub voice: Option<Locate<VoiceTools>>,
+    /// Told whether Sinai answers on its socket: each time that changes, and again (with `true`) after one of
+    /// Sinai's parts is given another model while it answers. Called on the window's own thread, so it returns at
+    /// once and does its work elsewhere.
+    pub on_sinai: Option<Arc<dyn Fn(bool) + Send + Sync>>,
 }
 
 impl fmt::Debug for Processes {
@@ -280,6 +285,7 @@ impl fmt::Debug for Processes {
             .field("sinai_mind", &self.sinai_mind.is_some())
             .field("ears", &self.ears.is_some())
             .field("voice", &self.voice.is_some())
+            .field("on_sinai", &self.on_sinai.is_some())
             .finish()
     }
 }
@@ -356,6 +362,12 @@ impl Registry {
         self
     }
 
+    /// What is told whether Sinai answers (see [`Processes::on_sinai`]). It brings no page and no plug-in id.
+    pub fn on_sinai(mut self, told: impl Fn(bool) + Send + Sync + 'static) -> Registry {
+        self.processes.on_sinai = Some(Arc::new(told));
+        self
+    }
+
     pub fn replay_kernel(&self) -> Option<Arc<dyn ReplayKernel>> {
         self.replay.clone()
     }
@@ -401,7 +413,11 @@ impl Registry {
 
     /// Nothing added: the public app.
     pub fn is_empty(&self) -> bool {
-        self.plugins.is_empty() && !self.owner && self.training.is_none() && self.ids().is_empty()
+        self.plugins.is_empty()
+            && !self.owner
+            && self.training.is_none()
+            && self.ids().is_empty()
+            && self.processes.on_sinai.is_none()
     }
 }
 
@@ -437,7 +453,21 @@ mod tests {
         assert!(r.is_empty() && r.plugins().is_empty() && !r.is_owner() && r.training_default().is_none());
         assert!(r.replay_kernel().is_none() && r.ids().is_empty());
         let p = r.processes();
-        assert!(p.sinai_mind.is_none() && p.ears.is_none() && p.voice.is_none());
+        assert!(p.sinai_mind.is_none() && p.ears.is_none() && p.voice.is_none() && p.on_sinai.is_none());
+    }
+
+    #[test]
+    fn what_is_told_about_sinais_loop_is_carried_without_an_id() {
+        let told = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let log = told.clone();
+        let r = Registry::new().on_sinai(move |up| log.lock().unwrap().push(up));
+        assert!(r.ids().is_empty(), "no plug-in id: it unlocks nothing");
+        assert!(!r.is_empty(), "but it is not the public app");
+        let hook = r.processes().on_sinai.clone().expect("carried");
+        hook(true);
+        hook(false);
+        assert_eq!(*told.lock().unwrap(), [true, false]);
+        assert!(format!("{r:?}").contains("on_sinai: true"));
     }
 
     struct Fixture;
