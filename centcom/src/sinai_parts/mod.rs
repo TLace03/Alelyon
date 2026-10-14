@@ -40,6 +40,7 @@
 //!   "embeddings": {"kind": "gguf", "name": "<stem>"} | {"kind": "endpoint", "id": "<id>"},
 //!   "voice":      {"kind": "voice-file", "file": "<file name>"} | {"kind": "endpoint", "id": "<id>"}
 //!   any part:     {"kind": "cloud", "provider": "<id>", "model": "<id>", "agreed": "<UTC time>"}
+//!   mind, eyes, voice: {"kind": "one-model", "model": "<stem>"}   (written only by the one-model switch, [`one_model`])
 //! }
 //! ```
 //!
@@ -58,7 +59,9 @@
 //! preferences' `"paid"` allowance); every other cloud choice stays free only.
 //!
 //! One action can fill several parts at once ([`Choices::set`] per part, one write each): the store holds a choice per
-//! part, never one shared model, so "one model for every part" is a later action over the same entries.
+//! part, never one shared model. The one-model switch ([`one_model`]) is such an action: it writes a `one-model`
+//! entry for the mind, the eyes and the voice in one write, keeps the entries it replaced, and puts them back when
+//! turned off. `one-model` joined version 1 without a new number, as `voice-file` did.
 //!
 //! **Live**: while a card or the picker is on show, the preferences file, the speech models folder, the voice folder
 //! and the models folder (for the eyes' vision projector) are watched (`live`), and the window is told only when one
@@ -66,6 +69,7 @@
 
 pub mod auto;
 pub mod cloud;
+pub mod one_model;
 pub mod view;
 
 use std::collections::HashMap;
@@ -154,7 +158,13 @@ pub enum Kind {
     VoiceFile,
     /// A free model of a hosted provider, on the person's own account, agreed to part by part ([`cloud`]).
     Cloud,
+    /// One local model as the mind, the eyes and the voice at once: set only by the one-model switch
+    /// ([`one_model`]), never offered in a single part's picker.
+    OneModel,
 }
+
+/// The entry kind the one-model switch writes.
+pub const ONE_MODEL_KIND: &str = "one-model";
 
 /// Whether hosted providers' free models are offered in the pickers (each still needs the person's Connect and Agree).
 pub const CLOUD_OFFERED: bool = true;
@@ -186,6 +196,8 @@ pub enum Choice {
     VoiceFile(String),
     /// A free model of a hosted provider; used only once agreed (`agreed`: when, in UTC).
     Cloud { provider: String, model: String, agreed: Option<String> },
+    /// The one local model, by its GGUF stem in the models folder ([`one_model`]).
+    OneModel(String),
     /// An entry of a kind this version does not know, kept as written.
     Unknown(Value),
 }
@@ -199,6 +211,7 @@ impl Choice {
             Choice::SpeechFile(_) => Kind::SpeechFile,
             Choice::VoiceFile(_) => Kind::VoiceFile,
             Choice::Cloud { .. } => Kind::Cloud,
+            Choice::OneModel(_) => Kind::OneModel,
             Choice::Unknown(_) => return None,
         })
     }
@@ -218,6 +231,7 @@ impl Choice {
                 }
                 v
             }
+            Choice::OneModel(model) => json!({"kind": ONE_MODEL_KIND, "model": model}),
             Choice::Unknown(v) => v.clone(),
         }
     }
@@ -247,6 +261,7 @@ impl Choice {
                 Choice::VoiceFile(file)
             }
             "cloud" => Choice::Cloud { provider: field("provider")?, model: field("model")?, agreed: field("agreed") },
+            ONE_MODEL_KIND => Choice::OneModel(field("model")?),
             _ => Choice::Unknown(v.clone()),
         })
     }
@@ -293,8 +308,9 @@ impl Choices {
         }
         if let Some(pick) = sinai_model.and_then(Pick::parse) {
             match chosen.get(&Part::Mind) {
-                // Sinai's mind chosen: the own model kept beside it is the models panel's, not the part's
-                Some(Choice::SinaiMind) => {}
+                // Sinai's own mind chosen (or the one model, which is its own mind on another model): the own model kept
+                // beside it is the models panel's, not the part's
+                Some(Choice::SinaiMind | Choice::OneModel(_)) => {}
                 _ => {
                     chosen.insert(Part::Mind, Choice::from_pick(&pick));
                 }
@@ -681,6 +697,9 @@ fn loop_use(part: Part, kept: Option<&Choice>, f: &Facts<'_>) -> String {
 
 /// `part`'s card: its model, where it runs, its state, and what uses the choice in this build.
 pub fn card(part: Part, choices: &Choices, f: &Facts<'_>) -> Card {
+    if let Some(Choice::OneModel(model)) = choices.used(part) {
+        return one_model::card(part, model, f);
+    }
     if let Some(card) = cloud_card(part, choices, f) {
         return card;
     }
@@ -851,6 +870,9 @@ pub struct Snapshot {
     pub voices: Vec<SpeechFile>,
     /// None when the eyes' choice is not a GGUF file of the models folder.
     pub eyes_projector: Option<Result<String, String>>,
+    /// Whether the one model can be turned on: its server program and every file it needs, or what is missing;
+    /// None when the build offers no one model.
+    pub one_model: Option<one_model::Found>,
 }
 
 /// Where the picker reads from: the preferences file and the three folders (None: not known, nothing read there).
@@ -860,6 +882,8 @@ pub struct Places {
     pub speech_dir: Option<PathBuf>,
     pub voice_dir: Option<PathBuf>,
     pub models_dir: Option<PathBuf>,
+    /// The one model this build offers ([`alelyon_plugin_api::OneModel`]), as it found it; None: it offers none.
+    pub one_model: Option<Result<alelyon_plugin_api::OneModel, String>>,
 }
 
 impl Places {
@@ -873,6 +897,7 @@ impl Places {
             speech_dir: speech_dir(),
             voice_dir: voice_dir(),
             models_dir: Some(lattice_core::llama::files::LlamaPaths::from_env(&lattice_core::ProcessEnv).models_dir),
+            one_model: crate::installed::one_model(),
         }
     }
 }
@@ -886,7 +911,9 @@ pub fn snapshot(at: &Places) -> Snapshot {
         }
         _ => None,
     };
+    let one_model = at.one_model.as_ref().map(|spec| one_model::look(spec, at.models_dir.as_deref()));
     Snapshot {
+        one_model,
         choices,
         speech_dir: at.speech_dir.clone(),
         speech: at.speech_dir.as_deref().map(speech_files).unwrap_or_default(),
@@ -909,6 +936,10 @@ pub enum Msg {
     AddModels,
     /// A step of using a free cloud model: connect, choose, agree ([`cloud`]).
     Cloud(cloud::Step),
+    /// Turn the one-model switch on or off ([`one_model`]).
+    OneModel(bool),
+    /// The switch was written (the parts it changed, as now kept), or why not.
+    OneModelDone(bool, Result<Vec<(Part, Option<Choice>)>, String>),
 }
 
 /// What the window does after a message, beyond the picker's own state.
@@ -917,6 +948,8 @@ pub enum Then {
     Task(Task<Msg>),
     /// A choice was kept: the window applies it (the mind's who-answers, the models panel's catalog).
     Chosen(Part, Option<Choice>),
+    /// Several parts' choices were kept in one write (the one-model switch): the window applies each.
+    ChosenMany(Vec<(Part, Option<Choice>)>),
     /// The picker closed for the Models panel.
     OpenModels,
 }
@@ -937,11 +970,15 @@ pub struct State {
     speech_dir: Option<PathBuf>,
     voice_dir: Option<PathBuf>,
     models_dir: Option<PathBuf>,
+    /// The one model this build offers, as it found it.
+    one_model: Option<Result<alelyon_plugin_api::OneModel, String>>,
+    /// What the one-model switch last said (kept apart from the picker's own words: the switch is on Sinai's page).
+    pub one_said: Option<Result<String, String>>,
 }
 
 impl Default for State {
     fn default() -> State {
-        let Places { prefs, speech_dir, voice_dir, models_dir } = Places::real();
+        let Places { prefs, speech_dir, voice_dir, models_dir, one_model } = Places::real();
         State {
             open: None,
             snapshot: None,
@@ -954,6 +991,8 @@ impl Default for State {
             speech_dir,
             voice_dir,
             models_dir,
+            one_model,
+            one_said: None,
         }
     }
 }
@@ -963,6 +1002,19 @@ impl State {
     #[cfg(test)]
     pub fn at(prefs: Option<PathBuf>, speech_dir: Option<PathBuf>) -> State {
         State { prefs, speech_dir, ..State::default() }
+    }
+
+    /// Use these places for the one model too (a test's): the models folder and the build's one model.
+    #[cfg(test)]
+    pub fn with_one_model(mut self, models_dir: Option<PathBuf>, one_model: Option<Result<alelyon_plugin_api::OneModel, String>>) -> State {
+        self.models_dir = models_dir;
+        self.one_model = one_model;
+        self
+    }
+
+    /// Whether this build offers a one model (the switch shows only then).
+    pub fn offers_one_model(&self) -> bool {
+        self.one_model.is_some()
     }
 
     pub fn choices(&self) -> Choices {
@@ -983,6 +1035,7 @@ impl State {
             speech_dir: self.speech_dir.clone(),
             voice_dir: self.voice_dir.clone(),
             models_dir: self.models_dir.clone(),
+            one_model: self.one_model.clone(),
         };
         Task::perform(off_thread(move || snapshot(&at)), |s| Msg::Read(Box::new(s.unwrap_or_default())))
     }
@@ -1082,6 +1135,27 @@ impl State {
                     },
                 ));
             }
+            Msg::OneModel(on) => return self.one_model(on),
+            Msg::OneModelDone(on, result) => {
+                self.working = false;
+                match result {
+                    Ok(kept) => {
+                        if let Some(s) = &mut self.snapshot {
+                            for (part, choice) in &kept {
+                                s.choices.set(*part, choice.clone());
+                            }
+                            s.eyes_projector = None;
+                        }
+                        self.one_said = Some(Ok(if on {
+                            "On. Sinai's own loop uses the one model for its mind, eyes and voice from its next start.".to_string()
+                        } else {
+                            "Off. Your previous choices for the mind, eyes and voice are back.".to_string()
+                        }));
+                        return Then::ChosenMany(kept);
+                    }
+                    Err(why) => self.one_said = Some(Err(why)),
+                }
+            }
             Msg::Chosen(part, choice, result) => {
                 self.working = false;
                 match result {
@@ -1115,6 +1189,32 @@ impl State {
             }
         }
         Then::Nothing
+    }
+
+    /// Turn the one-model switch on or off: checked again and written off the window's thread, in one write.
+    fn one_model(&mut self, on: bool) -> Then {
+        if self.working {
+            return Then::Nothing;
+        }
+        let Some(at) = self.prefs.clone() else {
+            self.one_said = Some(Err("This window keeps no preferences, so nothing was changed.".into()));
+            return Then::Nothing;
+        };
+        self.working = true;
+        self.one_said = None;
+        let (spec, models_dir) = (self.one_model.clone(), self.models_dir.clone());
+        Then::Task(Task::perform(
+            off_thread(move || {
+                if on {
+                    let Some(spec) = spec else { return Err("This build offers no one model.".to_string()) };
+                    let found = one_model::look(&spec, models_dir.as_deref());
+                    one_model::turn_on(&at, &found, &cloud::stamp(cloud::now()))
+                } else {
+                    one_model::turn_off(&at)
+                }
+            }),
+            move |r| Msg::OneModelDone(on, r.unwrap_or_else(|| Err("the switch was not written: its thread stopped".into()))),
+        ))
     }
 
     /// While a card or the picker is on show: the watch over the preferences file and the speech models folder.

@@ -593,7 +593,7 @@ fn the_snapshot_reads_the_voice_folder_and_the_chosen_vision_models_projector() 
     // a GGUF file as the models folder lists it: the magic, version 3, no tensors, no keys
     let gguf = [&b"GGUF"[..], &3u32.to_le_bytes(), &0u64.to_le_bytes(), &0u64.to_le_bytes()].concat();
     std::fs::write(models.join("Vision-Q4_K_M.gguf"), &gguf).unwrap();
-    let at = Places { prefs: Some(dir.join("preferences.json")), speech_dir: None, voice_dir: Some(voices.clone()), models_dir: Some(models.clone()) };
+    let at = Places { prefs: Some(dir.join("preferences.json")), speech_dir: None, voice_dir: Some(voices.clone()), models_dir: Some(models.clone()), one_model: None };
     save(at.prefs.as_deref().unwrap(), Part::Eyes, Some(&Choice::Gguf("Vision-Q4_K_M".into()))).unwrap();
     let snap = snapshot(&at);
     assert_eq!(snap.voices.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["kokoro-v1.0.onnx"]);
@@ -684,4 +684,215 @@ fn the_embeddings_card_says_when_sinais_loop_measures_a_model_first() {
     let mut f = facts(false, &Answering::Nobody, Some(&cat), &knocked, &down);
     f.loop_meaning = Some("recall by meaning: measuring qwen first");
     assert!(!card(Part::Embeddings, &chosen, &f).state.contains("Recall by meaning"));
+}
+
+// ------------------------------------------------------------------- the one-model switch
+
+/// A build's one model as a test describes it: neutral names, a program and files in `dir` (nothing real).
+fn spec(dir: &Path) -> alelyon_plugin_api::OneModel {
+    alelyon_plugin_api::OneModel {
+        title: "Test Model".into(),
+        model: "Test-Q4".into(),
+        server: Ok(dir.join("server").join("one-server.exe")),
+        server_setting: "TEST_ONE_SERVER".into(),
+        beside_server: vec!["assets/voice.wav".into()],
+        beside_model: vec!["vision/v.gguf".into(), "speech/s.gguf".into()],
+        needs: "Needs about 1 GB of graphics memory (measured).".into(),
+    }
+}
+
+fn ready_found() -> one_model::Found {
+    one_model::Found {
+        title: "Test Model".into(),
+        needs: String::new(),
+        stem: "Test-Q4".into(),
+        server: Some(PathBuf::from("C:/x/one-server.exe")),
+        model: Some(PathBuf::from("C:/m/Test-Q4.gguf")),
+        missing: Vec::new(),
+    }
+}
+
+fn read_json(at: &Path) -> Value {
+    serde_json::from_str(&std::fs::read_to_string(at).unwrap()).unwrap()
+}
+
+#[test]
+fn the_one_models_entry_round_trips_and_older_readers_keep_it() {
+    let one = Choice::OneModel("Test-Q4".into());
+    assert_eq!(one.entry(), json!({"kind": "one-model", "model": "Test-Q4"}));
+    assert_eq!(Choice::from_entry(&one.entry()), Some(one.clone()));
+    assert_eq!(one.kind(), Some(Kind::OneModel));
+    assert_eq!(Choice::from_entry(&json!({"kind": "one-model"})), None, "an entry without its model is no choice");
+    for part in Part::ALL {
+        for mind in [false, true] {
+            assert!(!offered(part, mind).contains(&Kind::OneModel), "{part:?}: never offered in one part's picker");
+        }
+    }
+    // what an older build does with a kind it does not know: kept as written, and the part uses its default
+    let later = json!({"kind": "one-model-duplex", "model": "x", "ears": true});
+    let mut parts = serde_json::Map::new();
+    parts.insert("eyes".into(), later.clone());
+    let c = Choices::from_prefs(&parts, None);
+    assert_eq!(c.get(Part::Eyes), Some(&Choice::Unknown(later.clone())));
+    assert_eq!(c.used(Part::Eyes), None, "a kind it does not know is no choice: the part uses its default");
+    // and another part's write keeps the entries exactly as written
+    let dir = scratch("one-model-kept");
+    let at = dir.join("preferences.json");
+    std::fs::write(&at, serde_json::to_string(&json!({"parts": {"version": 1, "mind": one.entry(), "eyes": later}})).unwrap()).unwrap();
+    save(&at, Part::Ears, Some(&Choice::SpeechFile("ggml-base.en.bin".into()))).unwrap();
+    let v = read_json(&at);
+    assert_eq!(v["parts"]["mind"], one.entry());
+    assert_eq!(v["parts"]["eyes"], json!({"kind": "one-model-duplex", "model": "x", "ears": true}));
+}
+
+#[test]
+fn the_one_model_is_the_minds_choice_even_beside_an_older_sinai_model() {
+    let mut parts = serde_json::Map::new();
+    parts.insert("mind".into(), json!({"kind": "one-model", "model": "Test-Q4"}));
+    let c = Choices::from_prefs(&parts, Some("gguf:qwen"));
+    assert_eq!(c.used(Part::Mind), Some(&Choice::OneModel("Test-Q4".into())), "sinai_model is the models panel's here");
+}
+
+#[test]
+fn on_then_off_puts_every_entry_back_exactly() {
+    let dir = scratch("one-model-restore");
+    let at = dir.join("preferences.json");
+    let before = json!({
+        "web_pages": "yours",
+        "sinai_model": "gguf:qwen",
+        "parts": {"version": 1, "mind": {"kind": "gguf", "name": "qwen"}, "eyes": {"kind": "gguf", "name": "vision"},
+                  "ears": {"kind": "speech-file", "file": "ggml-base.en.bin"}, "smell": {"kind": "nose"}},
+    });
+    std::fs::write(&at, serde_json::to_string_pretty(&before).unwrap()).unwrap();
+    let on = one_model::turn_on(&at, &ready_found(), "2026-10-14T12:00:00Z").unwrap();
+    assert_eq!(on.len(), 3);
+    let v = read_json(&at);
+    for part in one_model::PARTS {
+        assert_eq!(v["parts"][part.key()], json!({"kind": "one-model", "model": "Test-Q4"}), "{part:?}");
+    }
+    assert_eq!(v["parts"]["ears"], before["parts"]["ears"], "hearing is never touched");
+    assert_eq!(v["parts"]["smell"], before["parts"]["smell"], "an entry this build does not know is kept");
+    assert_eq!(v["sinai_model"], "gguf:qwen", "left alone");
+    assert_eq!(v[one_model::KEY]["previous"]["parts"], before["parts"]);
+    let c = Choices::read(Some(&at));
+    assert!(one_model::is_on(&c));
+    assert_eq!(c.used(Part::Mind), Some(&Choice::OneModel("Test-Q4".into())));
+    // on again: what was kept the first time stays kept
+    one_model::turn_on(&at, &ready_found(), "2026-10-14T12:05:00Z").unwrap();
+    assert_eq!(read_json(&at)[one_model::KEY]["previous"]["parts"], before["parts"]);
+    let off = one_model::turn_off(&at).unwrap();
+    assert_eq!(read_json(&at), before, "exactly as it was");
+    assert_eq!(off[0], (Part::Mind, Some(Choice::Gguf("qwen".into()))));
+    assert_eq!(off[2], (Part::Voice, None), "the voice had no entry: it has none again");
+    assert!(one_model::turn_off(&at).is_err(), "off again: nothing to put back");
+    assert_eq!(read_json(&at), before, "and nothing written");
+
+    // a file with no parts and no sinai_model at all comes back without them
+    let bare = json!({"backdrop_motion": true});
+    std::fs::write(&at, serde_json::to_string(&bare).unwrap()).unwrap();
+    one_model::turn_on(&at, &ready_found(), "t").unwrap();
+    one_model::turn_off(&at).unwrap();
+    assert_eq!(read_json(&at), bare);
+}
+
+#[test]
+fn a_part_changed_while_on_keeps_its_new_choice_when_turned_off() {
+    let dir = scratch("one-model-partial");
+    let at = dir.join("preferences.json");
+    let before = json!({"sinai_model": "gguf:qwen", "parts": {"version": 1, "mind": {"kind": "gguf", "name": "qwen"}}});
+    std::fs::write(&at, serde_json::to_string(&before).unwrap()).unwrap();
+    one_model::turn_on(&at, &ready_found(), "t").unwrap();
+    save(&at, Part::Voice, Some(&Choice::VoiceFile("kokoro-v1.0.onnx".into()))).unwrap();
+    let off = one_model::turn_off(&at).unwrap();
+    let v = read_json(&at);
+    assert_eq!(v["parts"]["voice"], json!({"kind": "voice-file", "file": "kokoro-v1.0.onnx"}), "chosen by hand: kept");
+    assert_eq!(v["parts"]["mind"], json!({"kind": "gguf", "name": "qwen"}), "still on the one model: put back");
+    assert!(v["parts"].get("eyes").is_none(), "had no entry: has none again");
+    assert_eq!(v["sinai_model"], "gguf:qwen");
+    assert!(v.get(one_model::KEY).is_none());
+    assert_eq!(off[2], (Part::Voice, Some(Choice::VoiceFile("kokoro-v1.0.onnx".into()))));
+}
+
+#[test]
+fn it_cannot_be_turned_on_while_the_program_or_a_file_is_missing() {
+    let dir = scratch("one-model-missing");
+    let at = dir.join("preferences.json");
+    let before = json!({"parts": {"version": 1, "mind": {"kind": "gguf", "name": "qwen"}}});
+    std::fs::write(&at, serde_json::to_string(&before).unwrap()).unwrap();
+    let models = dir.join("models");
+    let folder = models.join("Test");
+    std::fs::create_dir_all(&folder).unwrap();
+    std::fs::write(folder.join("Test-Q4.gguf"), b"GGUF\x03\x00\x00\x00rest").unwrap();
+    let spec = spec(&dir);
+    let server = spec.server.clone().unwrap();
+
+    // nothing but the model itself: the program and every file beside the model are named
+    let found = one_model::look(&Ok(spec.clone()), Some(&models));
+    assert!(!found.ready());
+    assert_eq!((found.title.as_str(), found.stem.as_str()), ("Test Model", "Test-Q4"));
+    let why = found.refusal().unwrap();
+    assert!(why.contains("one-server.exe") && why.contains("TEST_ONE_SERVER"), "{why}");
+    assert!(why.contains("vision/v.gguf") && why.contains("speech/s.gguf"), "{why}");
+    let refused = one_model::turn_on(&at, &found, "t").unwrap_err();
+    assert_eq!(refused, why);
+    assert_eq!(read_json(&at), before, "nothing was written");
+
+    // the program without what must be beside it is not enough
+    std::fs::create_dir_all(server.parent().unwrap()).unwrap();
+    std::fs::write(&server, b"MZ").unwrap();
+    for rel in &spec.beside_model {
+        let p = folder.join(rel);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, b"GGUF").unwrap();
+    }
+    let found = one_model::look(&Ok(spec.clone()), Some(&models));
+    assert!(found.refusal().unwrap().contains("assets/voice.wav beside the server program"), "{:?}", found.missing);
+
+    // everything in place: ready, and it turns on
+    let voice = server.parent().unwrap().join("assets/voice.wav");
+    std::fs::create_dir_all(voice.parent().unwrap()).unwrap();
+    std::fs::write(&voice, b"RIFF").unwrap();
+    let found = one_model::look(&Ok(spec.clone()), Some(&models));
+    assert!(found.ready(), "{:?}", found.missing);
+    assert_eq!(found.model.as_deref(), Some(folder.join("Test-Q4.gguf").as_path()));
+    one_model::turn_on(&at, &found, "t").unwrap();
+    assert!(one_model::is_on(&Choices::read(Some(&at))));
+
+    // no models folder, a relative program path, a build that could not say: each said in words
+    let relative = alelyon_plugin_api::OneModel { server: Ok(PathBuf::from("one-server.exe")), ..spec.clone() };
+    let found = one_model::look(&Ok(relative), None);
+    assert_eq!(found.missing.len(), 2, "{:?}", found.missing);
+    assert!(found.missing[0].contains("full path") && found.missing[1].contains("models folder"));
+    let unsaid = one_model::look(&Err("no home folder is known".into()), Some(&models));
+    assert_eq!(unsaid.refusal().unwrap(), "The one model cannot be turned on yet: no home folder is known.");
+}
+
+#[test]
+fn a_part_on_the_one_model_says_so_on_its_card_and_the_switch_needs_preferences() {
+    let knocked = HashMap::new();
+    let up = |p: u16| Some(p == 8180);
+    let mut parts = serde_json::Map::new();
+    for part in one_model::PARTS {
+        parts.insert(part.key().into(), json!({"kind": "one-model", "model": "Test-Q4"}));
+    }
+    let chosen = Choices::from_prefs(&parts, None);
+    let f = facts(true, &Answering::Mind, None, &knocked, &up);
+    for part in one_model::PARTS {
+        let c = card(part, &chosen, &f);
+        assert_eq!(c.model, "Test-Q4 (one model)", "{part:?}");
+        assert_eq!(c.level, Level::Up);
+        assert!(c.used_by.contains("mind, eyes and voice"));
+    }
+    let f = facts(false, &Answering::Nobody, None, &knocked, &up);
+    assert_eq!(card(Part::Voice, &chosen, &f).level, Level::Problem, "a build without the loop cannot run it");
+    assert_ne!(card(Part::Ears, &chosen, &f).model, "Test-Q4 (one model)", "hearing is not part of it");
+
+    let public = State::at(None, None);
+    assert!(!public.offers_one_model(), "the public build offers no one model, so no switch");
+    let dir = scratch("one-model-state");
+    let mut s = State::at(None, None).with_one_model(None, Some(Ok(spec(&dir))));
+    assert!(s.offers_one_model());
+    assert!(matches!(s.update(Msg::OneModel(true), None, true), Then::Nothing));
+    assert!(matches!(&s.one_said, Some(Err(w)) if w.contains("keeps no preferences")));
+    assert!(!s.working);
 }

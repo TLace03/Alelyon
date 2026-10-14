@@ -24,6 +24,7 @@
 //! the folder (Ctrl+Shift+F) ([`search`]); and Ctrl+K asks the agent to edit the selected lines, its change then waiting
 //! in the review as any of its changes does.
 
+pub mod activity;
 pub mod agent;
 pub mod attach;
 pub mod buffer;
@@ -111,6 +112,7 @@ impl Side {
         match self {
             Side::Explorer => "Explorer",
             Side::Search => "Search (Ctrl+Shift+F)",
+            Side::Chats if crate::lattice::ONE_SURFACE => "Activity and topics",
             Side::Chats => "Chats",
             Side::Changes => "Changes",
             Side::Tools => "Tools and MCP servers",
@@ -453,6 +455,8 @@ pub struct Ide {
     /// The message being sent is not the composer's (an inline edit's, or a suggested task's prompt): the composer's
     /// draft stays.
     pub inline_sending: bool,
+    /// The message being sent is a suggested task's Start: on one chat surface it runs beside the chat, which stays.
+    pub task_starting: bool,
     /// The suggested tasks whose prompts are shown on their chips.
     pub task_prompts: HashSet<String>,
     /// The images attached to the composer's message (at most 4), sent with it.
@@ -533,6 +537,7 @@ impl Default for Ide {
             search: search::SearchView::default(),
             reveal: None,
             inline_sending: false,
+            task_starting: false,
             attached: Vec::new(),
             task_prompts: HashSet::new(),
             tools: tools::Tools::default(),

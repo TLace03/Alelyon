@@ -41,8 +41,12 @@ lattice-app = { path = "../lattice/crates/lattice-app" }
 iced = { version = "0.14.0", default-features = false, features = ["wgpu", "tiny-skia", "crisp", "x11", "wayland", "tokio", "canvas", "markdown", "lazy", "advanced", "image-without-codecs"] }
 futures = "0.3.34"
 # The window's icon: the company mark, this crate's assets/alelyon_256.png. Already in this lock (iced's image
-# support brings it); nothing is downloaded for it.
+# support brings it); nothing is downloaded for it. Pages' PNG photos are decoded with it too.
 png = "0.18.1"
+# Pages' JPEG and WebP photos (src/pages/photos.rs). The image crate is already in this lock (iced's image support
+# brings it without codecs); its `jpeg` and `webp` features add zune-jpeg with zune-core, and image-webp with
+# quick-error: pure Rust, under MIT, Apache-2.0 or Zlib. Only these two codecs are on.
+image = { version = "0.25.10", default-features = false, features = ["jpeg", "webp"] }
 # Signing in (src/signin) and friends (src/social): the identity service's client, UI-free, in its own crate
 # (../crates/alelyon-identity-client, Apache-2.0, also in the public Alelyon-Client repository). It brings the HTTPS
 # client (reqwest over the system's TLS) and PKCE's SHA-256, base64url, randomness and percent-encoding at the versions

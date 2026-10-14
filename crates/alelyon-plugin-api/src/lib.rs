@@ -12,7 +12,8 @@
 //! A build can also carry what is not a page: the receipt verifier's replay substrate ([`Registry::replay`]), and
 //! where the programs the public app does not ship are found ([`Processes`]: Sinai's mind, voice enrolment's tools),
 //! or its own rule for one the app finds itself (the speech engine). Each is a plug-in id: [`Registry::ids`]. A build
-//! can also be told whether Sinai answers ([`Registry::on_sinai`]), to start or stop what it runs beside it.
+//! can also be told whether Sinai answers ([`Registry::on_sinai`]), to start or stop what it runs beside it, and
+//! can offer one local model for several of Sinai's parts at once ([`Registry::one_model`], [`OneModel`]).
 
 use std::any::Any;
 use std::fmt;
@@ -262,6 +263,27 @@ pub struct VoiceTools {
     pub speaker_model: PathBuf,
 }
 
+/// One local model a build offers for several of Sinai's parts at once (the app's one-model switch): what it is, the
+/// server program it runs on and the files each needs beside it. The app checks the files and writes the parts' choices;
+/// the build's own loop runs the server. The public app offers none.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OneModel {
+    /// Its name on screen.
+    pub title: String,
+    /// The model, by its GGUF stem in the models folder: what the parts' entries name.
+    pub model: String,
+    /// The server program as configured (never searched for), or why none is known.
+    pub server: Result<PathBuf, String>,
+    /// The setting that names the server program instead of the build's own place for it.
+    pub server_setting: String,
+    /// Files that must be beside the server program, relative to its folder.
+    pub beside_server: Vec<String>,
+    /// Files that must be beside the model, relative to its folder.
+    pub beside_model: Vec<String>,
+    /// What it needs to run, as measured: said on screen as a fact.
+    pub needs: String,
+}
+
 /// Where the programs the public app does not ship are found. The app's clients for them (Sinai's page, voice
 /// enrolment) are public; a build without a locator shows that client's empty state. The speech engine is open and
 /// the app finds it itself (beside its own program); a locator here replaces that rule for one build.
@@ -277,6 +299,8 @@ pub struct Processes {
     /// Sinai's parts is given another model while it answers. Called on the window's own thread, so it returns at
     /// once and does its work elsewhere.
     pub on_sinai: Option<Arc<dyn Fn(bool) + Send + Sync>>,
+    /// One local model for several of Sinai's parts ([`OneModel`]), as the build finds it when asked.
+    pub one_model: Option<Locate<OneModel>>,
 }
 
 impl fmt::Debug for Processes {
@@ -286,6 +310,7 @@ impl fmt::Debug for Processes {
             .field("ears", &self.ears.is_some())
             .field("voice", &self.voice.is_some())
             .field("on_sinai", &self.on_sinai.is_some())
+            .field("one_model", &self.one_model.is_some())
             .finish()
     }
 }
@@ -368,6 +393,13 @@ impl Registry {
         self
     }
 
+    /// The one local model this build offers for several of Sinai's parts ([`OneModel`]). It brings no page and no
+    /// plug-in id: the switch shows where the build carries it.
+    pub fn one_model(mut self, locate: impl Fn() -> Result<OneModel, String> + Send + Sync + 'static) -> Registry {
+        self.processes.one_model = Some(Arc::new(locate));
+        self
+    }
+
     pub fn replay_kernel(&self) -> Option<Arc<dyn ReplayKernel>> {
         self.replay.clone()
     }
@@ -418,6 +450,7 @@ impl Registry {
             && self.training.is_none()
             && self.ids().is_empty()
             && self.processes.on_sinai.is_none()
+            && self.processes.one_model.is_none()
     }
 }
 
@@ -454,6 +487,27 @@ mod tests {
         assert!(r.replay_kernel().is_none() && r.ids().is_empty());
         let p = r.processes();
         assert!(p.sinai_mind.is_none() && p.ears.is_none() && p.voice.is_none() && p.on_sinai.is_none());
+        assert!(p.one_model.is_none(), "the public app offers no one model");
+    }
+
+    #[test]
+    fn a_one_model_is_carried_without_an_id() {
+        let spec = OneModel {
+            title: "A model".into(),
+            model: "a-model-Q4".into(),
+            server: Ok(PathBuf::from("C:/programs/server.exe")),
+            server_setting: "SERVER_SETTING".into(),
+            beside_server: vec!["voice.wav".into()],
+            beside_model: vec!["parts/one.gguf".into()],
+            needs: "Needs some memory.".into(),
+        };
+        let given = spec.clone();
+        let r = Registry::new().one_model(move || Ok(given.clone()));
+        assert!(r.ids().is_empty(), "no plug-in id: it unlocks nothing");
+        assert!(!r.is_empty(), "but it is not the public app");
+        let locate = r.processes().one_model.clone().expect("carried");
+        assert_eq!(locate(), Ok(spec));
+        assert!(format!("{r:?}").contains("one_model: true"));
     }
 
     #[test]

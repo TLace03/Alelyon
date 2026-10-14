@@ -166,6 +166,18 @@ pub fn restore_parts(at: &Path, parts: Option<Value>, sinai_model: Option<String
     write(at, map)
 }
 
+/// Keep several top-level entries at `at` in one write (None removes the entry), with whatever else the file held.
+pub fn save_keys(at: &Path, entries: Vec<(&str, Option<Value>)>) -> Result<(), String> {
+    let mut map = object(at);
+    for (key, value) in entries {
+        match value {
+            Some(v) => map.insert(key.into(), v),
+            None => map.remove(key),
+        };
+    }
+    write(at, map)
+}
+
 /// The value kept under `key` at `at`; None when there is none or no file to make sense of.
 pub fn load_value(at: &Path, key: &str) -> Option<Value> {
     object(at).remove(key)
