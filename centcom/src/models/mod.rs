@@ -84,6 +84,22 @@ impl Pick {
     }
 }
 
+/// The Models panel's tabs: where a model comes from. What is in use stays above them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Tab {
+    /// GGUF files in the models folder, run here by llama.cpp.
+    #[default]
+    Local,
+    /// Open-weight models a service runs (`hosted`).
+    Hosted,
+    /// OpenAI-compatible endpoints from the model registry.
+    Endpoints,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 3] = [Tab::Local, Tab::Hosted, Tab::Endpoints];
+}
+
 /// The two surfaces a model is chosen for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Surface {
@@ -711,6 +727,8 @@ pub enum Msg {
     /// The hosted providers' cards (`hosted`).
     Hosted(hosted::Msg),
     Dismiss,
+    /// A tab of the panel chosen.
+    Tab(Tab),
 }
 
 /// The Models panel, and Sinai's page's own-model conversation.
@@ -734,6 +752,8 @@ pub struct State {
     pub hosted: hosted::Hosted,
     /// The mind's free cloud model, when it is the one answering on Sinai's page: the strip's messages go there.
     pub cloud_mind: Option<crate::sinai_parts::cloud::CloudPick>,
+    /// The panel's tab on show; kept while the window is open.
+    pub tab: Tab,
 }
 
 impl Default for State {
@@ -752,6 +772,7 @@ impl Default for State {
             own: byo::Strip::default(),
             hosted: hosted::Hosted::default(),
             cloud_mind: None,
+            tab: Tab::default(),
         }
     }
 }
@@ -999,6 +1020,7 @@ impl State {
                 self.working = false;
                 self.said = None;
             }
+            Msg::Tab(tab) => self.tab = tab,
         }
         Task::none()
     }

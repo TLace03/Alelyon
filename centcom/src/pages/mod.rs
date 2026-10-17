@@ -9,16 +9,27 @@
 //! Nothing here runs on a timer: a screen is read when it is opened, when "Refresh" is pressed, and after each change
 //! made from this page. A page is public: the page says so before a person opens theirs.
 
+mod icons;
+mod keys;
+mod kit;
+mod look;
 mod photos;
+mod popover;
+#[cfg(test)]
+mod snapshots;
 mod view;
+
+pub use keys::{SHEET as KEYS, keys};
 
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 
 use alelyon_identity_client::pages::{
-    self, Applicant, Community, CommunityPage, CommunitySummary, Education, Employment, Experience, Found, Joining, JobsQuery, Kind,
+    self, About, Applicant, Community, CommunityPage, CommunitySummary, Draft, Education, Employment, Experience, FeedbackCategory,
+    FeedbackSort, FeedbackStatus, Found, Joining, JobsQuery, Kind, NewProduct, ProductChanges, ProductList, ProductMaker, ProductPage,
+    ProductShow, Products, Stage, Tester,
     ListMembers, ListPage, ListTarget, MediaMatch, Me, Member, ModAct, ModAction, ModReport, PageList,
-    NewEducation, NewExperience, NewJob, NewPhoto, NewPoll, NewPost, Notifications, Org, OrgPage, Person, PersonPage, Post, Posts,
+    NewEducation, NewExperience, NewJob, NewPhoto, NewPoll, NewPost, Notification, Notifications, Org, OrgPage, Person, PersonPage, PersonShow, Post, Posts,
     Reaction, Reason, ReplyRule, SearchKind, Suggestions, Tagged, Target, Thread, Trending, Upload, Workplace,
 };
 pub use alelyon_identity_client::pages::Problem;
@@ -70,12 +81,19 @@ pub enum Screen {
     /// Lists (ADR-0054): the reader's private lists, and one list (by id) read as a stream.
     Lists,
     List(String),
+    /// Drafts and scheduled posts (ADR-0055): the reader's own.
+    Drafts,
+    /// Builders (ADR-0056): the day's and the week's launches, the newest products, the reader's own and those they
+    /// follow; and one product, by its handle.
+    Products,
+    Product(String),
 }
 
 impl Screen {
-    pub const TABS: [Screen; 9] = [
+    pub const TABS: [Screen; 10] = [
         Screen::Home,
         Screen::Explore,
+        Screen::Products,
         Screen::Communities,
         Screen::Lists,
         Screen::Jobs,
@@ -109,6 +127,9 @@ impl Screen {
             Screen::CommunityMembers(h) => format!("c/{h} members"),
             Screen::Lists => "Lists".into(),
             Screen::List(_) => "List".into(),
+            Screen::Drafts => "Drafts".into(),
+            Screen::Products => "Products".into(),
+            Screen::Product(h) => format!("p/{h}"),
         }
     }
 
@@ -149,6 +170,8 @@ pub enum PhotoFor {
     Page(&'static str),
     /// An organization's `logo` or `banner`, by its ticker.
     Org(String, &'static str),
+    /// A product's `logo`, or its screenshot (`shot`) at a place: its handle, the slot and the place.
+    Product(String, &'static str, usize),
 }
 
 impl PhotoFor {
@@ -160,6 +183,8 @@ impl PhotoFor {
             PhotoFor::Page("avatar") => format!("Your photo is {done}."),
             PhotoFor::Page(kind) => format!("Your {kind} is {done}."),
             PhotoFor::Org(ticker, kind) => format!("({ticker})'s {kind} is {done}."),
+            PhotoFor::Product(handle, "logo", _) => format!("p/{handle}'s logo is {done}."),
+            PhotoFor::Product(handle, _, _) => format!("A screenshot of p/{handle} is {}.", if cleared { "removed" } else { "added" }),
         }
     }
 }
@@ -176,6 +201,130 @@ pub struct Attached {
     /// The file's name, as the composer shows it.
     pub name: String,
     pub alt: String,
+}
+
+/// Which notifications show: all of them, or those that answer or name the reader (X's Mentions).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum NotifView {
+    #[default]
+    All,
+    Mentions,
+}
+
+impl NotifView {
+    pub const ALL: [NotifView; 2] = [NotifView::All, NotifView::Mentions];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            NotifView::All => "All",
+            NotifView::Mentions => "Mentions",
+        }
+    }
+
+    /// The notification is one this view shows.
+    pub fn shows(self, kind: &str) -> bool {
+        self == NotifView::All || matches!(kind, "mention" | "reply" | "quote")
+    }
+}
+
+/// Notifications as the social sites list them: the reactions to one post, its reposts, and new followers, each as
+/// one row where the newest of them stands, its people newest first; everything else a row of its own. `items`
+/// come newest first.
+pub fn grouped<'a>(items: impl IntoIterator<Item = &'a Notification>) -> Vec<Vec<&'a Notification>> {
+    let mut groups: Vec<Vec<&Notification>> = Vec::new();
+    let mut at: HashMap<(&str, Option<&str>), usize> = HashMap::new();
+    for n in items {
+        let key = match n.kind.as_str() {
+            "like" | "repost" => Some((n.kind.as_str(), n.post.as_ref().map(|p| p.id.as_str()))),
+            "follow" => Some(("follow", None)),
+            _ => None,
+        };
+        if let Some(k) = key {
+            if let Some(&i) = at.get(&k) {
+                groups[i].push(n);
+                continue;
+            }
+            at.insert(k, groups.len());
+        }
+        groups.push(vec![n]);
+    }
+    groups
+}
+
+/// A person's page's tabs: what the service lists (posts, replies, photos, articles), and their professional
+/// profile (experience, education, skills), as LinkedIn shows one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum PersonTab {
+    #[default]
+    Posts,
+    Replies,
+    Media,
+    Articles,
+    Profile,
+}
+
+impl PersonTab {
+    pub const ALL: [PersonTab; 5] = [PersonTab::Posts, PersonTab::Replies, PersonTab::Media, PersonTab::Articles, PersonTab::Profile];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            PersonTab::Posts => "Posts",
+            PersonTab::Replies => "Replies",
+            PersonTab::Media => "Media",
+            PersonTab::Articles => "Articles",
+            PersonTab::Profile => "Profile",
+        }
+    }
+
+    /// What the page is read with; the profile comes with any of them.
+    pub fn show(self) -> PersonShow {
+        match self {
+            PersonTab::Replies => PersonShow::Replies,
+            PersonTab::Media => PersonShow::Media,
+            PersonTab::Articles => PersonShow::Articles,
+            PersonTab::Posts | PersonTab::Profile => PersonShow::Posts,
+        }
+    }
+}
+
+/// The reader's own page's tabs: how the page reads (name, photos, title, biography, organizations), the
+/// background (positions, schools, skills), privacy (AI training, muted people), and job applications.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum MineTab {
+    #[default]
+    Profile,
+    Background,
+    Privacy,
+    Applications,
+}
+
+impl MineTab {
+    pub const ALL: [MineTab; 4] = [MineTab::Profile, MineTab::Background, MineTab::Privacy, MineTab::Applications];
+}
+
+/// An organization's page's tabs, as LinkedIn's: its posts, its open jobs, its people, and about it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum OrgTab {
+    #[default]
+    Posts,
+    Products,
+    Jobs,
+    People,
+    About,
+}
+
+impl OrgTab {
+    pub const ALL: [OrgTab; 5] = [OrgTab::Posts, OrgTab::Products, OrgTab::Jobs, OrgTab::People, OrgTab::About];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            OrgTab::Posts => "Posts",
+            OrgTab::Products => "Products",
+            OrgTab::Jobs => "Jobs",
+            OrgTab::People => "People",
+            OrgTab::About => "About",
+        }
+    }
 }
 
 /// Which feed Home shows: the ranked one, or that of the people and organizations followed.
@@ -197,14 +346,23 @@ impl HomeFeed {
     }
 }
 
-/// The reader's profile being written on My page: the entry in each form (an id set when changing one), and the skills
-/// as one comma-separated line.
+/// The reader's profile being written on My page: the entry in each form (an id set when changing one), whether each
+/// form is open, and the skills as chips.
 #[derive(Default)]
 pub struct ProfileForm {
     pub experience: NewExperience,
     pub education: NewEducation,
-    pub skills: String,
-    /// The skills line differs from what the service last said.
+    /// The forms that add a position or a school are open (one changing an entry is open while it has its id).
+    pub exp_open: bool,
+    pub edu_open: bool,
+    /// The position in the form is held now: it has no end.
+    pub exp_now: bool,
+    /// The entry whose Delete was pressed once: a second press deletes it.
+    pub confirm_delete: Option<String>,
+    pub skills: Vec<String>,
+    /// The skill being typed, added on Enter (several between commas).
+    pub skill_new: String,
+    /// The skills differ from what the service last said.
     pub skills_dirty: bool,
 }
 
@@ -242,6 +400,38 @@ fn as_tag(typed: &str) -> Option<String> {
         && tag.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
         && tag.bytes().any(|b| b.is_ascii_alphabetic());
     ok.then(|| tag.to_ascii_lowercase())
+}
+
+/// A mention being typed in the composer (`@ad`): where it stands, and the people the service found for it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Mentioning {
+    /// The line it is on, and the byte columns of its `@` and of the cursor after it.
+    pub line: usize,
+    pub start: usize,
+    pub end: usize,
+    /// What follows the `@`, as typed.
+    pub word: String,
+    /// The people with a page who match it, and the one Enter or Tab takes.
+    pub found: Vec<Person>,
+    pub at: usize,
+}
+
+/// The mention being typed at the composer's cursor: its line, the byte columns of its `@` and of the cursor, and what
+/// follows the `@` (1 to 39 letters, digits, `.`, `_` or `-`), when the `@` begins a word, as the service reads a
+/// mention. None with a selection, or anywhere else.
+pub(crate) fn typed_mention(body: &text_editor::Content) -> Option<(usize, usize, usize, String)> {
+    let cursor = body.cursor();
+    if cursor.selection.is_some() {
+        return None;
+    }
+    let at = cursor.position;
+    let line = body.line(at.line)?;
+    let before = line.text.get(..at.column)?;
+    let start = before.rfind('@')?;
+    let word = &before[start + 1..];
+    let fits = (1..=39).contains(&word.len()) && word.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'));
+    let free = before[..start].chars().next_back().is_none_or(|c| !(c.is_alphanumeric() || matches!(c, '_' | '@' | '.')));
+    (fits && free).then(|| (at.line, start, at.column, word.to_string()))
 }
 
 /// Who a new post is from: the person, or an organization they run.
@@ -305,6 +495,198 @@ impl NewCommunity {
     }
 }
 
+/// What the Products tab shows: the day's or the week's launches, the newest products, the reader's own, or those
+/// they follow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ProductsView {
+    #[default]
+    Today,
+    Week,
+    Newest,
+    Yours,
+    Following,
+}
+
+impl ProductsView {
+    pub const ALL: [ProductsView; 5] = [ProductsView::Today, ProductsView::Week, ProductsView::Newest, ProductsView::Yours, ProductsView::Following];
+
+    pub fn title(self) -> &'static str {
+        match self {
+            ProductsView::Today => "Today",
+            ProductsView::Week => "This week",
+            ProductsView::Newest => "Newest",
+            ProductsView::Yours => "Yours",
+            ProductsView::Following => "Following",
+        }
+    }
+
+    /// Launches, or products.
+    pub fn launches(self) -> bool {
+        matches!(self, ProductsView::Today | ProductsView::Week)
+    }
+
+    fn list(self) -> ProductList {
+        match self {
+            ProductsView::Yours => ProductList::Mine,
+            ProductsView::Following => ProductList::Following,
+            _ => ProductList::Newest,
+        }
+    }
+}
+
+/// A field of the form that starts a product, or of the form its keepers edit it with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProductField {
+    Handle,
+    Name,
+    Tagline,
+    About,
+    Website,
+    Source,
+    /// "Built with", comma-separated.
+    Tech,
+}
+
+/// A product being started (or, without its handle and owner, edited by its keepers).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ProductForm {
+    pub handle: String,
+    pub name: String,
+    pub tagline: String,
+    pub about: String,
+    pub website: String,
+    pub source: String,
+    pub tech: String,
+    pub platforms: Vec<&'static str>,
+    pub stage: Stage,
+    /// The organization that owns it (a ticker), else the reader.
+    pub as_org: Option<String>,
+}
+
+impl ProductForm {
+    /// As the service reads a handle: trimmed, lower case, without a typed `p/`, letters, digits and `-` only.
+    fn tidy_handle(typed: &str) -> String {
+        let lower = typed.trim().to_ascii_lowercase();
+        let bare = lower.strip_prefix("p/").unwrap_or(&lower);
+        bare.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').take(40).collect()
+    }
+
+    /// Its technologies, as typed between commas, each once.
+    pub fn tech_list(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for part in self.tech.split(',').map(|t| t.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|t| !t.is_empty()) {
+            if !out.iter().any(|o| o.eq_ignore_ascii_case(&part)) {
+                out.push(part.chars().take(pages::PRODUCT_TECH_MAX_CHARS).collect());
+            }
+        }
+        out
+    }
+
+    /// Why it cannot be sent yet, in words; None when it can.
+    pub fn why_not(&self, starting: bool) -> Option<String> {
+        let link = |l: &str| l.trim().is_empty() || l.trim().starts_with("https://");
+        if starting
+            && !((3..=40).contains(&self.handle.len()) && !self.handle.starts_with('-') && !self.handle.ends_with('-'))
+        {
+            Some("A handle is 3-40 letters, digits or -, beginning and ending with a letter or digit".into())
+        } else if self.name.trim().is_empty() {
+            Some("Name it".into())
+        } else if !link(&self.website) || !link(&self.source) {
+            Some("A link is an https address".into())
+        } else if self.tech_list().len() > pages::MAX_PRODUCT_TECH {
+            Some(format!("At most {} technologies", pages::MAX_PRODUCT_TECH))
+        } else {
+            None
+        }
+    }
+
+    fn of(page: &ProductPage) -> ProductForm {
+        ProductForm {
+            name: page.summary.product.name.clone(),
+            tagline: page.summary.tagline.clone(),
+            about: page.about.clone(),
+            website: page.website.clone(),
+            source: page.source.clone(),
+            tech: page.summary.tech.join(", "),
+            platforms: pages::PLATFORMS.into_iter().filter(|p| page.platforms.iter().any(|q| q == p)).collect(),
+            stage: page.summary.stage,
+            ..ProductForm::default()
+        }
+    }
+
+    fn new_product(&self) -> NewProduct {
+        NewProduct {
+            handle: self.handle.clone(),
+            name: self.name.trim().to_string(),
+            tagline: self.tagline.trim().to_string(),
+            about: self.about.trim().to_string(),
+            website: self.website.trim().to_string(),
+            source: self.source.trim().to_string(),
+            platforms: self.platforms.iter().map(|p| p.to_string()).collect(),
+            tech: self.tech_list(),
+            stage: self.stage,
+            as_org: self.as_org.clone(),
+        }
+    }
+
+    fn changes(&self) -> ProductChanges {
+        ProductChanges {
+            name: Some(self.name.trim().to_string()),
+            tagline: Some(self.tagline.trim().to_string()),
+            about: Some(self.about.trim().to_string()),
+            website: Some(self.website.trim().to_string()),
+            source: Some(self.source.trim().to_string()),
+            platforms: Some(self.platforms.iter().map(|p| p.to_string()).collect()),
+            tech: Some(self.tech_list()),
+            stage: Some(self.stage),
+        }
+    }
+}
+
+/// What is being written on the product on show: feedback (with its category) or a review (with its stars).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Giving {
+    Feedback(FeedbackCategory, String),
+    Review(u8, String),
+}
+
+impl Giving {
+    pub fn text(&self) -> &str {
+        match self {
+            Giving::Feedback(_, text) | Giving::Review(_, text) => text,
+        }
+    }
+
+    fn about(&self) -> About {
+        match self {
+            Giving::Feedback(category, _) => About::Feedback(*category),
+            Giving::Review(stars, _) => About::Review(*stars),
+        }
+    }
+}
+
+/// A product the reader keeps, as the composer's About offers it; None is nothing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AboutProduct(pub Option<(String, String)>);
+
+impl std::fmt::Display for AboutProduct {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            None => write!(f, "No product"),
+            Some((_, name)) => write!(f, "{name}"),
+        }
+    }
+}
+
+/// Choose a platform (true) or take it back, keeping the service's order.
+fn toggle_platform(chosen: &mut Vec<&'static str>, platform: &'static str, on: bool) {
+    chosen.retain(|p| *p != platform);
+    if on {
+        chosen.push(platform);
+    }
+    chosen.sort_by_key(|p| pages::PLATFORMS.iter().position(|q| q == p));
+}
+
 /// The organization a title names, as the picker offers it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TitleOrg(pub Option<Org>);
@@ -342,6 +724,19 @@ pub struct Composer {
     pub photos: Vec<Attached>,
     /// The community to post in (a handle), when not on the reader's own page.
     pub in_community: Option<String>,
+    /// The draft being written again (ADR-0055): Post posts it, and Save draft rewrites it.
+    pub draft_id: Option<String>,
+    /// The post that draft quotes, until it is read into `quoting` (or when it is not there to read).
+    pub draft_quote: Option<String>,
+    /// The schedule is being chosen: a day and a time, in UTC as CENTCOM shows every time.
+    pub schedule_on: bool,
+    pub schedule_day: String,
+    pub schedule_time: String,
+    /// The product it is about, one the reader keeps (its handle) (ADR-0056); and whether it launches a version, with
+    /// the version.
+    pub product: Option<String>,
+    pub launch_on: bool,
+    pub launch_version: String,
 }
 
 /// How long a poll stays open, as the composer offers it.
@@ -455,9 +850,38 @@ impl Composer {
             && (!self.job_wanted() || self.job.workplace == Workplace::Remote || !self.job.location.trim().is_empty())
     }
 
+    /// Why the composer cannot post yet, as its Post button says under the pointer (UX rule C5); None when it can
+    /// (`ready`).
+    pub fn why_not(&self) -> Option<String> {
+        let n = self.chars();
+        let titled = (1..=pages::ARTICLE_TITLE_MAX_CHARS).contains(&self.title.trim().chars().count());
+        if self.sending {
+            Some("Posting\u{2026}".into())
+        } else if n == 0 {
+            Some("Write something first".into())
+        } else if n > self.limit() {
+            Some(format!("{} characters over the limit of {}", n - self.limit(), self.limit()))
+        } else if self.kind == Kind::Article && !titled {
+            Some(format!("Give the article a title of at most {} characters", pages::ARTICLE_TITLE_MAX_CHARS))
+        } else if self.poll_on && self.poll_choices().len() < 2 {
+            Some("A poll needs at least two options".into())
+        } else if self.job_wanted() && self.job.workplace != Workplace::Remote && self.job.location.trim().is_empty() {
+            Some("Say where the job is, or make it remote".into())
+        } else if self.launches() && self.launch_version.trim().is_empty() {
+            Some("Say which version it launches".into())
+        } else {
+            None
+        }
+    }
+
     /// The poll's options as typed, without the empty ones.
     fn poll_choices(&self) -> Vec<String> {
         self.poll_options.iter().map(|o| o.trim().to_string()).filter(|o| !o.is_empty()).collect()
+    }
+
+    /// A launch goes with a post about a product, not a quote.
+    pub fn launches(&self) -> bool {
+        self.launch_on && self.product.is_some() && !self.quotes()
     }
 
     /// A job opening goes with an article posted as an organization only.
@@ -467,7 +891,77 @@ impl Composer {
 
     /// A poll goes with a post of its own (not an article, not a quote) only.
     fn poll_wanted(&self) -> bool {
-        self.poll_on && self.kind == Kind::Post && self.quoting.is_none()
+        self.poll_on && self.kind == Kind::Post && !self.quotes()
+    }
+
+    /// It quotes a post: one on show, or the one a draft being written again names.
+    pub fn quotes(&self) -> bool {
+        self.quoting.is_some() || self.draft_quote.is_some()
+    }
+
+    /// Ready to keep as a draft: as for posting, but not a job opening, which is posted at once.
+    pub fn draftable(&self) -> bool {
+        self.ready() && !self.job_wanted()
+    }
+
+    /// The time the schedule names, as RFC 3339 and in seconds: a day as 2026-10-15 and a time as 09:30, in UTC.
+    pub fn schedule_at(&self) -> Option<(String, f64)> {
+        let (h, m) = self.schedule_time.trim().split_once(':')?;
+        let (h, m): (u32, u32) = (h.trim().parse().ok()?, m.trim().parse().ok()?);
+        let day = self.schedule_day.trim();
+        if h > 23 || m > 59 || day.len() != 10 {
+            return None;
+        }
+        let at = format!("{day}T{h:02}:{m:02}:00Z");
+        // A day that does not exist (the 31st of a short month) reads as another: refused.
+        crate::utc::parse(&at).filter(|s| crate::utc::full(*s).starts_with(day)).map(|s| (at, s))
+    }
+
+    /// The composer holding a draft again, to post, rewrite or schedule.
+    fn from_draft(draft: &Draft) -> Composer {
+        let p = &draft.post;
+        let mut composer = Composer {
+            kind: p.kind,
+            title: p.title.clone().unwrap_or_default(),
+            body: text_editor::Content::with_text(&p.text),
+            as_who: p.as_org.clone(),
+            replies: p.replies,
+            photos: draft
+                .photos
+                .iter()
+                .enumerate()
+                .map(|(i, photo)| Attached {
+                    id: photo.id.clone(),
+                    url: photo.url.clone().unwrap_or_default(),
+                    name: format!("Photo {}", i + 1),
+                    alt: photo.alt.clone(),
+                })
+                .collect(),
+            in_community: p.community.clone(),
+            draft_id: Some(draft.id.clone()),
+            draft_quote: p.repost_of.clone(),
+            product: p.product.clone(),
+            launch_on: matches!(p.about, About::Launch(_)),
+            launch_version: match &p.about {
+                About::Launch(version) => version.clone(),
+                _ => String::new(),
+            },
+            ..Composer::default()
+        };
+        if let Some(poll) = &p.poll {
+            composer.poll_on = true;
+            for (slot, option) in composer.poll_options.iter_mut().zip(&poll.options) {
+                slot.clone_from(option);
+            }
+            composer.poll_length = PollLength(poll.hours);
+        }
+        if let Some(at) = draft.publish_at.as_deref().and_then(crate::utc::parse) {
+            let full = crate::utc::full(at);
+            composer.schedule_on = true;
+            composer.schedule_day = full[..10].to_string();
+            composer.schedule_time = full[11..16].to_string();
+        }
+        composer
     }
 
     fn new_post(&self) -> NewPost {
@@ -482,14 +976,17 @@ impl Composer {
             text: self.body.text().trim().to_string(),
             title: (self.kind == Kind::Article).then(|| self.title.trim().to_string()),
             reply_to: None,
-            repost_of: self.quoting.as_ref().map(|p| p.id.clone()),
+            repost_of: self.quoting.as_ref().map(|p| p.id.clone()).or_else(|| self.draft_quote.clone()),
             as_org: self.as_who.clone(),
             replies: self.replies,
             poll,
             job: self.job_wanted().then(|| NewJob { days: self.job_days.0, ..self.job.clone() }),
             media,
             // A community post is one's own, not an organization's, and not a quote.
-            community: self.in_community.clone().filter(|_| self.as_who.is_none() && self.quoting.is_none()),
+            community: self.in_community.clone().filter(|_| self.as_who.is_none() && !self.quotes()),
+            // A post about a product is one's own top-level post or article: not a quote, a community's or a job.
+            product: self.product.clone().filter(|_| !self.quotes() && self.in_community.is_none() && !self.job_wanted()),
+            about: if self.launches() { About::Launch(self.launch_version.trim().to_string()) } else { About::Update },
         }
     }
 }
@@ -506,6 +1003,10 @@ pub struct Mine {
     pub saving: bool,
     /// "Close my page" was pressed once: the page asks before it closes.
     pub confirm_close: bool,
+    /// The tab on show.
+    pub tab: MineTab,
+    /// The reader's page as others see it, for the top drawn over the fields (its banner and totals).
+    pub top: Option<PersonPage>,
 }
 
 /// A new organization being named.
@@ -601,6 +1102,65 @@ pub struct State {
     pub edit_list: Option<(String, String, String)>,
     pub confirm_delete_list: Option<String>,
     pub list_picker: Option<(ListTarget, Vec<PageList>)>,
+    /// Drafts (ADR-0055): the reader's own, and the one a press of Delete waits to confirm.
+    pub drafts: Option<Vec<Draft>>,
+    pub confirm_delete_draft: Option<String>,
+    /// The window's width, as the app last saw it: wide enough, the page is three columns (navigation, the feed,
+    /// and search with what is trending), as the social sites lay theirs out. None until the app tells it.
+    pub width: Option<f32>,
+    /// The post whose ⋯ menu, repost choice or reactions are open (its id): one at a time.
+    pub post_menu: Option<String>,
+    pub repost_menu: Option<String>,
+    pub reacting: Option<String>,
+    /// All notifications, or the mentions.
+    pub notif_view: NotifView,
+    /// The page last asked for by scrolling to the end (its key, `more_key`): asked once.
+    pub more_asked: Option<String>,
+    /// The tab on show on a person's and an organization's page, the organization's open jobs (its ticker with
+    /// them), and whether the page's own ⋯ menu is open.
+    pub person_tab: PersonTab,
+    pub org_tab: OrgTab,
+    pub org_jobs: Option<(String, Posts)>,
+    /// The products of the organization on show (ADR-0056), with its ticker.
+    pub org_products: Option<(String, Products)>,
+    pub page_menu: bool,
+    /// The post the keyboard is on, by id (`keys`: j and k move it); none until j or k is pressed on this screen.
+    pub selected: Option<String>,
+    /// r opened a conversation: its reply field takes the keyboard once it is read.
+    pub reply_focus: bool,
+    /// The photo open over the page: its post's id and its place among the post's photos.
+    pub viewing: Option<(String, usize)>,
+    /// A mention being typed in the composer, with the people who match it (`typed_mention`).
+    pub mentioning: Option<Mentioning>,
+    /// Builders (ADR-0056): the Products tab's part on show; the day's launches (the rail's too) and the week's; the
+    /// products a list part holds (with the part they answer); the products the reader keeps (the composer's About);
+    /// the product on show, the part of its page on show, its feedback board's order and status, its makers and
+    /// testers when asked for; a product being started, the edit of the one on show, and what is being written on it;
+    /// the note of an ask to test, the username of a maker being listed, the note of an invitation to test; the
+    /// product a press of Delete waits to confirm.
+    pub products_view: ProductsView,
+    pub launches_today: Option<Vec<Post>>,
+    pub launches_week: Option<Vec<Post>>,
+    pub product_list: Option<(ProductsView, Products)>,
+    pub my_products: Option<Vec<pages::ProductSummary>>,
+    pub product: Option<ProductPage>,
+    pub product_show: ProductShow,
+    pub feedback_sort: FeedbackSort,
+    pub feedback_status: Option<FeedbackStatus>,
+    pub product_makers: Option<(String, Vec<ProductMaker>)>,
+    pub product_testers: Option<(String, Vec<Tester>)>,
+    pub new_product: ProductForm,
+    pub edit_product: Option<ProductForm>,
+    pub giving: Option<Giving>,
+    pub test_note: String,
+    pub maker_name: String,
+    pub tester_note: String,
+    pub confirm_delete_product: Option<String>,
+}
+
+/// The public website's address of a post, as Copy link copies it.
+pub fn post_link(post_id: &str) -> String {
+    format!("https://www.alelyon.com/pages/?post={post_id}")
 }
 
 #[derive(Clone, Debug)]
@@ -652,8 +1212,17 @@ pub enum Msg {
     DeleteExperience(String),
     SaveEducation,
     DeleteEducation(String),
-    SkillsText(String),
+    /// The skill being typed.
+    SkillNew(String),
+    /// Add what is typed to the skills (several between commas).
+    SkillAdd,
+    /// Take off the skill at this place.
+    SkillRemove(usize),
     SaveSkills,
+    /// Open the form that adds a position (true) or a school (false).
+    EntryOpen(bool),
+    /// The position in the form is held now (true): it has no end.
+    ExpNow(bool),
     /// A save or delete of that part answered.
     ProfileSaved(ProfilePart, Result<(), Problem>),
     /// Endorse (true) another's skill, or take that back: username, skill.
@@ -724,12 +1293,18 @@ pub enum Msg {
     OpenPage,
     ClosePage,
     MineName(String),
+    /// A tab of the reader's own page chosen.
+    MineTab(MineTab),
     /// Allow (true) or opt out of the use of one's public posts to improve Alelyon, AI models included.
     AiTraining(bool),
     MineTitle(String),
     MineTitleOrg(TitleOrg),
     MineBio(text_editor::Action),
     SaveMine,
+    /// Put back in My page's fields what the service last said.
+    DiscardMine,
+    /// The reader's page as others see it, for My page's top.
+    MineTop(Result<PersonPage, Problem>),
     Saved(Result<Me, Problem>),
     ShowTicker(String, bool),
     MoveTicker(String, bool),
@@ -826,6 +1401,129 @@ pub enum Msg {
     ListAdd(String, ListTarget, bool),
     /// Take someone off the list on show (its stream and members are read again).
     ListTakeOff(String, ListTarget),
+    // drafts and scheduled posts (ADR-0055)
+    /// Keep what the composer holds as a draft (rewriting the draft it holds).
+    SaveDraft,
+    /// Show (true) or hide the schedule's day and time.
+    ScheduleOn(bool),
+    ScheduleDay(String),
+    ScheduleTime(String),
+    /// Keep what the composer holds as a draft to be posted at the schedule's time.
+    Schedule,
+    DraftSaved(Result<Draft, Problem>),
+    Drafts(Result<Vec<Draft>, Problem>),
+    /// Write a draft again in the composer, on Home.
+    OpenDraft(String),
+    /// The post a draft written again quotes, read for the composer: the draft's id with it.
+    DraftQuote(String, Result<Thread, Problem>),
+    /// Post a draft now, from Drafts.
+    PostDraft(String),
+    /// Delete a draft: the first press asks, the second deletes.
+    DeleteDraft(String),
+    /// Stop writing the draft again: the composer empties, and the saved draft stays.
+    CloseDraft,
+    // builders (ADR-0056)
+    ProductsView(ProductsView),
+    /// The day's (false) or the week's (true) launches.
+    Launches(bool, Result<Vec<Post>, Problem>),
+    /// A page of products for that part; `append` adds it under those on show.
+    ProductList(ProductsView, bool, Result<Products, Problem>),
+    MyProducts(Result<Products, Problem>),
+    /// A page of a product; `append` adds its posts under those on show.
+    Product(String, bool, Result<ProductPage, Problem>),
+    ProductShow(ProductShow),
+    FeedbackSort(FeedbackSort),
+    FeedbackFilter(Option<FeedbackStatus>),
+    NewProductField(ProductField, String),
+    NewProductStage(Stage),
+    NewProductPlatform(&'static str, bool),
+    NewProductOwner(AsWho),
+    CreateProduct,
+    ProductCreated(Result<pages::Product, Problem>),
+    /// Open (true) or close the edit form of the product on show (for its keepers).
+    EditProduct(bool),
+    EditProductField(ProductField, String),
+    EditProductStage(Stage),
+    EditProductPlatform(&'static str, bool),
+    SaveProduct,
+    /// Delete a product: the first press asks, the second deletes.
+    DeleteProduct(String),
+    /// The product on show is gone (deleted, or suspended by a moderator): what to say, on the Products tab.
+    ProductGone(Result<String, Problem>),
+    FollowProduct(String, bool),
+    /// Support a launch (true), or take the support back: its post's id.
+    SupportLaunch(String, bool),
+    /// Vote for a piece of feedback (true), or take the vote back.
+    VoteFeedback(String, bool),
+    SetFeedbackStatus(String, FeedbackStatus),
+    /// Change one's review's stars.
+    ReviewStars(String, u8),
+    /// Start writing feedback or a review on the product on show (Some), or stop.
+    Give(Option<Giving>),
+    GiveText(String),
+    GiveCategory(FeedbackCategory),
+    GiveStars(u8),
+    SendGiving,
+    /// Ask to test the product on show (true, with the note), or withdraw: its handle.
+    AskToTest(String, bool),
+    TestNote(String),
+    /// Show (Some, its handle) or hide the product's makers, and its testers for its keepers.
+    ShowTeam(Option<String>),
+    ProductMakers(String, Result<Vec<ProductMaker>, Problem>),
+    ProductTesters(String, Result<Vec<Tester>, Problem>),
+    MakerName(String),
+    InviteMaker(String),
+    /// Confirm (true) or decline being listed as a maker: the product's handle.
+    AnswerMaker(String, bool),
+    /// Take a maker off, or leave: handle, member.
+    RemoveMaker(String, String),
+    TesterNote(String),
+    /// Invite (true) someone who asked to test, or decline the ask: handle, member.
+    AnswerTester(String, String, bool),
+    /// The composer's product (for its keepers' updates and launches), launching, and the version.
+    PostAbout(AboutProduct),
+    LaunchOn(bool),
+    LaunchVersion(String),
+    /// Moderators: suspend (true) or restore a product, by handle.
+    ModProduct(String, bool),
+    /// The products of an organization, by its ticker.
+    OrgProducts(String, Result<Products, Problem>),
+    /// Open a product's website or source in the browser.
+    OpenLink(String),
+    // a post's menus and the navigation's Post button
+    /// Open (Some post id) or close a post's ⋯ menu.
+    PostMenu(Option<String>),
+    /// Open or close a post's choice between Repost and Quote.
+    RepostMenu(Option<String>),
+    /// Open or close a post's reactions.
+    Reacting(Option<String>),
+    /// Copy a post's public link.
+    CopyLink(String),
+    /// The navigation's Post button: Home, with the composer.
+    Compose,
+    NotifView(NotifView),
+    /// The page was scrolled: how far down, from 0 at the top to 1 at the end.
+    Scrolled(f32),
+    /// A key of the page's (`keys`).
+    Key(keys::PageKey),
+    /// Open a post's photo over the page (its post and place), or close it.
+    ViewPhoto(Option<(String, usize)>),
+    /// The open photo's neighbour among its post's photos: -1 the one before, 1 the one after, round the ends.
+    PhotoStep(i32),
+    /// The people a mention being typed may name, as the service found them for what it read.
+    MentionFound(String, Result<Found, Problem>),
+    /// The person after (1) or before (-1) the chosen one among them, round the ends.
+    MentionMove(i32),
+    /// Write the chosen person's @username in place of what was typed (None: the one the keyboard is on).
+    MentionPick(Option<usize>),
+    /// Leave the mention as typed.
+    MentionClose,
+    PersonTab(PersonTab),
+    OrgTab(OrgTab),
+    /// An organization's open jobs, for its Jobs tab: its ticker with them.
+    OrgJobs(String, Result<Posts, Problem>),
+    /// Open (true) or close the ⋯ menu of the person or organization on show.
+    PageMenu(bool),
 }
 
 impl State {
@@ -910,6 +1608,7 @@ impl State {
                 self.fetch_me(),
                 self.run(|c, t| async move { pages::mutes(&c, &t).await }, Msg::Muted),
                 self.run(|c, t| async move { pages::applications(&c, &t).await }, Msg::Applications),
+                self.fetch_mine_top(),
             ]),
             Screen::Notifications => self.run(
                 move |c, t| async move { pages::notifications(&c, &t, before.as_deref()).await },
@@ -928,7 +1627,8 @@ impl State {
             }
             Screen::Person(u) => {
                 let name = u.clone();
-                self.run(move |c, t| async move { pages::person(&c, &t, &u, before.as_deref()).await }, move |r| Msg::Person(name.clone(), append, r))
+                let show = self.person_tab.show();
+                self.run(move |c, t| async move { pages::person(&c, &t, &u, before.as_deref(), show).await }, move |r| Msg::Person(name.clone(), append, r))
             }
             Screen::Org(ticker) => {
                 let name = ticker.clone();
@@ -969,7 +1669,44 @@ impl State {
                     Msg::ListPage(key.clone(), append, r)
                 })
             }
+            Screen::Drafts => self.run(|c, t| async move { pages::drafts(&c, &t).await }, Msg::Drafts),
+            Screen::Products => self.read_products(self.products_view, before),
+            Screen::Product(handle) => {
+                let key = handle.clone();
+                let (show, sort, status) = (self.product_show, self.feedback_sort, self.feedback_status);
+                self.run(move |c, t| async move { pages::product(&c, &t, &handle, show, sort, status, before.as_deref()).await }, move |r| {
+                    Msg::Product(key.clone(), append, r)
+                })
+            }
         }
+    }
+
+    /// The Products tab's part: the day's or the week's launches, or a page of products after `before` (a handle).
+    fn read_products(&self, view: ProductsView, before: Option<String>) -> Task<Msg> {
+        if view.launches() {
+            let week = view == ProductsView::Week;
+            return self.run(move |c, t| async move { pages::launches(&c, &t, week, None).await }, move |r| Msg::Launches(week, r));
+        }
+        let append = before.is_some();
+        self.run(
+            move |c, t| async move { pages::products(&c, &t, view.list(), None, None, None, before.as_deref()).await },
+            move |r| Msg::ProductList(view, append, r),
+        )
+    }
+
+    /// A product's makers, and for its keepers who asked to test it.
+    fn read_team(&self, handle: String) -> Task<Msg> {
+        let (h, key) = (handle.clone(), handle.clone());
+        let mut tasks = vec![self.run(move |c, t| async move { pages::product_makers(&c, &t, &h).await }, move |r| {
+            Msg::ProductMakers(key.clone(), r)
+        })];
+        if self.product.as_ref().is_some_and(|p| p.summary.product.handle == handle && p.you_keep()) {
+            let key = handle.clone();
+            tasks.push(self.run(move |c, t| async move { pages::product_testers(&c, &t, &handle).await }, move |r| {
+                Msg::ProductTesters(key.clone(), r)
+            }));
+        }
+        Task::batch(tasks)
     }
 
     /// The moderation screen's view: the open or closed reports, the log, or the photo matches.
@@ -998,13 +1735,27 @@ impl State {
         if !keep {
             self.loading = true;
         }
-        let read = self.read(screen, None);
+        let mut tasks = vec![self.read(screen, None)];
         // The reader's own communities: the composer's choices on Home, and what they keep anywhere.
         if matches!(screen, Screen::Home | Screen::Communities | Screen::Community(_)) {
-            let mine = self.run(|c, t| async move { pages::communities(&c, &t, true).await }, Msg::MyCommunities);
-            return Task::batch([read, mine]);
+            tasks.push(self.run(|c, t| async move { pages::communities(&c, &t, true).await }, Msg::MyCommunities));
         }
-        read
+        // The products the reader keeps: what the composer's About offers (ADR-0056).
+        if matches!(screen, Screen::Home | Screen::Products | Screen::Product(_)) {
+            tasks.push(self.run(|c, t| async move { pages::products(&c, &t, ProductList::Mine, None, None, None, None).await }, Msg::MyProducts));
+        }
+        // The day's launches beside the feed: read once, and again on Explore (the Products tab's Today reads them).
+        if *screen == Screen::Explore || (self.launches_today.is_none() && !(*screen == Screen::Products && self.products_view == ProductsView::Today)) {
+            tasks.push(self.run(|c, t| async move { pages::launches(&c, &t, false, None).await }, |r| Msg::Launches(false, r)));
+        }
+        // What is trending and who to follow, beside the feed: read once, and again on Explore.
+        if *screen == Screen::Home && self.trending.is_none() {
+            tasks.push(self.run(|c, t| async move { pages::trending(&c, &t).await }, Msg::Trending));
+        }
+        if *screen == Screen::Home && self.suggestions.is_none() {
+            tasks.push(self.run(|c, t| async move { pages::suggestions(&c, &t).await }, Msg::Suggestions));
+        }
+        Task::batch(tasks)
     }
 
     /// The reader keeps the community (an active owner or moderator), as their own list says.
@@ -1021,6 +1772,16 @@ impl State {
         }
     }
 
+    /// Keep what the composer holds as a draft, rewriting the one it holds; `publish_at` (RFC 3339) schedules it.
+    fn save_draft(&mut self, publish_at: Option<String>) -> Task<Msg> {
+        if !self.composer.draftable() || self.uploading > 0 {
+            return Task::none();
+        }
+        self.composer.sending = true;
+        let (new, id) = (self.composer.new_post(), self.composer.draft_id.clone());
+        self.run(move |c, t| async move { pages::draft_save(&c, &t, id.as_deref(), &new, publish_at.as_deref()).await }, Msg::DraftSaved)
+    }
+
     /// The screen on show, read again (after a change made here).
     fn reload(&mut self) -> Task<Msg> {
         let Some(screen) = self.screen.clone() else { return Task::none() };
@@ -1032,10 +1793,154 @@ impl State {
             let (id, key) = (id.clone(), id.clone());
             tasks.push(self.run(move |c, t| async move { pages::list_members(&c, &t, &id).await }, move |r| Msg::ListMembers(key.clone(), r)));
         }
+        // So are the makers and testers of the product on show, while they are open.
+        if let (Screen::Product(handle), Some((shown, _))) = (&screen, &self.product_makers)
+            && shown == handle
+        {
+            tasks.push(self.read_team(handle.clone()));
+        }
         Task::batch(tasks)
     }
 
+    /// After an edit or a move in the composer: the mention being typed at the cursor, if one is, and the people who
+    /// match it, asked for again only when its words changed.
+    fn track_mention(&mut self) -> Task<Msg> {
+        let Some((line, start, end, word)) = typed_mention(&self.composer.body) else {
+            self.mentioning = None;
+            return Task::none();
+        };
+        let (found, at, same) = match self.mentioning.take() {
+            Some(m) if m.word == word => (m.found, m.at, true),
+            _ => (Vec::new(), 0, false),
+        };
+        self.mentioning = Some(Mentioning { line, start, end, word: word.clone(), found, at });
+        if same {
+            return Task::none();
+        }
+        let asked = word.clone();
+        self.run(move |c, t| async move { pages::search(&c, &t, &asked, SearchKind::People, None).await }, move |r| {
+            Msg::MentionFound(word.clone(), r)
+        })
+    }
+
+    /// The chosen person's @username in place of the mention as typed, and a space after it unless one follows already;
+    /// the composer keeps the keyboard.
+    fn pick_mention(&mut self, which: Option<usize>) -> Task<Msg> {
+        let Some(m) = self.mentioning.take() else { return Task::none() };
+        let Some(username) = m.found.get(which.unwrap_or(m.at)).and_then(|p| p.username.clone()) else { return Task::none() };
+        let spaced = self.composer.body.line(m.line).and_then(|l| l.text.get(m.end..).map(|rest| rest.starts_with(char::is_whitespace))).unwrap_or(false);
+        let words = if spaced { format!("@{username}") } else { format!("@{username} ") };
+        let (from, to) = (text_editor::Position { line: m.line, column: m.start }, text_editor::Position { line: m.line, column: m.end });
+        self.composer.body.move_to(text_editor::Cursor { position: to, selection: Some(from) });
+        self.composer.body.perform(text_editor::Action::Edit(text_editor::Edit::Paste(std::sync::Arc::new(words))));
+        iced::widget::operation::focus(keys::COMPOSER)
+    }
+
+    /// The posts the column shows, in its order, each as its row shows it (a plain repost as the post it reposts):
+    /// what j and k move between.
+    pub(crate) fn shown_posts(&self) -> Vec<&Post> {
+        let mut out: Vec<&Post> = Vec::new();
+        let lists: Vec<&Posts> = match self.screen.clone().unwrap_or(Screen::Home) {
+            Screen::Home => match self.home_feed {
+                HomeFeed::ForYou => self.for_you.iter().map(|(_, p)| p).collect(),
+                HomeFeed::Following => self.home.iter().collect(),
+            },
+            Screen::Explore => self.explore.iter().collect(),
+            Screen::Bookmarks => self.bookmarks.iter().collect(),
+            Screen::Jobs => self.jobs.iter().collect(),
+            Screen::Tag(_) => self.tagged.iter().map(|t| &t.posts).collect(),
+            Screen::Flagged(_) => self.flagged.iter().map(|(_, p)| p).collect(),
+            Screen::List(_) => self.list.iter().map(|l| &l.posts).collect(),
+            Screen::Community(_) => self.community.iter().map(|c| &c.posts).collect(),
+            Screen::Product(_) => self.product.iter().map(|p| &p.posts).collect(),
+            Screen::Search(q) => self
+                .found
+                .iter()
+                .filter(|(found_q, kind, _)| *found_q == q && matches!(kind, SearchKind::All | SearchKind::Posts) && *kind == self.search_kind)
+                .map(|(_, _, found)| &found.posts)
+                .collect(),
+            Screen::Org(t) => match (self.org.as_ref().filter(|page| page.org.ticker == t), self.org_tab) {
+                (Some(page), OrgTab::Posts) => vec![&page.posts],
+                (Some(_), OrgTab::Jobs) => self.org_jobs.iter().filter(|(of, _)| *of == t).map(|(_, p)| p).collect(),
+                _ => Vec::new(),
+            },
+            _ => Vec::new(),
+        };
+        for list in lists {
+            out.extend(list.posts.iter());
+        }
+        match self.screen.clone().unwrap_or(Screen::Home) {
+            Screen::Person(_) => {
+                if let Some(page) = &self.person
+                    && self.person_tab != PersonTab::Profile
+                {
+                    if self.person_tab == PersonTab::Posts
+                        && let Some(pinned) = &page.pinned
+                    {
+                        out.push(pinned);
+                    }
+                    out.extend(page.posts.posts.iter());
+                }
+            }
+            Screen::Thread(_) => {
+                if let Some(t) = &self.thread {
+                    out.extend(t.parent.as_deref());
+                    out.push(&t.post);
+                    out.extend(t.replies.posts.iter());
+                }
+            }
+            _ => {}
+        }
+        out.into_iter().map(|p| if p.is_plain_repost() { p.repost_of.as_deref().unwrap_or(p) } else { p }).collect()
+    }
+
+    /// What a key of the page's does (`keys`): j and k choose the next or previous post on show and scroll the column
+    /// to it; l, r, t, b and o act on the chosen post; n, / and . on the page.
+    fn key(&mut self, key: keys::PageKey) -> Task<Msg> {
+        use keys::PageKey;
+        match key {
+            PageKey::NewPost => return self.update(Msg::Compose),
+            PageKey::Search => return iced::widget::operation::focus(keys::SEARCH),
+            PageKey::Refresh => return self.update(Msg::Refresh),
+            PageKey::PhotoPrevious => return self.update(Msg::PhotoStep(-1)),
+            PageKey::PhotoNext => return self.update(Msg::PhotoStep(1)),
+            _ => {}
+        }
+        let shown: Vec<(String, bool, bool)> = self.shown_posts().iter().map(|p| (p.id.clone(), p.liked, p.bookmarked)).collect();
+        let at = self.selected.as_ref().and_then(|id| shown.iter().position(|(i, _, _)| i == id));
+        if matches!(key, PageKey::Next | PageKey::Previous) {
+            if shown.is_empty() {
+                return Task::none();
+            }
+            let next = match (at, key) {
+                (None, _) => 0,
+                (Some(i), PageKey::Next) => (i + 1).min(shown.len() - 1),
+                (Some(i), _) => i.saturating_sub(1),
+            };
+            let id = shown[next].0.clone();
+            self.selected = Some(id.clone());
+            return iced::advanced::widget::operate(keys::Reveal::new(keys::row_id(&id))).then(|offset| match offset {
+                Some(y) => iced::widget::operation::scroll_to(keys::FEED, iced::widget::operation::AbsoluteOffset { x: None, y: Some(y) }),
+                None => Task::none(),
+            });
+        }
+        let Some((id, liked, saved)) = at.map(|i| shown[i].clone()) else { return Task::none() };
+        match key {
+            PageKey::Like => self.update(Msg::Like(id, !liked)),
+            PageKey::Bookmark => self.update(Msg::Bookmark(id, !saved)),
+            PageKey::Repost => self.update(Msg::RepostMenu(Some(id))),
+            PageKey::Open => self.update(Msg::Go(Screen::Thread(id))),
+            PageKey::Reply => {
+                self.reply_focus = true;
+                self.update(Msg::Go(Screen::Thread(id)))
+            }
+            _ => Task::none(),
+        }
+    }
+
     fn go(&mut self, screen: Screen) -> Task<Msg> {
+        // Before the screen on show is taken: going to the page already on show keeps its tab.
+        self.fresh_tabs(&screen);
         if let Some(current) = self.screen.take()
             && !screen.is_tab()
             && current != screen
@@ -1046,14 +1951,57 @@ impl State {
             self.history.clear();
         }
         self.reporting = None;
+        self.selected = None;
+        self.viewing = None;
         self.problem = None;
         self.edit_community = None;
         self.list_picker = None;
         self.list_members = None;
         self.edit_list = None;
         self.confirm_delete_list = None;
+        self.confirm_delete_draft = None;
+        self.edit_product = None;
+        self.giving = None;
+        self.confirm_delete_product = None;
+        self.page_menu = false;
+        if self.composer.chars() == 0 && !matches!(&screen, Screen::Product(h) if self.composer.product.as_ref() == Some(h)) {
+            self.composer.product = None;
+            self.composer.launch_on = false;
+        }
         self.screen = Some(screen.clone());
         self.load(&screen, false)
+    }
+
+    /// A person's or an organization's page opens at its first tab, unless it is the page already on show.
+    fn fresh_tabs(&mut self, screen: &Screen) {
+        if self.screen.as_ref() == Some(screen) {
+            return;
+        }
+        match screen {
+            Screen::Person(_) => self.person_tab = PersonTab::Posts,
+            Screen::Org(_) => {
+                self.org_tab = OrgTab::Posts;
+                self.org_jobs = None;
+                self.org_products = None;
+            }
+            Screen::Product(_) => {
+                self.product = None;
+                self.product_show = ProductShow::Updates;
+                self.feedback_sort = FeedbackSort::Top;
+                self.feedback_status = None;
+                self.product_makers = None;
+                self.product_testers = None;
+            }
+            _ => {}
+        }
+    }
+
+    /// What the next page of the screen on show is asked by: For you's page number, or another feed's `before`.
+    fn more_key(&self) -> Option<String> {
+        if self.screen == Some(Screen::Home) && self.home_feed == HomeFeed::ForYou {
+            return self.for_you.as_ref().filter(|(_, shown)| shown.more).map(|(page, _)| format!("for-you:{page}"));
+        }
+        self.next_page()
     }
 
     /// The `before` for the next page of the screen on show, when it has more.
@@ -1068,6 +2016,10 @@ impl State {
             Screen::Bookmarks => self.bookmarks.as_ref()?.next(),
             Screen::Jobs => self.jobs.as_ref()?.next(),
             Screen::Community(_) => self.community.as_ref()?.posts.next(),
+            Screen::Product(_) => self.product.as_ref()?.posts.next(),
+            Screen::Products if !self.products_view.launches() => {
+                self.product_list.as_ref().filter(|(view, _)| *view == self.products_view)?.1.next()
+            }
             Screen::List(_) => self.list.as_ref()?.posts.next(),
             Screen::Tag(_) => self.tagged.as_ref()?.posts.next(),
             Screen::Search(_) if self.search_kind == SearchKind::Posts => self.found.as_ref()?.2.posts.next(),
@@ -1090,6 +2042,12 @@ impl State {
     }
 
     /// The page's form, refilled from what the service said.
+    /// The reader's page as others see it, read for My page's top; nothing until the reader's username is known.
+    fn fetch_mine_top(&self) -> Task<Msg> {
+        let Some(username) = self.me.as_ref().and_then(|m| m.me.username.clone()) else { return Task::none() };
+        self.run(move |c, t| async move { pages::person(&c, &t, &username, None, PersonShow::Posts).await }, Msg::MineTop)
+    }
+
     fn refill_mine(&mut self) {
         let Some(me) = &self.me else { return };
         self.mine.name = me.me.display_name.clone();
@@ -1148,7 +2106,12 @@ impl State {
             Some(Screen::List(_)) => want.posts(self.list.as_ref().map(|l| &l.posts)),
             Some(Screen::Flagged(_)) => want.posts(self.flagged.as_ref().map(|(_, p)| p)),
             Some(Screen::Tag(_)) => want.posts(self.tagged.as_ref().map(|t| &t.posts)),
-            Some(Screen::Search(_)) => want.posts(self.found.as_ref().map(|(_, _, f)| &f.posts)),
+            Some(Screen::Search(_)) => {
+                if let Some((_, _, found)) = &self.found {
+                    want.summaries(&found.products);
+                    want.posts(Some(&found.posts));
+                }
+            }
             Some(Screen::Thread(_)) => {
                 if let Some(t) = &self.thread {
                     if let Some(parent) = &t.parent {
@@ -1174,6 +2137,31 @@ impl State {
                     want.add(page.org.logo.as_ref(), Size::Small);
                     want.posts(Some(&page.posts));
                 }
+                if self.org_tab == OrgTab::Products
+                    && let Some((_, list)) = &self.org_products
+                {
+                    want.summaries(&list.products);
+                }
+            }
+            Some(Screen::Products) => match self.products_view {
+                ProductsView::Today => want.launches(self.launches_today.as_deref()),
+                ProductsView::Week => want.launches(self.launches_week.as_deref()),
+                _ => want.summaries(self.product_list.as_ref().map(|(_, list)| list.products.as_slice()).unwrap_or_default()),
+            },
+            Some(Screen::Product(_)) => {
+                if let Some(page) = &self.product {
+                    want.summaries(std::slice::from_ref(&page.summary));
+                    for shot in &page.shots {
+                        want.add(Some(&shot.url), Size::Large);
+                    }
+                    for m in &page.makers {
+                        want.add(m.person.avatar.as_ref(), Size::Small);
+                    }
+                    if let Some(launch) = &page.latest_launch {
+                        want.post(launch);
+                    }
+                    want.posts(Some(&page.posts));
+                }
             }
             Some(Screen::Mine) => {
                 if let Some(me) = &self.me {
@@ -1182,6 +2170,8 @@ impl State {
             }
             _ => {}
         }
+        // the day's first launches, beside the feed
+        want.launches(self.launches_today.as_deref().map(|l| &l[..l.len().min(3)]));
         want.0
     }
 
@@ -1217,6 +2207,31 @@ impl State {
 
     /// Handles a message, then fetches the photos the screen on show now draws.
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
+        if matches!(
+            msg,
+            Msg::Repost(_)
+                | Msg::Quote(_)
+                | Msg::React(..)
+                | Msg::Like(..)
+                | Msg::Bookmark(..)
+                | Msg::Delete(_)
+                | Msg::Pin(_)
+                | Msg::Mute(..)
+                | Msg::Block(..)
+                | Msg::Reporting(_)
+                | Msg::ModAct(..)
+                | Msg::TakeOut(_)
+                | Msg::CopyLink(_)
+                | Msg::Go(_)
+                | Msg::Back
+                | Msg::Compose
+                | Msg::PickLists(_)
+        ) {
+            self.post_menu = None;
+            self.repost_menu = None;
+            self.reacting = None;
+            self.page_menu = false;
+        }
         let task = self.step(msg);
         Task::batch([task, self.fetch_photos()])
     }
@@ -1228,10 +2243,15 @@ impl State {
                 if let Some(previous) = self.history.pop() {
                     self.screen = Some(previous.clone());
                     self.reporting = None;
+                    self.selected = None;
+                    self.viewing = None;
                     self.list_picker = None;
                     self.list_members = None;
                     self.edit_list = None;
                     self.confirm_delete_list = None;
+                    self.confirm_delete_draft = None;
+                    self.page_menu = false;
+                    self.fresh_tabs(&previous);
                     return self.load(&previous, true);
                 }
             }
@@ -1247,11 +2267,15 @@ impl State {
             Msg::Me(Ok(me)) => {
                 let first = self.me.is_none();
                 if !self.profile_form.skills_dirty {
-                    self.profile_form.skills = me.profile.skills.iter().map(|s| s.skill.as_str()).collect::<Vec<_>>().join(", ");
+                    self.profile_form.skills = me.profile.skills.iter().map(|s| s.skill.clone()).collect();
                 }
                 self.me = Some(me);
                 if first || !self.mine.dirty {
                     self.refill_mine();
+                }
+                // My page opened before the reader's username was known: its top is read now.
+                if self.screen == Some(Screen::Mine) && self.mine.top.is_none() {
+                    return self.fetch_mine_top();
                 }
             }
             Msg::Me(Err(p)) => self.problem = Some(p),
@@ -1326,7 +2350,12 @@ impl State {
                 }
                 self.loading = false;
                 match result {
-                    Ok(thread) => self.thread = Some(thread),
+                    Ok(thread) => {
+                        self.thread = Some(thread);
+                        if std::mem::take(&mut self.reply_focus) {
+                            return iced::widget::operation::focus(keys::REPLY);
+                        }
+                    }
                     Err(p) => {
                         self.thread = None;
                         self.problem = Some(p);
@@ -1540,6 +2569,8 @@ impl State {
                 } = text;
             }
             Msg::ExpEdit(entry) => {
+                self.profile_form.exp_open = true;
+                self.profile_form.exp_now = entry.ended.is_none();
                 let ticker = entry.org.as_ref().map(|o| o.ticker.clone()).unwrap_or_default();
                 self.profile_form.experience = NewExperience {
                     org_name: if ticker.is_empty() { entry.org_name } else { String::new() },
@@ -1562,6 +2593,7 @@ impl State {
                 } = text;
             }
             Msg::EduEdit(entry) => {
+                self.profile_form.edu_open = true;
                 self.profile_form.education = NewEducation {
                     id: entry.id,
                     school: entry.school,
@@ -1572,8 +2604,24 @@ impl State {
                 };
             }
             Msg::ProfileClear => {
-                self.profile_form.experience = NewExperience::default();
-                self.profile_form.education = NewEducation::default();
+                let f = &mut self.profile_form;
+                f.experience = NewExperience::default();
+                f.education = NewEducation::default();
+                (f.exp_open, f.edu_open, f.exp_now, f.confirm_delete) = (false, false, false, None);
+            }
+            Msg::EntryOpen(position) => {
+                let f = &mut self.profile_form;
+                if position {
+                    (f.experience, f.exp_open, f.exp_now) = (NewExperience::default(), true, false);
+                } else {
+                    (f.education, f.edu_open) = (NewEducation::default(), true);
+                }
+            }
+            Msg::ExpNow(now) => {
+                self.profile_form.exp_now = now;
+                if now {
+                    self.profile_form.experience.ended.clear();
+                }
             }
             Msg::SaveExperience => {
                 let entry = self.profile_form.experience.clone();
@@ -1582,6 +2630,12 @@ impl State {
                 });
             }
             Msg::DeleteExperience(id) => {
+                // Deleting takes an organization's confirmation with it: the first press asks.
+                if self.profile_form.confirm_delete.as_deref() != Some(id.as_str()) {
+                    self.profile_form.confirm_delete = Some(id);
+                    return Task::none();
+                }
+                self.profile_form.confirm_delete = None;
                 return self.run(move |c, t| async move { pages::delete_experience(&c, &t, &id).await.map(|_| ()) }, |r| {
                     Msg::ProfileSaved(ProfilePart::Experience, r)
                 });
@@ -1593,27 +2647,45 @@ impl State {
                 });
             }
             Msg::DeleteEducation(id) => {
+                if self.profile_form.confirm_delete.as_deref() != Some(id.as_str()) {
+                    self.profile_form.confirm_delete = Some(id);
+                    return Task::none();
+                }
+                self.profile_form.confirm_delete = None;
                 return self.run(move |c, t| async move { pages::delete_education(&c, &t, &id).await.map(|_| ()) }, |r| {
                     Msg::ProfileSaved(ProfilePart::Education, r)
                 });
             }
-            Msg::SkillsText(text) => {
-                self.profile_form.skills = text;
-                self.profile_form.skills_dirty = true;
+            Msg::SkillNew(text) => self.profile_form.skill_new = text,
+            Msg::SkillAdd => {
+                let f = &mut self.profile_form;
+                let typed = std::mem::take(&mut f.skill_new);
+                for skill in typed.split(',').map(|w| w.split_whitespace().collect::<Vec<_>>().join(" ")).filter(|w| !w.is_empty()) {
+                    if f.skills.len() < MAX_SKILLS && !f.skills.iter().any(|k| k.to_lowercase() == skill.to_lowercase()) {
+                        f.skills.push(skill.chars().take(SKILL_MAX_CHARS).collect());
+                        f.skills_dirty = true;
+                    }
+                }
+            }
+            Msg::SkillRemove(at) => {
+                if at < self.profile_form.skills.len() {
+                    self.profile_form.skills.remove(at);
+                    self.profile_form.skills_dirty = true;
+                }
             }
             Msg::SaveSkills => {
-                let skills: Vec<String> =
-                    self.profile_form.skills.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+                let skills = self.profile_form.skills.clone();
                 return self.run(move |c, t| async move { pages::set_skills(&c, &t, &skills).await.map(|_| ()) }, |r| {
                     Msg::ProfileSaved(ProfilePart::Skills, r)
                 });
             }
             Msg::ProfileSaved(part, result) => match result {
                 Ok(()) => {
+                    let f = &mut self.profile_form;
                     match part {
-                        ProfilePart::Experience => self.profile_form.experience = NewExperience::default(),
-                        ProfilePart::Education => self.profile_form.education = NewEducation::default(),
-                        ProfilePart::Skills => self.profile_form.skills_dirty = false,
+                        ProfilePart::Experience => (f.experience, f.exp_open, f.exp_now) = (NewExperience::default(), false, false),
+                        ProfilePart::Education => (f.education, f.edu_open) = (NewEducation::default(), false),
+                        ProfilePart::Skills => f.skills_dirty = false,
                     }
                     self.note = Some("Saved.".into());
                     return self.fetch_me();
@@ -1734,7 +2806,23 @@ impl State {
             }
             Msg::Kind(kind) => self.composer.kind = kind,
             Msg::Title(s) => self.composer.title = s,
-            Msg::Body(action) => self.composer.body.perform(action),
+            Msg::Body(action) => {
+                self.composer.body.perform(action);
+                return self.track_mention();
+            }
+            Msg::MentionFound(word, result) => {
+                if let Some(m) = self.mentioning.as_mut().filter(|m| m.word == word) {
+                    m.found = result.map(|f| f.people.into_iter().filter(|p| p.has_page && p.username.is_some()).take(6).collect()).unwrap_or_default();
+                    m.at = 0;
+                }
+            }
+            Msg::MentionMove(by) => {
+                if let Some(m) = self.mentioning.as_mut().filter(|m| !m.found.is_empty()) {
+                    m.at = (m.at as i64 + i64::from(by)).rem_euclid(m.found.len() as i64) as usize;
+                }
+            }
+            Msg::MentionPick(which) => return self.pick_mention(which),
+            Msg::MentionClose => self.mentioning = None,
             Msg::AsWho(who) => self.composer.as_who = who.0,
             Msg::Quote(post) => {
                 self.composer.kind = Kind::Post;
@@ -1743,13 +2831,26 @@ impl State {
                     return self.go(Screen::Home);
                 }
             }
-            Msg::Unquote => self.composer.quoting = None,
+            Msg::Unquote => {
+                self.composer.quoting = None;
+                self.composer.draft_quote = None;
+            }
             Msg::Submit => {
                 if !self.composer.ready() || self.uploading > 0 {
                     return Task::none();
                 }
                 self.composer.sending = true;
                 let new = self.composer.new_post();
+                if let Some(id) = self.composer.draft_id.clone() {
+                    // The draft is rewritten as it stands, then posted: its photos are already its own.
+                    return self.run(
+                        move |c, t| async move {
+                            let saved = pages::draft_save(&c, &t, Some(&id), &new, None).await?;
+                            pages::draft_publish(&c, &t, &saved.id).await
+                        },
+                        Msg::Posted,
+                    );
+                }
                 return self.run(move |c, t| async move { pages::post(&c, &t, &new).await }, Msg::Posted);
             }
             Msg::Posted(result) => {
@@ -1849,7 +2950,10 @@ impl State {
                 self.mine.dirty |= edits;
             }
             Msg::SaveMine => {
-                if self.mine.saving {
+                // Enter in a field asks too: nothing is sent until there is a change the service would take.
+                let name_ok = self.me.as_ref().is_some_and(|m| social::tidy_display_name(&self.mine.name) == m.me.display_name)
+                    || social::valid_display_name(&self.mine.name);
+                if self.mine.saving || !self.mine.dirty || !name_ok || title_problem(&self.mine.title).is_some() {
                     return Task::none();
                 }
                 self.mine.saving = true;
@@ -1868,6 +2972,13 @@ impl State {
                     },
                     Msg::Saved,
                 );
+            }
+            Msg::MineTab(tab) => self.mine.tab = tab,
+            Msg::DiscardMine => self.refill_mine(),
+            Msg::MineTop(result) => {
+                if let Ok(page) = result {
+                    self.mine.top = Some(page);
+                }
             }
             Msg::MineName(name) => {
                 self.mine.name = name;
@@ -2096,6 +3207,12 @@ impl State {
                     PhotoFor::Org(ticker, kind) => {
                         return self.done(move |c, t| async move { pages::set_org_media(&c, &t, &ticker, kind, &id).await }, words);
                     }
+                    PhotoFor::Product(handle, slot, at) => {
+                        return self.done(
+                            move |c, t| async move { pages::product_media(&c, &t, &handle, slot == "logo", at, Some(&id), "").await },
+                            words,
+                        );
+                    }
                 }
             }
             Msg::PhotoAlt(i, alt) => {
@@ -2118,10 +3235,287 @@ impl State {
                     PhotoFor::Org(ticker, kind) => {
                         return self.done(move |c, t| async move { pages::set_org_media(&c, &t, &ticker, kind, "").await }, words);
                     }
+                    PhotoFor::Product(handle, slot, at) => {
+                        return self.done(
+                            move |c, t| async move { pages::product_media(&c, &t, &handle, slot == "logo", at, None, "").await },
+                            words,
+                        );
+                    }
                 }
             }
             Msg::Photo(url, picture) => {
                 self.photos.insert(url, picture);
+            }
+            // builders (ADR-0056)
+            Msg::ProductsView(view) => {
+                self.products_view = view;
+                if self.screen == Some(Screen::Products) {
+                    self.loading = true;
+                    return self.read_products(view, None);
+                }
+            }
+            Msg::Launches(week, result) => {
+                // the day's are the rail's too: a read for the rail that fails says nothing
+                let shown = self.screen == Some(Screen::Products) && self.products_view == if week { ProductsView::Week } else { ProductsView::Today };
+                if shown {
+                    self.loading = false;
+                }
+                match result {
+                    Ok(posts) if week => self.launches_week = Some(posts),
+                    Ok(posts) => self.launches_today = Some(posts),
+                    Err(p) if shown => self.problem = Some(p),
+                    Err(_) => {}
+                }
+            }
+            Msg::ProductList(view, append, result) => {
+                if self.screen != Some(Screen::Products) || self.products_view != view {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.product_list.as_mut().filter(|(shown, _)| append && *shown == view) {
+                        Some((_, shown)) => {
+                            shown.products.extend(page.products);
+                            shown.more = page.more;
+                        }
+                        None => self.product_list = Some((view, page)),
+                    },
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::MyProducts(result) => {
+                if let Ok(page) = result {
+                    let kept: Vec<pages::ProductSummary> = page.products.into_iter().filter(|p| p.you_keep).collect();
+                    // a product the reader no longer keeps is not offered to post about
+                    if self.composer.product.as_ref().is_some_and(|h| !kept.iter().any(|p| &p.product.handle == h)) {
+                        self.composer.product = None;
+                        self.composer.launch_on = false;
+                    }
+                    self.my_products = Some(kept);
+                }
+            }
+            Msg::Product(handle, append, result) => {
+                if self.screen != Some(Screen::Product(handle)) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(page) => match self.product.as_mut().filter(|shown| append && shown.summary.product.id == page.summary.product.id) {
+                        Some(shown) => {
+                            shown.posts.posts.extend(page.posts.posts);
+                            shown.posts.more = page.posts.more;
+                        }
+                        None => {
+                            // a keeper writes the product's updates here: the composer is about it
+                            if page.you_keep() && self.composer.product.is_none() && self.composer.chars() == 0 {
+                                self.composer.product = Some(page.summary.product.handle.clone());
+                            }
+                            self.product = Some(page);
+                        }
+                    },
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::ProductShow(show) => {
+                self.product_show = show;
+                self.giving = None;
+                return self.reload();
+            }
+            Msg::FeedbackSort(sort) => {
+                self.feedback_sort = sort;
+                return self.reload();
+            }
+            Msg::FeedbackFilter(status) => {
+                self.feedback_status = status;
+                return self.reload();
+            }
+            Msg::NewProductField(field, text) => {
+                let form = &mut self.new_product;
+                match field {
+                    ProductField::Handle => form.handle = ProductForm::tidy_handle(&text),
+                    ProductField::Name => form.name = text,
+                    ProductField::Tagline => form.tagline = text,
+                    ProductField::About => form.about = text,
+                    ProductField::Website => form.website = text,
+                    ProductField::Source => form.source = text,
+                    ProductField::Tech => form.tech = text,
+                }
+            }
+            Msg::NewProductStage(stage) => self.new_product.stage = stage,
+            Msg::NewProductPlatform(platform, on) => toggle_platform(&mut self.new_product.platforms, platform, on),
+            Msg::NewProductOwner(owner) => self.new_product.as_org = owner.0,
+            Msg::CreateProduct => {
+                if self.new_product.why_not(true).is_some() {
+                    return Task::none();
+                }
+                let new = self.new_product.new_product();
+                return self.run(move |c, t| async move { pages::product_create(&c, &t, &new).await }, Msg::ProductCreated);
+            }
+            Msg::ProductCreated(Ok(product)) => {
+                self.new_product = ProductForm::default();
+                self.note = Some(format!("p/{} is made. Add its logo and screenshots, and list its makers.", product.handle));
+                return self.go(Screen::Product(product.handle));
+            }
+            Msg::ProductCreated(Err(p)) => self.problem = Some(p),
+            Msg::EditProduct(open) => {
+                self.edit_product = if open { self.product.as_ref().map(ProductForm::of) } else { None };
+            }
+            Msg::EditProductField(field, text) => {
+                if let Some(form) = self.edit_product.as_mut() {
+                    match field {
+                        ProductField::Handle => {}
+                        ProductField::Name => form.name = text,
+                        ProductField::Tagline => form.tagline = text,
+                        ProductField::About => form.about = text,
+                        ProductField::Website => form.website = text,
+                        ProductField::Source => form.source = text,
+                        ProductField::Tech => form.tech = text,
+                    }
+                }
+            }
+            Msg::EditProductStage(stage) => {
+                if let Some(form) = self.edit_product.as_mut() {
+                    form.stage = stage;
+                }
+            }
+            Msg::EditProductPlatform(platform, on) => {
+                if let Some(form) = self.edit_product.as_mut() {
+                    toggle_platform(&mut form.platforms, platform, on);
+                }
+            }
+            Msg::SaveProduct => {
+                let (Some(form), Some(page)) = (self.edit_product.as_ref(), self.product.as_ref()) else { return Task::none() };
+                if form.why_not(false).is_some() {
+                    return Task::none();
+                }
+                let (handle, changes) = (page.summary.product.handle.clone(), form.changes());
+                self.edit_product = None;
+                return self.done(move |c, t| async move { pages::product_update(&c, &t, &handle, &changes).await.map(|_| ()) }, "Saved.".into());
+            }
+            Msg::DeleteProduct(handle) => {
+                if self.confirm_delete_product.as_ref() != Some(&handle) {
+                    self.confirm_delete_product = Some(handle);
+                    return Task::none();
+                }
+                self.confirm_delete_product = None;
+                let shown = handle.clone();
+                return self.run(
+                    move |c, t| async move { pages::product_delete(&c, &t, &handle).await },
+                    move |r| Msg::ProductGone(r.map(|()| format!("p/{shown} is deleted. The posts about it stay their authors'."))),
+                );
+            }
+            Msg::ProductGone(Ok(words)) => {
+                self.note = Some(words);
+                self.product = None;
+                self.my_products = None;
+                return self.go(Screen::Products);
+            }
+            Msg::ProductGone(Err(p)) => self.problem = Some(p),
+            Msg::FollowProduct(handle, follow) => {
+                return self.done(move |c, t| async move { pages::product_follow(&c, &t, &handle, follow).await }, String::new());
+            }
+            Msg::SupportLaunch(id, support) => {
+                return self.done(move |c, t| async move { pages::launch_support(&c, &t, &id, support).await }, String::new());
+            }
+            Msg::VoteFeedback(id, vote) => {
+                return self.done(move |c, t| async move { pages::feedback_vote(&c, &t, &id, vote).await }, String::new());
+            }
+            Msg::SetFeedbackStatus(id, status) => {
+                let words = format!("Marked {}. Its author and voters are told.", status.label().to_lowercase());
+                return self.done(move |c, t| async move { pages::feedback_status(&c, &t, &id, status).await }, words);
+            }
+            Msg::ReviewStars(id, stars) => {
+                return self.done(move |c, t| async move { pages::review_stars(&c, &t, &id, stars).await }, String::new());
+            }
+            Msg::Give(giving) => self.giving = giving,
+            Msg::GiveText(text) => match self.giving.as_mut() {
+                Some(Giving::Feedback(_, words) | Giving::Review(_, words)) => *words = text,
+                None => {}
+            },
+            Msg::GiveCategory(category) => {
+                if let Some(Giving::Feedback(chosen, _)) = self.giving.as_mut() {
+                    *chosen = category;
+                }
+            }
+            Msg::GiveStars(stars) => {
+                if let Some(Giving::Review(chosen, _)) = self.giving.as_mut() {
+                    *chosen = stars.clamp(1, 5);
+                }
+            }
+            Msg::SendGiving => {
+                let (Some(giving), Some(page)) = (self.giving.clone(), self.product.as_ref()) else { return Task::none() };
+                let text = giving.text().trim().to_string();
+                if text.is_empty() || text.chars().count() > pages::POST_MAX_CHARS {
+                    return Task::none();
+                }
+                let new = NewPost { text, product: Some(page.summary.product.handle.clone()), about: giving.about(), ..NewPost::default() };
+                let words = if matches!(giving, Giving::Review(..)) { "Your review is posted." } else { "Your feedback is posted. Its makers are told." };
+                self.giving = None;
+                return self.run(move |c, t| async move { pages::post(&c, &t, &new).await }, move |r| Msg::Done(r.map(|_| words.to_string())));
+            }
+            Msg::AskToTest(handle, ask) => {
+                let note = std::mem::take(&mut self.test_note);
+                let words = if ask { "Asked. Its makers decide, and tell you how to join." } else { "Withdrawn." };
+                return self.done(move |c, t| async move { pages::product_test(&c, &t, &handle, ask, note.trim()).await.map(|_| ()) }, words.into());
+            }
+            Msg::TestNote(note) => self.test_note = note.chars().take(pages::TESTER_NOTE_MAX_CHARS).collect(),
+            Msg::ShowTeam(Some(handle)) => return self.read_team(handle),
+            Msg::ShowTeam(None) => {
+                self.product_makers = None;
+                self.product_testers = None;
+            }
+            Msg::ProductMakers(handle, result) => match result {
+                Ok(list) if self.screen == Some(Screen::Product(handle.clone())) => self.product_makers = Some((handle, list)),
+                Ok(_) => {}
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::ProductTesters(handle, result) => match result {
+                Ok(list) if self.screen == Some(Screen::Product(handle.clone())) => self.product_testers = Some((handle, list)),
+                Ok(_) => {}
+                Err(p) => self.problem = Some(p),
+            },
+            Msg::MakerName(name) => self.maker_name = name.trim().trim_start_matches('@').to_string(),
+            Msg::InviteMaker(handle) => {
+                let username = std::mem::take(&mut self.maker_name);
+                if username.is_empty() {
+                    return Task::none();
+                }
+                let words = format!("@{username} is listed. The listing shows once they confirm it.");
+                return self.done(move |c, t| async move { pages::maker_invite(&c, &t, &handle, &username).await.map(|_| ()) }, words);
+            }
+            Msg::AnswerMaker(handle, accept) => {
+                let words = if accept { "You are listed as one of its makers." } else { "Declined." };
+                return self.done(move |c, t| async move { pages::maker_answer(&c, &t, &handle, accept).await }, words.into());
+            }
+            Msg::RemoveMaker(handle, member) => {
+                let me = self.me.as_ref().is_some_and(|m| m.me.id == member);
+                let words = if me { "You left its makers." } else { "Taken off its makers." };
+                return self.done(move |c, t| async move { pages::maker_remove(&c, &t, &handle, &member).await }, words.into());
+            }
+            Msg::TesterNote(note) => self.tester_note = note.chars().take(pages::TESTER_INVITE_MAX_CHARS).collect(),
+            Msg::AnswerTester(handle, member, invite) => {
+                let note = if invite { std::mem::take(&mut self.tester_note) } else { String::new() };
+                let words = if invite { "Invited. Only they see your note." } else { "Declined." };
+                return self.done(
+                    move |c, t| async move { pages::tester_answer(&c, &t, &handle, &member, invite, note.trim()).await },
+                    words.into(),
+                );
+            }
+            Msg::PostAbout(choice) => {
+                self.composer.product = choice.0.map(|(handle, _)| handle);
+                if self.composer.product.is_none() {
+                    self.composer.launch_on = false;
+                }
+            }
+            Msg::LaunchOn(on) => self.composer.launch_on = on && self.composer.product.is_some(),
+            Msg::LaunchVersion(version) => self.composer.launch_version = version.chars().take(pages::LAUNCH_VERSION_MAX_CHARS).collect(),
+            Msg::ModProduct(handle, suspend) => {
+                let note = self.mod_note.trim().to_string();
+                let words = format!("p/{handle} is {}.", if suspend { "suspended" } else { "restored" });
+                return self.run(move |c, t| async move { pages::mod_product(&c, &t, suspend, &handle, &note).await }, move |r| {
+                    let words = words.clone();
+                    if suspend { Msg::ProductGone(r.map(|_| words)) } else { Msg::Done(r.map(|_| words)) }
+                });
             }
             Msg::Communities(result) => {
                 if self.screen != Some(Screen::Communities) {
@@ -2399,6 +3793,182 @@ impl State {
             Msg::ListTakeOff(list_id, target) => {
                 return self.done(move |c, t| async move { pages::list_add(&c, &t, &list_id, &target, false).await }, "Taken off the list.".into());
             }
+            Msg::SaveDraft => return self.save_draft(None),
+            Msg::ScheduleOn(on) => {
+                self.composer.schedule_on = on;
+                if on && self.composer.schedule_day.is_empty() {
+                    // An hour from now, on the next quarter hour.
+                    let at = ((crate::utc::now() / 900.0).ceil() * 900.0 + 3600.0).floor();
+                    let full = crate::utc::full(at);
+                    self.composer.schedule_day = full[..10].to_string();
+                    self.composer.schedule_time = full[11..16].to_string();
+                }
+            }
+            Msg::ScheduleDay(day) => self.composer.schedule_day = day.chars().take(10).collect(),
+            Msg::ScheduleTime(time) => self.composer.schedule_time = time.chars().take(5).collect(),
+            Msg::Schedule => {
+                if let Some((at, seconds)) = self.composer.schedule_at()
+                    && seconds >= crate::utc::now() + 60.0
+                {
+                    return self.save_draft(Some(at));
+                }
+                self.note = Some("Choose a day as 2026-10-15 and a time as 09:30, in UTC, at least a minute from now.".into());
+            }
+            Msg::DraftSaved(result) => {
+                self.composer.sending = false;
+                match result {
+                    Ok(draft) => {
+                        self.note = Some(match draft.publish_at.as_deref().and_then(crate::utc::parse) {
+                            Some(at) => format!("Scheduled for {} UTC. It is in Drafts until then.", &crate::utc::full(at)[..16]),
+                            None => "Saved to Drafts.".into(),
+                        });
+                        self.composer = Composer { as_who: self.composer.as_who.take(), ..Composer::default() };
+                        return self.fetch_me();
+                    }
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::Drafts(result) => {
+                if self.screen != Some(Screen::Drafts) {
+                    return Task::none();
+                }
+                self.loading = false;
+                match result {
+                    Ok(found) => self.drafts = Some(found),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::OpenDraft(id) => {
+                let Some(draft) = self.drafts.iter().flatten().find(|d| d.id == id).cloned() else { return Task::none() };
+                self.composer = Composer::from_draft(&draft);
+                let show = self.go(Screen::Home);
+                let Some(post_id) = draft.post.repost_of else { return show };
+                let read = self.run(move |c, t| async move { pages::thread(&c, &t, &post_id, None).await }, move |r| Msg::DraftQuote(id.clone(), r));
+                return Task::batch([show, read]);
+            }
+            Msg::DraftQuote(id, result) => {
+                if self.composer.draft_id.as_deref() != Some(id.as_str()) || self.composer.draft_quote.is_none() {
+                    return Task::none();
+                }
+                match result {
+                    Ok(thread) => {
+                        self.composer.quoting = Some(thread.post);
+                        self.composer.draft_quote = None;
+                    }
+                    Err(_) => self.note = Some("The post this draft quotes could not be read. Cancel the quote to post it without.".into()),
+                }
+            }
+            Msg::PostDraft(id) => {
+                return self.run(move |c, t| async move { pages::draft_publish(&c, &t, &id).await }, |r| Msg::Done(r.map(|_| "Posted.".to_string())));
+            }
+            Msg::DeleteDraft(id) => {
+                if self.confirm_delete_draft.as_deref() != Some(id.as_str()) {
+                    self.confirm_delete_draft = Some(id);
+                    return Task::none();
+                }
+                self.confirm_delete_draft = None;
+                if self.composer.draft_id.as_deref() == Some(id.as_str()) {
+                    // What the composer holds stays, as a new post.
+                    self.composer.draft_id = None;
+                }
+                return self.done(move |c, t| async move { pages::draft_delete(&c, &t, &id).await }, "Draft deleted.".into());
+            }
+            Msg::CloseDraft => self.composer = Composer { as_who: self.composer.as_who.take(), ..Composer::default() },
+            Msg::PostMenu(id) => {
+                self.post_menu = id;
+                self.repost_menu = None;
+                self.reacting = None;
+            }
+            Msg::RepostMenu(id) => {
+                self.repost_menu = id;
+                self.post_menu = None;
+                self.reacting = None;
+            }
+            Msg::Reacting(id) => {
+                self.reacting = id;
+                self.post_menu = None;
+                self.repost_menu = None;
+            }
+            Msg::CopyLink(id) => {
+                self.note = Some("Link copied.".into());
+                return iced::clipboard::write(post_link(&id));
+            }
+            Msg::Compose => {
+                let home = self.go(Screen::Home);
+                return Task::batch([home, iced::widget::operation::focus(keys::COMPOSER)]);
+            }
+            Msg::Key(key) => return self.key(key),
+            Msg::ViewPhoto(at) => self.viewing = at,
+            Msg::PhotoStep(by) => {
+                if let Some((id, at)) = self.viewing.clone() {
+                    let count = self.shown_posts().into_iter().find(|p| p.id == id).map_or(0, |p| p.media.len());
+                    if count > 0 {
+                        self.viewing = Some((id, (at as i64 + i64::from(by)).rem_euclid(count as i64) as usize));
+                    }
+                }
+            }
+            Msg::NotifView(view) => self.notif_view = view,
+            Msg::PersonTab(tab) => {
+                let read_again = tab.show() != self.person_tab.show();
+                self.person_tab = tab;
+                if read_again && let Some(screen) = self.screen.clone() {
+                    return self.load(&screen, true);
+                }
+            }
+            Msg::OrgTab(tab) => {
+                self.org_tab = tab;
+                let Some(Screen::Org(ticker)) = self.screen.clone() else { return Task::none() };
+                if tab == OrgTab::Jobs && self.org_jobs.as_ref().is_none_or(|(of, _)| *of != ticker) {
+                    let query = JobsQuery { ticker: Some(ticker.clone()), ..JobsQuery::default() };
+                    return self.run(move |c, t| async move { pages::jobs(&c, &t, &query, None).await }, move |r| Msg::OrgJobs(ticker.clone(), r));
+                }
+                if tab == OrgTab::Products && self.org_products.as_ref().is_none_or(|(of, _)| *of != ticker) {
+                    let key = ticker.clone();
+                    return self.run(
+                        move |c, t| async move { pages::products(&c, &t, ProductList::Newest, None, None, Some(&ticker), None).await },
+                        move |r| Msg::OrgProducts(key.clone(), r),
+                    );
+                }
+            }
+            Msg::OrgProducts(ticker, result) => {
+                if self.screen != Some(Screen::Org(ticker.clone())) {
+                    return Task::none();
+                }
+                match result {
+                    Ok(page) => self.org_products = Some((ticker, page)),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::OpenLink(url) => {
+                // Only a web address the service kept: a product's https link.
+                if url.starts_with("https://")
+                    && let Err(why) = crate::signin::loopback::open_in_browser(&url)
+                {
+                    self.note = Some(why);
+                }
+            }
+            Msg::OrgJobs(ticker, result) => {
+                if self.screen != Some(Screen::Org(ticker.clone())) {
+                    return Task::none();
+                }
+                match result {
+                    Ok(jobs) => self.org_jobs = Some((ticker, jobs)),
+                    Err(p) => self.problem = Some(p),
+                }
+            }
+            Msg::PageMenu(open) => self.page_menu = open,
+            Msg::Scrolled(y) => {
+                // Near the end, the next page is read once, as the social sites do; Load more stays for the keys.
+                if y.is_nan() || y < 0.9 || self.loading {
+                    return Task::none();
+                }
+                let Some(key) = self.more_key() else { return Task::none() };
+                if self.more_asked.as_deref() == Some(key.as_str()) {
+                    return Task::none();
+                }
+                self.more_asked = Some(key);
+                return self.update(Msg::More);
+            }
             Msg::ListAdd(list_id, target, add) => {
                 // The offer is read again after the change, so it shows what is so.
                 let key = target.clone();
@@ -2450,8 +4020,30 @@ impl Wanted {
             (None, Some(a)) => self.add(a.avatar.as_ref(), Size::Small),
             (None, None) => {}
         }
+        if let Some(product) = &p.product {
+            self.add(product.logo.as_ref(), Size::Small);
+        }
         for photo in &p.media {
             self.add(Some(&photo.url), Size::Large);
+        }
+    }
+
+    /// Launches as a list draws them: each product's logo, and its post's.
+    fn launches(&mut self, posts: Option<&[Post]>) {
+        for p in posts.unwrap_or_default() {
+            self.post(p);
+        }
+    }
+
+    /// Products as a list draws them: each logo, and the picture of the person or organization that owns it.
+    fn summaries(&mut self, list: &[pages::ProductSummary]) {
+        for summary in list {
+            self.add(summary.product.logo.as_ref(), Size::Small);
+            match (&summary.org, &summary.owner) {
+                (Some(o), _) => self.add(o.logo.as_ref(), Size::Small),
+                (None, Some(a)) => self.add(a.avatar.as_ref(), Size::Small),
+                (None, None) => {}
+            }
         }
     }
 
@@ -2460,6 +4052,99 @@ impl Wanted {
             self.post(p);
         }
     }
+}
+
+/// How many skills a page keeps, and how long one may be (pages.py `MAX_SKILLS`, `SKILL_MAX_CHARS`).
+const MAX_SKILLS: usize = 50;
+const SKILL_MAX_CHARS: usize = 60;
+
+/// What is wrong with a title as typed, as the service would refuse it (pages.py `normalize_title`), or nothing.
+pub(super) fn title_problem(text: &str) -> Option<&'static str> {
+    let raw = unbracketed(text);
+    if raw.is_empty() {
+        return None;
+    }
+    if raw.contains(['[', ']', '(', ')']) {
+        return Some("A title may not carry brackets or parentheses: the name line draws them.");
+    }
+    let parts: Vec<String> = raw.split('|').map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).collect();
+    if parts.iter().any(String::is_empty) {
+        return Some("A title part may not be empty: one | between two parts.");
+    }
+    if parts.len() > 4 {
+        return Some("A title has at most 4 parts.");
+    }
+    if parts.iter().any(|p| p.chars().count() > 30) {
+        return Some("Each part of a title is at most 30 characters.");
+    }
+    if parts.join(" | ").chars().count() > pages::TITLE_MAX_CHARS {
+        return Some("A title is at most 60 characters.");
+    }
+    None
+}
+
+/// A title as the page will show it: its parts tidied, one " | " between them.
+pub(super) fn tidy_title(text: &str) -> String {
+    let raw = unbracketed(text);
+    if raw.is_empty() {
+        return String::new();
+    }
+    raw.split('|').map(|p| p.split_whitespace().collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join(" | ")
+}
+
+/// A title without the one pair of brackets round it that the service drops.
+fn unbracketed(text: &str) -> &str {
+    let raw = text.trim();
+    match raw.strip_prefix('[').and_then(|r| r.strip_suffix(']')) {
+        Some(inner) => inner.trim(),
+        None => raw,
+    }
+}
+
+/// A month as the service keeps one (YYYY-MM, 1950 to 2099), and a year.
+pub(super) fn is_month(text: &str) -> bool {
+    let (year, month) = text.split_once('-').unwrap_or(("", ""));
+    is_year(year) && month.len() == 2 && month.bytes().all(|b| b.is_ascii_digit()) && (1..=12).contains(&month.parse::<u32>().unwrap_or(0))
+}
+
+pub(super) fn is_year(text: &str) -> bool {
+    text.len() == 4 && text.bytes().all(|b| b.is_ascii_digit()) && (1950..=2099).contains(&text.parse::<u32>().unwrap_or(0))
+}
+
+/// What is wrong with the position in the form, said before anything is sent, or nothing.
+pub(super) fn position_problem(x: &NewExperience, now: bool) -> Option<&'static str> {
+    let (ticker, started, ended) = (x.ticker.trim(), x.started.trim(), x.ended.trim());
+    if x.title.trim().is_empty() {
+        return Some("Name the position.");
+    }
+    if !ticker.is_empty() && !((2..=5).contains(&ticker.len()) && ticker.bytes().all(|b| b.is_ascii_alphabetic())) {
+        return Some("A ticker is 2-5 letters.");
+    }
+    if !is_month(started) {
+        return Some("Say when it began: YYYY-MM, between 1950 and 2099.");
+    }
+    if !now && !ended.is_empty() && !is_month(ended) {
+        return Some("Say when it ended as YYYY-MM, or tick that you hold it now.");
+    }
+    if !now && !ended.is_empty() && ended < started {
+        return Some("It cannot end before it began.");
+    }
+    None
+}
+
+/// What is wrong with the school in the form, or nothing.
+pub(super) fn school_problem(y: &NewEducation) -> Option<&'static str> {
+    let (from, to) = (y.started.trim(), y.ended.trim());
+    if y.school.trim().is_empty() {
+        return Some("Name the school.");
+    }
+    if (!from.is_empty() && !is_year(from)) || (!to.is_empty() && !is_year(to)) {
+        return Some("A year is YYYY, between 1950 and 2099.");
+    }
+    if !from.is_empty() && !to.is_empty() && to < from {
+        return Some("It cannot end before it began.");
+    }
+    None
 }
 
 #[cfg(test)]
@@ -2633,6 +4318,68 @@ mod tests {
     }
 
     #[test]
+    fn a_title_is_held_to_the_services_rules_before_it_is_sent() {
+        assert_eq!(title_problem(""), None);
+        assert_eq!(title_problem("[ Founder | CEO ]"), None, "one pair of brackets round it is dropped, as the service drops it");
+        assert_eq!(tidy_title("[ Founder|  CEO ]"), "Founder | CEO");
+        assert!(title_problem("Founder (CEO)").is_some_and(|w| w.contains("brackets")));
+        assert!(title_problem("A | | B").is_some_and(|w| w.contains("empty")));
+        assert!(title_problem("A | B | C | D | E").is_some_and(|w| w.contains("4 parts")));
+        assert!(title_problem(&"x".repeat(31)).is_some_and(|w| w.contains("30 characters")));
+        assert!(title_problem(&["abcdefghijklmn"; 4].join(" | ")).is_some_and(|w| w.contains("60 characters")));
+        assert!(is_month("1950-01") && is_month("2099-12") && !is_month("1949-12") && !is_month("2021-13") && !is_month("2021-3"));
+        assert!(is_year("2016") && !is_year("16") && !is_year("2100"));
+    }
+
+    #[test]
+    fn my_page_saves_only_a_change_the_service_would_take_and_can_put_it_back() {
+        let mut s = State::default();
+        let me = Me { me: Person { display_name: "Ada".into(), username: Some("ada".into()), has_page: true, ..Person::default() }, ..Me::default() };
+        let _ = s.update(Msg::Me(Ok(me)));
+        let _ = s.update(Msg::SaveMine);
+        assert!(!s.mine.saving, "nothing changed: nothing is sent");
+        let _ = s.update(Msg::MineTitle("A | B | C | D | E".into()));
+        let _ = s.update(Msg::SaveMine);
+        assert!(!s.mine.saving, "a title the service would refuse is not sent");
+        let _ = s.update(Msg::MineTitle("Founder | CEO".into()));
+        let _ = s.update(Msg::DiscardMine);
+        assert_eq!((s.mine.title.as_str(), s.mine.dirty), ("", false), "Discard puts back what the service said");
+        let _ = s.update(Msg::MineTitle("Founder".into()));
+        let _ = s.update(Msg::SaveMine);
+        assert!(s.mine.saving);
+        let _ = s.update(Msg::MineTop(Ok(PersonPage { banner: Some("https://media.alelyon.com/b.webp".into()), followers: 3, ..PersonPage::default() })));
+        assert_eq!(s.mine.top.as_ref().map(|t| t.followers), Some(3), "the top is drawn from the page as others see it");
+    }
+
+    #[test]
+    fn the_background_forms_open_on_demand_say_a_bad_month_and_delete_on_a_second_press() {
+        let mut s = State::default();
+        assert!(!s.profile_form.exp_open);
+        let _ = s.update(Msg::EntryOpen(true));
+        assert!(s.profile_form.exp_open);
+        let _ = s.update(Msg::ExpField(ExpField::Title, "Founder".into()));
+        let _ = s.update(Msg::ExpField(ExpField::Started, "2021-13".into()));
+        assert!(position_problem(&s.profile_form.experience, false).is_some_and(|w| w.contains("began")));
+        let _ = s.update(Msg::ExpField(ExpField::Started, "2021-03".into()));
+        let _ = s.update(Msg::ExpField(ExpField::Ended, "2020-01".into()));
+        assert!(position_problem(&s.profile_form.experience, false).is_some_and(|w| w.contains("before")));
+        let _ = s.update(Msg::ExpNow(true));
+        assert_eq!((s.profile_form.experience.ended.as_str(), position_problem(&s.profile_form.experience, true)), ("", None), "held now: no end");
+        let _ = s.update(Msg::ProfileSaved(ProfilePart::Experience, Ok(())));
+        assert!(!s.profile_form.exp_open, "a saved position closes its form");
+        let _ = s.update(Msg::EntryOpen(false));
+        let _ = s.update(Msg::EduField(EduField::School, "UCL".into()));
+        let _ = s.update(Msg::EduField(EduField::Started, "16".into()));
+        assert!(school_problem(&s.profile_form.education).is_some_and(|w| w.contains("YYYY")));
+        let _ = s.update(Msg::ProfileClear);
+        assert!(!s.profile_form.edu_open);
+        let _ = s.update(Msg::DeleteExperience("exp_1".into()));
+        assert_eq!(s.profile_form.confirm_delete.as_deref(), Some("exp_1"), "the first press asks");
+        let _ = s.update(Msg::DeleteExperience("exp_1".into()));
+        assert!(s.profile_form.confirm_delete.is_none(), "the second deletes");
+    }
+
+    #[test]
     fn the_profile_forms_fill_from_an_entry_and_empty_only_once_saved() {
         let mut s = State::default();
         let entry = Experience {
@@ -2667,13 +4414,17 @@ mod tests {
             ..Me::default()
         };
         let _ = s.update(Msg::Me(Ok(me(&["Mathematics", "Engines"]))));
-        assert_eq!(s.profile_form.skills, "Mathematics, Engines");
-        let _ = s.update(Msg::SkillsText("Looms".into()));
+        assert_eq!(s.profile_form.skills, ["Mathematics", "Engines"]);
+        let _ = s.update(Msg::SkillRemove(0));
+        let _ = s.update(Msg::SkillNew("Looms, engines,  Steam   power".into()));
+        let _ = s.update(Msg::SkillAdd);
+        assert_eq!(s.profile_form.skills, ["Engines", "Looms", "Steam power"], "a comma parts them; one already there is not added twice");
+        assert!(s.profile_form.skill_new.is_empty());
         let _ = s.update(Msg::Me(Ok(me(&["Mathematics"]))));
-        assert_eq!(s.profile_form.skills, "Looms", "what is being typed stays");
+        assert_eq!(s.profile_form.skills, ["Engines", "Looms", "Steam power"], "what is being changed stays");
         let _ = s.update(Msg::ProfileSaved(ProfilePart::Skills, Ok(())));
         let _ = s.update(Msg::Me(Ok(me(&["Looms"]))));
-        assert_eq!(s.profile_form.skills, "Looms");
+        assert_eq!(s.profile_form.skills, ["Looms"]);
         let _ = s.update(Msg::Go(Screen::OrgExperience("LACE".into())));
         let _ = s.update(Msg::OrgExperience("ABCD".into(), Ok(vec![])));
         assert!(s.org_experience.is_none(), "another organization's answer is dropped");
@@ -3015,6 +4766,291 @@ mod tests {
 
     fn person(username: &str) -> Person {
         Person { id: format!("acc_{username}"), username: Some(username.into()), ..Person::default() }
+    }
+
+    fn a_draft(id: &str, text: &str) -> Draft {
+        Draft { id: id.into(), post: NewPost { text: text.into(), ..NewPost::default() }, ..Draft::default() }
+    }
+
+    #[test]
+    fn a_draft_opens_in_the_composer_as_it_was_kept_and_posting_it_posts_the_draft() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Drafts));
+        let mut kept = a_draft("drf_1", "Which loom?");
+        kept.post.poll = Some(pages::NewPoll { options: vec!["Jacquard".into(), "Hand".into()], hours: 72 });
+        kept.post.replies = ReplyRule::Followers;
+        kept.publish_at = Some("2026-10-15T09:30:00Z".into());
+        let mut quoting = a_draft("drf_2", "Well put");
+        quoting.post.repost_of = Some("pst_9".into());
+        let _ = s.update(Msg::Drafts(Ok(vec![kept, quoting])));
+        let _ = s.update(Msg::OpenDraft("drf_1".into()));
+        assert_eq!(s.screen, Some(Screen::Home), "a draft is written again on Home");
+        let c = &s.composer;
+        assert_eq!((c.draft_id.as_deref(), c.body.text().trim(), c.replies), (Some("drf_1"), "Which loom?", ReplyRule::Followers));
+        assert!(c.poll_on && c.poll_options[..2] == ["Jacquard".to_string(), "Hand".to_string()] && c.poll_length == PollLength(72));
+        assert_eq!((c.schedule_on, c.schedule_day.as_str(), c.schedule_time.as_str()), (true, "2026-10-15", "09:30"));
+        assert_eq!(c.new_post().poll.map(|p| p.options.len()), Some(2));
+        let _ = s.update(Msg::CloseDraft);
+        assert!(s.composer.draft_id.is_none() && s.composer.body.text().trim().is_empty(), "closing empties the composer");
+        let _ = s.update(Msg::OpenDraft("drf_2".into()));
+        assert_eq!(s.composer.new_post().repost_of.as_deref(), Some("pst_9"), "its quote is kept before the post is read");
+        let _ = s.update(Msg::DraftQuote("drf_2".into(), Err(Problem::Expired)));
+        assert_eq!(s.composer.new_post().repost_of.as_deref(), Some("pst_9"), "and when it cannot be read");
+        let _ = s.update(Msg::Unquote);
+        assert_eq!(s.composer.new_post().repost_of, None, "until the quote is cancelled");
+    }
+
+    #[test]
+    fn a_schedule_reads_only_a_real_day_and_time_in_utc() {
+        let mut c = Composer { schedule_day: "2026-10-15".into(), schedule_time: "9:05".into(), ..Composer::default() };
+        assert_eq!(c.schedule_at().map(|(at, _)| at), Some("2026-10-15T09:05:00Z".to_string()));
+        for (day, time) in [("2026-02-31", "09:00"), ("2026-10-15", "24:00"), ("2026-10-15", "09:60"), ("15-10-2026", "09:00"), ("2026-10-15", "nine")] {
+            c.schedule_day = day.into();
+            c.schedule_time = time.into();
+            assert_eq!(c.schedule_at(), None, "{day} {time}");
+        }
+        let mut s = State::default();
+        let _ = s.update(Msg::ScheduleOn(true));
+        let (_, at) = s.composer.schedule_at().expect("a default time an hour on");
+        assert!(at > crate::utc::now() + 3000.0 && at < crate::utc::now() + 4600.0, "{at}");
+        s.composer.kind = Kind::Article;
+        s.composer.title = "Engineer".into();
+        s.composer.body = text_editor::Content::with_text("Build the engine");
+        s.composer.as_who = Some("LACE".into());
+        assert!(s.composer.draftable(), "an article is drafted");
+        s.composer.job_on = true;
+        s.composer.job.workplace = Workplace::Remote;
+        assert!(s.composer.ready() && !s.composer.draftable(), "a job opening is posted at once, not drafted");
+    }
+
+    #[test]
+    fn deleting_a_draft_asks_first_and_frees_the_composer_writing_it() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Drafts));
+        let _ = s.update(Msg::Drafts(Ok(vec![a_draft("drf_1", "One")])));
+        let _ = s.update(Msg::OpenDraft("drf_1".into()));
+        let _ = s.update(Msg::Go(Screen::Drafts));
+        let _ = s.update(Msg::DeleteDraft("drf_1".into()));
+        assert_eq!(s.confirm_delete_draft.as_deref(), Some("drf_1"), "the first press asks");
+        let _ = s.update(Msg::DeleteDraft("drf_1".into()));
+        assert_eq!((s.confirm_delete_draft.as_ref(), s.composer.draft_id.as_ref()), (None, None));
+        assert_eq!(s.composer.body.text().trim(), "One", "the words stay, as a new post");
+        let _ = s.update(Msg::Drafts(Ok(Vec::new())));
+        let _ = s.update(Msg::Go(Screen::Home));
+        let _ = s.update(Msg::Drafts(Ok(vec![a_draft("drf_2", "Two")])));
+        assert_eq!(s.drafts.as_ref().map(Vec::len), Some(0), "an answer for Drafts off screen is dropped");
+    }
+
+    fn told(id: &str, kind: &str, who: &str, post: Option<&str>) -> Notification {
+        Notification {
+            id: id.into(),
+            kind: kind.into(),
+            actor: Some(Person { id: format!("acc_{who}"), username: Some(who.into()), ..Person::default() }),
+            post: post.map(|p| Post { id: p.into(), ..Post::default() }),
+            ..Notification::default()
+        }
+    }
+
+    #[test]
+    fn the_composer_says_why_it_cannot_post_exactly_when_it_cannot() {
+        let mut c = Composer::default();
+        assert_eq!(c.why_not().as_deref(), Some("Write something first"));
+        c.body = text_editor::Content::with_text("Shipped it");
+        assert!(c.ready() && c.why_not().is_none());
+        c.poll_on = true;
+        assert!(!c.ready());
+        assert_eq!(c.why_not().as_deref(), Some("A poll needs at least two options"));
+        c.poll_options = ["Yes".into(), "No".into(), String::new(), String::new()];
+        assert!(c.ready() && c.why_not().is_none());
+        c.kind = Kind::Article;
+        c.poll_on = false;
+        assert!(!c.ready() && c.why_not().is_some_and(|w| w.starts_with("Give the article a title")));
+        c.title = "Notes".into();
+        assert!(c.ready() && c.why_not().is_none());
+        c.body = text_editor::Content::with_text(&"x".repeat(c.limit() + 3));
+        assert_eq!(c.why_not(), Some(format!("3 characters over the limit of {}", c.limit())));
+    }
+
+    #[test]
+    fn j_and_k_choose_the_posts_on_show_in_their_order_and_l_likes_the_chosen_one() {
+        let post = |id: &str| Post { id: id.into(), ..Post::default() };
+        let mut s = State {
+            screen: Some(Screen::Home),
+            home_feed: HomeFeed::Following,
+            home: Some(Posts { posts: vec![post("p1"), post("p2"), post("p3")], more: false }),
+            ..State::default()
+        };
+        let _ = s.update(Msg::Key(keys::PageKey::Previous));
+        assert_eq!(s.selected.as_deref(), Some("p1"), "the first key chooses the first post");
+        let _ = s.update(Msg::Key(keys::PageKey::Next));
+        let _ = s.update(Msg::Key(keys::PageKey::Next));
+        let _ = s.update(Msg::Key(keys::PageKey::Next));
+        assert_eq!(s.selected.as_deref(), Some("p3"), "and stays on the last");
+        let _ = s.update(Msg::Key(keys::PageKey::Previous));
+        assert_eq!(s.selected.as_deref(), Some("p2"));
+        let _ = s.update(Msg::Go(Screen::Explore));
+        assert_eq!(s.selected, None, "another screen starts with none chosen");
+    }
+
+    #[test]
+    fn a_plain_repost_is_chosen_as_the_post_it_reposts_and_a_thread_lists_its_parent_post_and_replies() {
+        let post = |id: &str| Post { id: id.into(), ..Post::default() };
+        let repost = Post { id: "r1".into(), repost_of_id: Some("p9".into()), repost_of: Some(Box::new(post("p9"))), ..Post::default() };
+        let s = State { screen: Some(Screen::Home), home_feed: HomeFeed::Following, home: Some(Posts { posts: vec![repost], more: false }), ..State::default() };
+        assert_eq!(s.shown_posts().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["p9"]);
+        let thread = Thread { parent: Some(Box::new(post("up"))), post: post("it"), replies: Posts { posts: vec![post("a"), post("b")], more: false } };
+        let s = State { screen: Some(Screen::Thread("it".into())), thread: Some(thread), ..State::default() };
+        assert_eq!(s.shown_posts().iter().map(|p| p.id.as_str()).collect::<Vec<_>>(), ["up", "it", "a", "b"]);
+    }
+
+    #[test]
+    fn a_photo_opens_over_the_page_steps_round_its_posts_photos_and_closes_on_another_screen() {
+        let photo = |n: u32| pages::Photo { url: format!("https://media.alelyon.com/p{n}.webp"), ..pages::Photo::default() };
+        let post = Post { id: "pst_1".into(), media: vec![photo(1), photo(2), photo(3)], ..Post::default() };
+        let mut s = State {
+            screen: Some(Screen::Home),
+            home_feed: HomeFeed::Following,
+            home: Some(Posts { posts: vec![post], more: false }),
+            ..State::default()
+        };
+        let _ = s.update(Msg::ViewPhoto(Some(("pst_1".into(), 0))));
+        let _ = s.update(Msg::Key(keys::PageKey::PhotoPrevious));
+        assert_eq!(s.viewing, Some(("pst_1".into(), 2)), "round the start to the last");
+        let _ = s.update(Msg::Key(keys::PageKey::PhotoNext));
+        assert_eq!(s.viewing, Some(("pst_1".into(), 0)), "and round the end to the first");
+        let _ = s.update(Msg::Go(Screen::Explore));
+        assert_eq!(s.viewing, None, "another screen closes it");
+        let _ = s.update(Msg::Key(keys::PageKey::PhotoNext));
+        assert_eq!(s.viewing, None, "the arrows open nothing");
+    }
+
+    #[test]
+    fn a_mention_is_read_where_the_service_reads_one() {
+        let at = |text: &str| {
+            let mut body = text_editor::Content::with_text(text);
+            body.perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
+            typed_mention(&body).map(|(_, start, end, word)| (start, end, word))
+        };
+        assert_eq!(at("Thanks @ad"), Some((7, 10, "ad".to_string())));
+        assert_eq!(at("@ada.l"), Some((0, 6, "ada.l".to_string())), "at the start, with a dot");
+        assert_eq!(at("mail ada@ex"), None, "inside an address");
+        assert_eq!(at("Thanks @"), None, "nothing typed after it yet");
+        assert_eq!(at("Thanks @ada "), None, "a space ends it");
+        assert_eq!(at("Zoë: @bo"), Some((6, 9, "bo".to_string())), "byte columns after a two-byte letter");
+    }
+
+    #[test]
+    fn a_picked_person_replaces_the_mention_as_typed_and_the_list_steps_round() {
+        let who = |u: &str| Person { username: Some(u.into()), has_page: true, ..Person::default() };
+        let mut s = State::default();
+        s.composer.body = text_editor::Content::with_text("Thanks @ad for the review");
+        s.composer.body.perform(text_editor::Action::Move(text_editor::Motion::DocumentStart));
+        for _ in 0.."Thanks @ad".len() {
+            s.composer.body.perform(text_editor::Action::Move(text_editor::Motion::Right));
+        }
+        let _ = s.track_mention();
+        assert_eq!(s.mentioning.as_ref().map(|m| m.word.as_str()), Some("ad"));
+        let found = Found { people: vec![who("ada"), who("adam"), Person { username: Some("nopage".into()), ..Person::default() }], ..Found::default() };
+        let _ = s.update(Msg::MentionFound("ad".into(), Ok(found)));
+        assert_eq!(s.mentioning.as_ref().map(|m| m.found.len()), Some(2), "only people with a page");
+        let _ = s.update(Msg::MentionMove(-1));
+        assert_eq!(s.mentioning.as_ref().map(|m| m.at), Some(1), "round the start to the last");
+        let _ = s.update(Msg::MentionMove(1));
+        let _ = s.update(Msg::MentionPick(None));
+        assert_eq!(s.composer.body.text().trim_end(), "Thanks @ada for the review", "no second space before one already there");
+        assert!(s.mentioning.is_none());
+        let _ = s.update(Msg::MentionFound("ad".into(), Ok(Found::default())));
+        assert!(s.mentioning.is_none(), "a late answer opens nothing");
+    }
+
+    #[test]
+    fn counts_are_written_as_x_writes_them() {
+        for (n, words) in [(0, "0"), (7, "7"), (999, "999"), (1_284, "1,284"), (9_999, "9,999"), (10_000, "10K"), (12_549, "12.5K"), (999_999, "999.9K"), (1_000_000, "1M"), (1_250_000, "1.2M")] {
+            assert_eq!(view::compact(n), words, "{n}");
+        }
+    }
+
+    #[test]
+    fn a_page_opens_at_its_first_tab_and_a_tab_reads_only_what_it_changes() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Person("ada".into())));
+        let _ = s.update(Msg::PersonTab(PersonTab::Replies));
+        assert_eq!((s.person_tab, s.person_tab.show()), (PersonTab::Replies, PersonShow::Replies));
+        let _ = s.update(Msg::PersonTab(PersonTab::Profile));
+        assert_eq!(s.person_tab.show(), PersonShow::Posts, "the profile comes with the posts");
+        let _ = s.update(Msg::Go(Screen::Person("ada".into())));
+        assert_eq!(s.person_tab, PersonTab::Profile, "the page on show keeps its tab");
+        let _ = s.update(Msg::Go(Screen::Person("bob".into())));
+        assert_eq!(s.person_tab, PersonTab::Posts, "another person's page opens at Posts");
+        let _ = s.update(Msg::Go(Screen::Org("LACE".into())));
+        let _ = s.update(Msg::OrgTab(OrgTab::Jobs));
+        let _ = s.update(Msg::OrgJobs("WEFT".into(), Ok(Posts::default())));
+        assert!(s.org_jobs.is_none(), "another organization's jobs are dropped");
+        let _ = s.update(Msg::OrgJobs("LACE".into(), Ok(Posts::default())));
+        assert_eq!(s.org_jobs.as_ref().map(|(t, _)| t.as_str()), Some("LACE"));
+        let _ = s.update(Msg::PageMenu(true));
+        let _ = s.update(Msg::Reporting(Some(Target::Org("LACE".into()))));
+        assert!(!s.page_menu, "acting from the menu closes it");
+        let _ = s.update(Msg::Go(Screen::Org("WEFT".into())));
+        assert_eq!((s.org_tab, s.org_jobs.as_ref()), (OrgTab::Posts, None), "another organization opens at Posts");
+    }
+
+    #[test]
+    fn reactions_reposts_and_follows_are_grouped_where_the_newest_stands() {
+        let items = vec![
+            told("n1", "like", "ada", Some("pst_1")),
+            told("n2", "reply", "bob", Some("pst_1")),
+            told("n3", "like", "carol", Some("pst_1")),
+            told("n4", "follow", "dan", None),
+            told("n5", "like", "erin", Some("pst_2")),
+            told("n6", "follow", "fay", None),
+            told("n7", "repost", "gus", Some("pst_1")),
+        ];
+        let ids: Vec<Vec<&str>> = grouped(&items).iter().map(|g| g.iter().map(|n| n.id.as_str()).collect()).collect();
+        assert_eq!(ids, [vec!["n1", "n3"], vec!["n2"], vec!["n4", "n6"], vec!["n5"], vec!["n7"]]);
+        assert!(NotifView::Mentions.shows("reply") && NotifView::Mentions.shows("mention") && !NotifView::Mentions.shows("like"));
+        assert!(NotifView::All.shows("follow"));
+    }
+
+    #[test]
+    fn scrolling_near_the_end_asks_for_the_next_page_once() {
+        let mut s = State::default();
+        let _ = s.update(Msg::Go(Screen::Explore));
+        s.loading = false;
+        s.explore = Some(Posts { posts: vec![Post { id: "pst_9".into(), ..Post::default() }], more: true });
+        let _ = s.update(Msg::Scrolled(0.5));
+        assert_eq!(s.more_asked, None, "not near the end");
+        let _ = s.update(Msg::Scrolled(0.95));
+        assert_eq!(s.more_asked.as_deref(), Some("pst_9"));
+        s.more_asked = Some("pst_9".into());
+        let _ = s.update(Msg::Scrolled(0.99));
+        assert_eq!(s.more_asked.as_deref(), Some("pst_9"), "the same page is not asked twice");
+        s.explore = Some(Posts { posts: vec![Post { id: "pst_9".into(), ..Post::default() }], more: false });
+        s.more_asked = None;
+        let _ = s.update(Msg::Scrolled(1.0));
+        assert_eq!(s.more_asked, None, "nothing more to ask for");
+        let _ = s.update(Msg::Scrolled(f32::NAN));
+        assert_eq!(s.more_asked, None, "a page shorter than the window scrolls nowhere");
+    }
+
+    #[test]
+    fn a_post_shows_one_menu_at_a_time_and_acting_closes_it() {
+        let mut s = State::default();
+        let _ = s.update(Msg::PostMenu(Some("pst_1".into())));
+        assert_eq!(s.post_menu.as_deref(), Some("pst_1"));
+        let _ = s.update(Msg::RepostMenu(Some("pst_2".into())));
+        assert_eq!((s.post_menu.as_deref(), s.repost_menu.as_deref()), (None, Some("pst_2")), "one menu at a time");
+        let _ = s.update(Msg::Reacting(Some("pst_2".into())));
+        assert_eq!((s.repost_menu.as_deref(), s.reacting.as_deref()), (None, Some("pst_2")));
+        let _ = s.update(Msg::React("pst_2".into(), Reaction::Celebrate));
+        assert_eq!(s.reacting, None, "reacting closes the choices");
+        let _ = s.update(Msg::PostMenu(Some("pst_3".into())));
+        let _ = s.update(Msg::CopyLink("pst_3".into()));
+        assert_eq!((s.post_menu.as_ref(), s.note.as_deref()), (None, Some("Link copied.")));
+        assert_eq!(post_link("pst_3"), "https://www.alelyon.com/pages/?post=pst_3");
+        let _ = s.update(Msg::PostMenu(Some("pst_4".into())));
+        let _ = s.update(Msg::Go(Screen::Explore));
+        assert_eq!(s.post_menu, None, "going elsewhere closes it");
     }
 
     #[test]

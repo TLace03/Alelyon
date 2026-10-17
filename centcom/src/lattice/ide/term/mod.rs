@@ -6,7 +6,10 @@
 //!   Keys reach it only from the keyboard while it has the focus (a click on it gives it the focus, a click anywhere
 //!   else takes it away, and a gold edge says which), and a paste only from the person's own Ctrl+V, Shift+Insert or
 //!   right click; a paste holding a line break the shell would run at once, or a long one, is asked about first.
-//!   Nothing a model writes, and no tool of the agent, can type into it, and what it shows is never sent to a model.
+//!   Nothing a model writes, and no tool of the agent, can type into a terminal the person opened. The agent's
+//!   `read_terminal` reads a terminal's last lines, and its `run_in_terminal` opens a new terminal (named "Agent: ...")
+//!   and types one command line into it, each only after the person's yes in the core's dialog, asked every time
+//!   (`lattice_core::convo::terminal`).
 //! - Each terminal and everything started in it is in a job object of its own: closing the terminal (asked first
 //!   while a program started in it still runs), or Alelyon ending (a crash included), ends them.
 //! - Its output is read on a thread of its own and reaches the window through a subscription that runs whichever

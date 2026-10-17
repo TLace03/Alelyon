@@ -1,5 +1,6 @@
-//! Activity, on one chat surface: a chart of what is working now (a task opens in the Tasks view; each topic that works or waits for the reader, the
-//! tasks started from it drawn beneath it, and the topic shown), then every topic, newest first, to jump to.
+//! The Chats side, on one chat surface: the groups (`super::groups`), then every topic, newest first, to jump to. The
+//! chart of what is working now (each topic that works or waits for the reader, the tasks started from it drawn
+//! beneath it, and the topic shown; a task opens in the Tasks view) is drawn on the board (`super::board`).
 
 use std::collections::{HashMap, HashSet};
 
@@ -11,7 +12,7 @@ use lattice_protocol::conversation::ConversationSummary;
 use super::IdeMsg;
 use crate::lattice::{Msg, State};
 use crate::theme;
-use crate::ui::{self, label, mono, note, strong};
+use crate::ui::{self, label, mono, note};
 
 type El<'a> = Element<'a, Msg>;
 
@@ -103,28 +104,35 @@ pub fn chart<'a>(
     roots.into_iter().map(|id| build(id, 0, &listed, origins, &kids)).collect()
 }
 
-/// The Activity side: the chart, then the topics.
+/// The Chats side: the groups, then the topics.
 pub fn view<'a>(state: &'a State, phase: f32) -> El<'a> {
     let ide = &state.ide;
-    let current = state.conversation().map(|c| c.id());
     let mut col = Column::new().spacing(2);
     let Some(list) = &state.list else {
         return container(ui::working(phase, "Reading the topics…")).padding(12).into();
     };
-    col = col.push(container(strong("Working now", 12.5, theme::TEXT)).padding(Padding { top: 10.0, right: 10.0, bottom: 4.0, left: 12.0 }));
-    let nodes = chart(&list.conversations, &state.task_origins, current, &state.calling);
-    let working = nodes.iter().any(|n| busy(state, n));
-    if !working {
-        col = col.push(container(note("Nothing is working now. A task you start from a chip runs here, beside the chat.")).padding(Padding { top: 0.0, right: 12.0, bottom: 6.0, left: 12.0 }));
-    }
-    for node in &nodes {
-        col = node_lines(state, node, String::new(), None, col, phase);
-    }
+    col = super::groups::section(state, col, phase);
+    col = projects_section(state, col);
     // Every topic, to jump to.
     let search = ide.chat_search.trim().to_lowercase();
-    let shown: Vec<&ConversationSummary> =
-        list.conversations.iter().filter(|c| search.is_empty() || c.title.to_lowercase().contains(&search)).collect();
-    col = col.push(container(strong(format!("Topics ({})", list.conversations.len()), 12.5, theme::TEXT)).padding(Padding { top: 14.0, right: 10.0, bottom: 4.0, left: 12.0 }));
+    // In an open group, its topics only.
+    let group = ide.groups.shown();
+    let in_group = |c: &ConversationSummary| group.is_none_or(|g| g.topics.contains(&c.id));
+    let shown: Vec<&ConversationSummary> = list
+        .conversations
+        .iter()
+        .filter(|c| in_group(c) && (search.is_empty() || c.title.to_lowercase().contains(&search)))
+        .collect();
+    let heading = match group {
+        Some(g) => format!("Topics in {} \u{00B7} {}", ui::cut(ide.groups.name(&g.id).unwrap_or(""), 28), g.topics.len()),
+        None => format!("Topics \u{00B7} {}", list.conversations.len()),
+    };
+    // Under a head that folds them away.
+    let folded = ide.side_folds.contains("topics");
+    col = col.push(super::groups::section_head(&heading, "topics", folded, None));
+    if folded {
+        return scrollable(col).height(Length::Fill).style(theme::scrollbars).into();
+    }
     col = col.push(
         container(text_input("Find a topic", &ide.chat_search).on_input(|t| go(IdeMsg::ChatSearch(t))).padding([5.0, 8.0]).size(12.5).style(ui::input_style))
             .padding(Padding { top: 0.0, right: 10.0, bottom: 4.0, left: 10.0 }),
@@ -150,6 +158,73 @@ pub fn view<'a>(state: &'a State, phase: f32) -> El<'a> {
         col = col.push(container(note(format!("{} archived (never deleted)", list.archived.len()))).padding(12));
     }
     scrollable(col).height(Length::Fill).style(theme::scrollbars).into()
+}
+
+/// A project's topics as the store lists them (newest first): the chats the project names.
+pub(super) fn project_topics<'a>(rows: &'a [ConversationSummary], project: &lattice_core::projects::Project) -> Vec<&'a ConversationSummary> {
+    rows.iter().filter(|r| project.chats.iter().any(|chat| *chat == r.id)).collect()
+}
+
+/// The projects, under a head that folds them away (with New project at its end): each with how many topics it holds,
+/// the one worked in marked gold. A press works in it, as the composer's project chip does; its arrow shows its topics
+/// under it, to open one, without moving the chat.
+fn projects_section<'a>(state: &'a State, mut col: Column<'a, Msg>) -> Column<'a, Msg> {
+    let Some(projects) = state.ide.projects.list.as_deref() else { return col };
+    let shown: Vec<&lattice_core::projects::Project> = projects.iter().filter(|p| !p.archived).collect();
+    let folded = state.ide.side_folds.contains("projects");
+    let new = super::groups::small("New project", Some(go(IdeMsg::Projects(super::projects::ProjectsMsg::Create))));
+    col = col.push(super::groups::section_head(&format!("Projects \u{00B7} {}", shown.len()), "projects", folded, Some(new)));
+    if folded {
+        return col;
+    }
+    let rows: &[ConversationSummary] = state.list.as_ref().map(|l| l.conversations.as_slice()).unwrap_or_default();
+    for project in shown.iter().copied() {
+        let key = format!("project:{}", project.id);
+        let open = state.ide.side_folds.contains(&key);
+        let picked = state.ide.project.as_deref() == Some(project.id.as_str());
+        let members = project_topics(rows, project);
+        let arrow = button(label(if open { "\u{25BE}" } else { "\u{25B8}" }, 11.0, theme::TEXT_FAINT))
+            .padding([0.0, 2.0])
+            .style(theme::ghost_button)
+            .on_press(go(IdeMsg::SideFold(key)));
+        let n = members.len();
+        let line = Row::new()
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .push(arrow)
+            .push(container(space().width(7).height(7)).style(theme::dot(if picked { theme::GOLD } else { theme::LINE })))
+            .push(
+                container(label(project.name.as_str(), 12.5, if picked { theme::GOLD } else { theme::TEXT }).wrapping(iced::widget::text::Wrapping::None))
+                    .width(Length::Fill)
+                    .clip(true),
+            )
+            .push(label(format!("{n} topic{}", if n == 1 { "" } else { "s" }), 10.5, theme::TEXT_FAINT));
+        col = col.push(
+            button(line).width(Length::Fill).padding([4.0, 10.0]).style(theme::list_row(picked)).on_press(Msg::WorkIn(Some(project.id.clone()))),
+        );
+        if open {
+            col = super::groups::topic_rows(state, &members, col, false);
+        }
+    }
+    if shown.is_empty() {
+        col = col.push(container(note("No projects yet. New project makes one; the composer's project chip picks it.")).padding(Padding { top: 2.0, right: 10.0, bottom: 4.0, left: 12.0 }));
+    }
+    col
+}
+
+/// What is working now, as a chart: each topic that works or waits for the reader, the tasks started from it beneath
+/// it, and the topic shown.
+pub fn working<'a>(state: &'a State, mut col: Column<'a, Msg>, phase: f32) -> Column<'a, Msg> {
+    let Some(list) = &state.list else { return col };
+    let current = state.conversation().map(|c| c.id());
+    let nodes = chart(&list.conversations, &state.task_origins, current, &state.calling);
+    if !nodes.iter().any(|n| busy(state, n)) {
+        col = col.push(note("Nothing is working now. A task you start from a chip runs beside the chat."));
+    }
+    for node in &nodes {
+        col = node_lines(state, node, String::new(), None, col, phase);
+    }
+    col
 }
 
 fn needs(state: &State, row: &ConversationSummary) -> bool {
@@ -307,5 +382,25 @@ mod tests {
         let rows = vec![row("a", 9.0, true, false), row("t1", 8.0, false, false)];
         let nodes = chart(&rows, &looped, None, &HashSet::new());
         assert_eq!(ids(&nodes), vec!["a[]", "t1[]"], "a loop is drawn as topics side by side, never left out");
+    }
+    #[test]
+    fn a_projects_topics_are_the_chats_it_names_in_the_lists_order() {
+        let rows = vec![row("a", 9.0, false, false), row("b", 8.0, false, false), row("c", 7.0, false, false)];
+        let project = lattice_core::projects::Project {
+            id: "p".into(),
+            name: "App".into(),
+            instructions: String::new(),
+            folder: None,
+            more_folders: vec![],
+            files: vec![],
+            choice: None,
+            chats: vec!["c".into(), "a".into(), "gone".into()],
+            created: 0.0,
+            updated: 0.0,
+            archived: false,
+            allow_all: false,
+        };
+        let ids: Vec<&str> = project_topics(&rows, &project).iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, ["a", "c"], "newest first, as the list has them; a chat no longer listed is left out");
     }
 }

@@ -19,7 +19,7 @@
 
 use std::sync::OnceLock;
 
-use iced::widget::{button, container, pick_list, scrollable, text_editor, text_input};
+use iced::widget::{button, container, pick_list, scrollable, text_editor, text_input, toggler};
 use iced::{Background, Border, Color, Font, Gradient, Radians, Shadow, Theme, Vector, border, font, gradient, overlay};
 
 pub use lattice_app::theme::*;
@@ -208,6 +208,92 @@ pub fn rail_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button:
     }
 }
 
+// ----------------------------------------------------------------- the chat
+
+/// How round a pill's ends are: half the height of a line of chips.
+pub const PILL: f32 = 16.0;
+
+/// A chip that is a button (the composer's mode and pickers, the tray's lists): round-ended and warm-dark behind a
+/// faint gold edge that brightens under the pointer; the chosen one washed gold, its words gold.
+pub fn pill_button(selected: bool) -> impl Fn(&Theme, button::Status) -> button::Style {
+    move |_, status| {
+        let hovered = matches!(status, button::Status::Hovered | button::Status::Pressed);
+        let (bg, text, edge) = if selected {
+            (mix(SURFACE, GOLD, 0.08), GOLD, Color { a: 0.45, ..GOLD })
+        } else if status == button::Status::Disabled {
+            (WARM_RAISED, TEXT_FAINT, Color { a: 0.12, ..GOLD })
+        } else if hovered {
+            (WARM_HOVER, TEXT, Color { a: 0.50, ..GOLD })
+        } else {
+            (WARM_RAISED, TEXT_DIM, Color { a: 0.22, ..GOLD })
+        };
+        button::Style { background: Some(Background::Color(bg)), text_color: text, border: outlined(PILL, edge), ..button::Style::default() }
+    }
+}
+
+/// The reader's message: a warm raised bubble on the right, its corner nearest the composer tucked in.
+pub fn bubble(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(WARM_RAISED)),
+        text_color: Some(TEXT),
+        border: Border { color: Color { a: 0.16, ..GOLD }, width: 1.0, radius: border::radius(18).bottom_right(6) },
+        ..container::Style::default()
+    }
+}
+
+/// The composer: a round-ended field lifted off the page on a shadow, edged in gold.
+pub fn composer(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(SURFACE)),
+        text_color: Some(TEXT),
+        border: Border { color: Color { a: 0.26, ..GOLD }, width: 1.0, radius: 24.0.into() },
+        shadow: Shadow { color: Color::from_rgba(0.0, 0.0, 0.0, 0.55), offset: Vector::new(0.0, 12.0), blur_radius: 36.0 },
+        ..container::Style::default()
+    }
+}
+
+/// What the agent did in a turn, folded to one line or opened to its steps: the rail's dark behind a faint gold edge.
+pub fn work_card(_: &Theme) -> container::Style {
+    container::Style {
+        background: Some(Background::Color(SIDEBAR)),
+        text_color: Some(TEXT),
+        border: Border { color: Color { a: 0.14, ..GOLD }, width: 1.0, radius: 14.0.into() },
+        ..container::Style::default()
+    }
+}
+
+/// The agent's mark beside its answers: a square of gold wash, round-cornered.
+pub fn avatar(_: &Theme) -> container::Style {
+    container::Style { background: Some(Background::Color(mix(CANVAS, GOLD, 0.12))), border: border::rounded(8.0), ..container::Style::default() }
+}
+
+/// A switch: on, a gold track (brighter under the pointer) with a black knob; off, a warm-dark track with a faint knob
+/// inside a faint gold edge. Disabled, it keeps its place dimly.
+pub fn switch(_: &Theme, status: toggler::Status) -> toggler::Style {
+    use toggler::Status;
+    let (on, hovered, disabled) = match status {
+        Status::Active { is_toggled } => (is_toggled, false, false),
+        Status::Hovered { is_toggled } => (is_toggled, true, false),
+        Status::Disabled { is_toggled } => (is_toggled, false, true),
+    };
+    let (track, knob, edge) = match (on, disabled) {
+        (true, false) => (if hovered { GOLD_STRONG } else { GOLD }, ON_GOLD, GOLD_RIM),
+        (false, false) => (if hovered { WARM_HOVER } else { WARM_RAISED }, TEXT_FAINT, Color { a: 0.30, ..GOLD }),
+        (_, true) => (WARM_RAISED, if on { GOLD_DIM } else { HOVER }, Color { a: 0.12, ..GOLD }),
+    };
+    toggler::Style {
+        background: Background::Color(track),
+        background_border_width: 1.0,
+        background_border_color: edge,
+        foreground: Background::Color(knob),
+        foreground_border_width: 0.0,
+        foreground_border_color: Color::TRANSPARENT,
+        text_color: Some(TEXT),
+        border_radius: None,
+        padding_ratio: 0.12,
+    }
+}
+
 /// Where the keyboard is when it is not in a box (the rail, after F6): a gold ring, as a focused box's edge.
 pub fn focus_ring(_: &Theme) -> container::Style {
     container::Style { border: Border { color: GOLD, width: 2.0, radius: 11.0.into() }, ..container::Style::default() }
@@ -267,6 +353,19 @@ pub fn picker(_: &Theme, status: pick_list::Status) -> pick_list::Style {
         handle_color: if hovered { GOLD } else { TEXT_DIM },
         background: Background::Color(CANVAS),
         border: outlined(8.0, field_edge(false, hovered)),
+    }
+}
+
+/// A picker set as a pill among the composer's chips: warm-dark and round-ended, its edge brightening under the
+/// pointer, as [`pill_button`] is.
+pub fn pill_picker(_: &Theme, status: pick_list::Status) -> pick_list::Style {
+    let hovered = matches!(status, pick_list::Status::Hovered | pick_list::Status::Opened { .. });
+    pick_list::Style {
+        text_color: TEXT,
+        placeholder_color: TEXT_FAINT,
+        handle_color: if hovered { GOLD } else { TEXT_FAINT },
+        background: Background::Color(if hovered { WARM_HOVER } else { WARM_RAISED }),
+        border: outlined(PILL, Color { a: if hovered { 0.50 } else { 0.22 }, ..GOLD }),
     }
 }
 
@@ -392,7 +491,15 @@ mod tests {
     #[test]
     fn every_colour_of_words_holds_45_to_1_on_every_surface() {
         let theme = Theme::Dark;
-        let surfaces = [("panel", panel(&theme)), ("well", well(&theme)), ("card", card(&theme))];
+        let surfaces = [
+            ("panel", panel(&theme)),
+            ("well", well(&theme)),
+            ("card", card(&theme)),
+            ("bubble", bubble(&theme)),
+            ("composer", composer(&theme)),
+            ("work card", work_card(&theme)),
+            ("avatar", avatar(&theme)),
+        ];
         let mut failures = Vec::new();
         for (surface, style) in surfaces {
             for fill in fills(style.background) {
@@ -434,6 +541,8 @@ mod tests {
             for selected in [false, true] {
                 // a tab's words are its own colour; a list row holds dim and faint words and chips
                 check(format!("segment {selected} {s:?}"), segment_button(selected)(&theme, s), &UNDER, &[]);
+                // a pill holds its own words, and a chip's count in gold or faint beside them
+                check(format!("pill {selected} {s:?}"), pill_button(selected)(&theme, s), &UNDER, &[GOLD, TEXT_FAINT]);
                 check(format!("row {selected} {s:?}"), list_row(selected)(&theme, s), &UNDER, &[TEXT_DIM, TEXT_FAINT, GOLD, POSITIVE]);
                 // a rail button's small words are faint, and gold once it is chosen (`view::rail`)
                 let rail_words: &[Color] = if selected { &[GOLD] } else { &[TEXT_DIM, TEXT_FAINT] };
@@ -441,6 +550,21 @@ mod tests {
             }
         }
         assert!(failures.is_empty(), "{failures:?}");
+    }
+
+    #[test]
+    fn a_switchs_knob_stands_out_from_its_track_whether_on_or_off() {
+        // a control's parts need 3:1 between them to be told apart (WCAG 1.4.11), disabled ones excepted
+        let theme = Theme::Dark;
+        for is_toggled in [false, true] {
+            for status in [toggler::Status::Active { is_toggled }, toggler::Status::Hovered { is_toggled }] {
+                let style = switch(&theme, status);
+                let (Background::Color(track), Background::Color(knob)) = (style.background, style.foreground) else {
+                    panic!("flat colours")
+                };
+                assert!(contrast(knob, track) >= 3.0, "{status:?}: {:.2}", contrast(knob, track));
+            }
+        }
     }
 
     #[test]
@@ -469,6 +593,12 @@ mod tests {
             let Background::Color(field) = input(&theme, status).background else { panic!("a flat field") };
             for (name, words) in [("value", TEXT), ("placeholder", TEXT_FAINT)] {
                 assert!(contrast(words, field) >= 4.5, "{name} in {status:?}");
+            }
+        }
+        for status in [pick_list::Status::Active, pick_list::Status::Hovered, pick_list::Status::Opened { is_hovered: true }] {
+            let Background::Color(pill) = pill_picker(&theme, status).background else { panic!("a flat pill") };
+            for (name, words) in [("value", TEXT), ("placeholder", TEXT_FAINT)] {
+                assert!(contrast(words, pill) >= 4.5, "{name} in the pill picker, {status:?}");
             }
         }
         let Background::Color(menu) = picker_menu(&theme).background else { panic!("a flat menu") };

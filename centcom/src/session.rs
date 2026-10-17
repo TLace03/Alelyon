@@ -44,6 +44,10 @@ pub struct LatticePlace {
     pub side_width: Option<f32>,
     pub agent_width: Option<f32>,
     pub panel_height: Option<f32>,
+    /// Whether the editor beside the chat was on show, its width, and whether the editor followed the agents.
+    pub editor_open: Option<bool>,
+    pub editor_width: Option<f32>,
+    pub follow: Option<bool>,
     /// The chat that was open (its id), the model chosen and the mode (`ask` or `agent`).
     pub chat: Option<String>,
     pub model: Option<String>,
@@ -91,6 +95,9 @@ impl Session {
                 side_width: number(l, "side_width"),
                 agent_width: number(l, "agent_width"),
                 panel_height: number(l, "panel_height"),
+                editor_open: l.get("editor_open").and_then(Value::as_bool),
+                editor_width: number(l, "editor_width"),
+                follow: l.get("follow").and_then(Value::as_bool),
                 chat: text(l, "chat"),
                 model: text(l, "model"),
                 mode: text(l, "mode"),
@@ -127,6 +134,9 @@ impl Session {
         put(&mut lattice, "side_width", json!(l.side_width.map(f32::round)));
         put(&mut lattice, "agent_width", json!(l.agent_width.map(f32::round)));
         put(&mut lattice, "panel_height", json!(l.panel_height.map(f32::round)));
+        put(&mut lattice, "editor_open", json!(l.editor_open));
+        put(&mut lattice, "editor_width", json!(l.editor_width.map(f32::round)));
+        put(&mut lattice, "follow", json!(l.follow));
         put(&mut lattice, "chat", json!(l.chat));
         put(&mut lattice, "model", json!(l.model));
         put(&mut lattice, "mode", json!(l.mode));
@@ -174,6 +184,9 @@ mod tests {
                 side_width: Some(300.0),
                 agent_width: Some(420.0),
                 panel_height: Some(250.0),
+                editor_open: Some(true),
+                editor_width: Some(700.0),
+                follow: Some(false),
                 chat: Some("c-1".into()),
                 model: Some("hosted:claude".into()),
                 mode: Some("agent".into()),

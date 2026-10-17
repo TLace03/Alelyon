@@ -188,6 +188,9 @@ pub struct State {
     pub error: Option<String>,
     pub loading: bool,
     asked: u64,
+    /// The parts of the page that are open (`ui::disclosure`): the key's settings, the agents' setup, a subject's
+    /// details. Closed unless the person opened one; kept while the window is open.
+    pub open: std::collections::BTreeSet<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +274,8 @@ pub enum Msg {
     DismissRequest(i64),
     ForgetKept(alelyon_research::knowledge::Kind, i64),
     KeptActed(Result<(), String>),
+    /// A part of the page opened or closed (`ui::disclosure`).
+    Disclose(&'static str),
 }
 
 /// The server's name in an MCP client's settings.
@@ -388,6 +393,7 @@ impl State {
             error: None,
             loading: false,
             asked: 0,
+            open: std::collections::BTreeSet::new(),
         }
     }
 
@@ -640,6 +646,11 @@ impl State {
                 Err(why) => self.error = Some(why),
             },
             Msg::ReplaceKey => self.replacing = !self.replacing,
+            Msg::Disclose(part) => {
+                if !self.open.remove(part) {
+                    self.open.insert(part);
+                }
+            }
             Msg::ForgetKey => {
                 return Task::perform(off_thread(|| lattice_core::keys::vault_remove(KEY_NAME)), |r| {
                     Msg::KeyForgotten(r.unwrap_or_else(|| Err("the thread ended without an answer".into())))

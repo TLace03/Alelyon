@@ -110,12 +110,17 @@ pub fn hub(state: &State, phase: f32) -> El<'_> {
         Some(Ok(h)) => h,
     };
     let empty = matches!(&state.topics, Some(Ok(t)) if t.is_empty());
-    page = page.push(column![
-        strong("Your research hub", 20.0, theme::TEXT),
-        note("What to work on next, from your subjects' gaps and from what you search, open and save here. It is worked out on this PC from \
-              the archive; nothing about you is sent anywhere."),
-    ]
-    .spacing(4));
+    page = page.push(
+        row![
+            strong("Your research hub", 20.0, theme::TEXT),
+            ui::help(
+                "What to work on next, from your subjects' gaps and from what you search, open and save here. It is worked out on \
+                 this PC from the archive; nothing about you is sent anywhere."
+            ),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center),
+    );
     if empty {
         return page
             .push(card(
@@ -145,9 +150,15 @@ pub fn hub(state: &State, phase: f32) -> El<'_> {
     for i in &hub.ideas {
         ideas = ideas.push(gap_row(state, &i.gap, &i.because, true));
     }
-    page = page.push(card("Ideas to pursue", ideas.push(note("Each idea is a lead raised by counts in your archive, not a finding: check it before relying on it."))));
+    page = page.push(titled(
+        "Ideas to pursue",
+        "Each idea is a lead raised by counts in your archive, not a finding: check it before relying on it.",
+        ideas,
+    ));
+    // The rest side by side, two to a row, rather than one long stack under the ideas (UX-PRINCIPLES B1).
+    let mut cards: Vec<El<'_>> = Vec::new();
     if let Some(kept) = super::kept::card_of(state) {
-        page = page.push(kept);
+        cards.push(kept);
     }
 
     if !hub.new_work.is_empty() || !hub.newly_found.is_empty() {
@@ -161,13 +172,13 @@ pub fn hub(state: &State, phase: f32) -> El<'_> {
                 hub.newly_found.len()
             )));
         }
-        page = page.push(card("New from your watched subjects", col));
+        cards.push(card("New from your watched subjects", col));
     }
     if let Some(c) = reading(state, "Read next", &hub.read_next) {
-        page = page.push(c);
+        cards.push(c);
     }
     if let Some(c) = reading(state, "New at the frontier", &hub.frontier) {
-        page = page.push(c);
+        cards.push(c);
     }
     if !hub.proposals.is_empty() {
         let mut col = Column::new().spacing(8);
@@ -181,16 +192,30 @@ pub fn hub(state: &State, phase: f32) -> El<'_> {
                 .align_y(Alignment::Center),
             );
         }
-        page = page.push(card("Subjects to start", col));
+        cards.push(card("Subjects to start", col));
     }
     if !hub.saved.is_empty() {
         let mut col = Column::new().spacing(4);
         for p in &hub.saved {
             col = col.push(paper_line(p, "", true));
         }
-        page = page.push(card("Saved", col));
+        cards.push(card("Saved", col));
+    }
+    if !cards.is_empty() {
+        page = page.push(ui::grid(cards, 2, 14.0));
     }
     page.into()
+}
+
+/// A card whose title has a "?" beside it: what the card's contents are worth, read once (UX-PRINCIPLES B2).
+fn titled<'a>(title: &'a str, help: &'a str, body: Column<'a, Msg>) -> El<'a> {
+    iced::widget::container(
+        column![row![ui::subheading(title), ui::help(help)].spacing(8).align_y(Alignment::Center), body.spacing(8)].spacing(10),
+    )
+    .padding(16)
+    .width(Length::Fill)
+    .style(theme::panel)
+    .into()
 }
 
 fn reading<'a>(state: &'a State, title: &'static str, list: &'a [alelyon_research::hub::Reading]) -> Option<El<'a>> {
@@ -204,6 +229,7 @@ fn reading<'a>(state: &'a State, title: &'static str, list: &'a [alelyon_researc
     Some(card(title, col))
 }
 
+/// A subject's gaps, grouped by kind; the tab above names the view, so no card stands around them.
 pub fn gaps(state: &State, phase: f32) -> El<'_> {
     let mut body = Column::new().spacing(14);
     match &state.gaps {
@@ -211,9 +237,22 @@ pub fn gaps(state: &State, phase: f32) -> El<'_> {
         Some(Err(why)) => body = body.push(ui::notice(why.as_str(), theme::CAUTION)),
         Some(Ok(list)) => {
             let shown: Vec<&StoredGap> = list.iter().filter(|g| !g.dismissed).collect();
-            if shown.is_empty() {
-                body = body.push(label("No gaps found: the subject may be small (under ten papers) or tightly connected.", 12.5, theme::TEXT_DIM));
-            }
+            body = body.push(
+                row![
+                    note(if shown.is_empty() {
+                        "No gaps found: the subject may be small (under ten papers) or tightly connected.".to_string()
+                    } else {
+                        format!("{} gap{} worth a look", shown.len(), if shown.len() == 1 { "" } else { "s" })
+                    }),
+                    ui::help(
+                        "Found from this subject's map and its papers' text, with no request to any index. Each is a lead raised by \
+                         counts, not a finding: two threads may rarely cite each other because they are unrelated, and an untried \
+                         combination may be untried because it fails."
+                    ),
+                ]
+                .spacing(8)
+                .align_y(Alignment::Center),
+            );
             let mut kind = None;
             for g in shown {
                 if kind != Some(g.kind) {
@@ -222,12 +261,7 @@ pub fn gaps(state: &State, phase: f32) -> El<'_> {
                 }
                 body = body.push(gap_row(state, g, &[], false));
             }
-            body = body.push(note(
-                "Found from this subject's map and its papers' text, with no request to any index. Each is a lead raised by counts, not a \
-                 finding: two threads may rarely cite each other because they are unrelated, and an untried combination may be untried \
-                 because it fails.",
-            ));
         }
     }
-    card("Gaps", body)
+    body.into()
 }

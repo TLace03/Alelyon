@@ -1,6 +1,6 @@
-//! What the IDE draws: the activity bar, the side bar (Explorer, Chats, Changes), the editor and its tabs, the bottom
-//! panel, the agent on the right ([`super::agent`]), the status bar, and the quick-open box and confirmations over
-//! them. It reads only what `update` built.
+//! What the IDE draws: the activity bar, the side bar (Explorer, Chats, Changes), the chat in the middle
+//! ([`super::agent`]), the editor beside it with its tabs and the bottom panel under it, the status bar, and the
+//! quick-open box and confirmations over them. It reads only what `update` built.
 
 use iced::widget::{
     Column, Row, button, center, column, container, mouse_area, opaque, responsive, rich_text, row, scrollable, space,
@@ -14,7 +14,7 @@ use lattice_protocol::conversation::{ChangeKind, ChangeState, DiffLineKind, Hunk
 use super::highlight::{self, Lang};
 use super::{
     Body, Confirm, EditorTab, PanelTab, Side, Splitter, TabKind, CODE_PAD, CODE_SIZE, LINE_HEIGHT,
-    PAGE_LINES, file_name, tree,
+    PAGE_LINES, file_icons, file_name, tree,
 };
 use crate::lattice::ide::IdeMsg;
 use crate::lattice::{Msg, State};
@@ -22,10 +22,11 @@ use crate::ui::{self, label, mono, note, strong};
 
 type El<'a> = Element<'a, Msg>;
 
-/// The activity bar's width, the splitters' grip, and the narrowest the editor may get before the side bar folds away.
+/// The activity bar's width, the splitters' grip, and the narrowest the page (the chat, or the board or the tasks in
+/// its place) may get before the right column and then the side bar give way.
 const ACTIVITY: f32 = 46.0;
 const GRIP: f32 = 5.0;
-const MIN_EDITOR: f32 = 300.0;
+const MIN_MAIN: f32 = 360.0;
 const STATUS_HEIGHT: f32 = 26.0;
 
 fn go(msg: IdeMsg) -> Msg {
@@ -106,26 +107,12 @@ fn canvas(_: &iced::Theme) -> container::Style {
     solid(theme::CANVAS)
 }
 
-/// The colour a file's dot takes, by its language: enough to tell kinds apart at a glance.
-pub fn lang_color(lang: Lang) -> Color {
-    match lang {
-        Lang::Rust => Color::from_rgb8(0xde, 0xa5, 0x84),
-        Lang::Python => Color::from_rgb8(0x8f, 0xb4, 0xe0),
-        Lang::Js => Color::from_rgb8(0xe8, 0xd4, 0x6a),
-        Lang::C | Lang::CSharp | Lang::Go | Lang::Java => Color::from_rgb8(0x9f, 0xb4, 0xd9),
-        Lang::Shader => Color::from_rgb8(0xc9, 0xa8, 0xdc),
-        Lang::Json | Lang::Toml | Lang::Yaml | Lang::Ini => Color::from_rgb8(0xd9, 0xa0, 0x7a),
-        Lang::Markdown => theme::TEXT,
-        Lang::Shell | Lang::PowerShell | Lang::Batch => theme::POSITIVE,
-        Lang::Sql => Color::from_rgb8(0xe3, 0xa6, 0xa6),
-        Lang::Html | Lang::Css => Color::from_rgb8(0xe3, 0xa6, 0xa6),
-        Lang::Plain => theme::TEXT_FAINT,
-    }
-}
+/// How large a file-type icon is drawn beside a name.
+const FILE_ICON: f32 = 14.0;
 
-pub(super) fn file_dot<'a>(path: &str) -> El<'a> {
-    let color = lang_color(Lang::of(path));
-    container(space().width(7).height(7)).style(theme::dot(color)).into()
+/// A file's type, beside its name: its language's icon ([`file_icons`]).
+pub(super) fn file_icon<'a>(path: &str) -> El<'a> {
+    file_icons::icon(file_icons::index_for(path), FILE_ICON)
 }
 
 // ------------------------------------------------------------------------------------------------- the frame
@@ -150,13 +137,19 @@ pub fn view<'a>(state: &'a State, phase: f32) -> El<'a> {
     if layers.len() == 1 { layers.pop().expect("one layer") } else { stack(layers).into() }
 }
 
+/// Chat first: the chat is the page, and the editor a panel on its right that Ctrl+E, opening a file, or following
+/// the agents' work shows. With the board on show it takes the page and the chat sits on its right; with the tasks
+/// grid, the right column holds the chat or the editor ([`beside_grid`]).
 fn frame<'a>(state: &'a State, phase: f32, width: f32) -> El<'a> {
     let ide = &state.ide;
     let dragging = ide.drag.map(|(w, _)| w);
-    // The agent panel keeps its width; the side bar folds away when the editor would get too narrow.
-    let agent_w = ide.agent_width.min((width - ACTIVITY - MIN_EDITOR).max(super::AGENT_RANGE.0));
-    let side_fits = width - ACTIVITY - agent_w - ide.side_width - 3.0 * GRIP >= MIN_EDITOR;
-    let side_open = ide.side_open && side_fits;
+    let tasks = ide.tasks_shown();
+    let right_open = tasks || ide.editor_open;
+    // The right column keeps its width while the page keeps its least; the side bar folds away first.
+    let (wanted, least) = if tasks { (ide.agent_width, super::AGENT_RANGE.0) } else { (ide.editor_width, super::EDITOR_RANGE.0) };
+    let right_w = wanted.min((width - ACTIVITY - MIN_MAIN - GRIP).max(least));
+    let taken = ACTIVITY + if right_open { right_w + GRIP } else { 0.0 };
+    let side_open = ide.side_open && width - taken - ide.side_width - GRIP >= MIN_MAIN;
     let mut line = Row::new().height(Length::Fill).push(activity_bar(state));
     if side_open {
         line = line.push(container(side_bar(state, phase)).width(ide.side_width).height(Length::Fill).style(bar_style));
@@ -164,12 +157,112 @@ fn frame<'a>(state: &'a State, phase: f32, width: f32) -> El<'a> {
     } else {
         line = line.push(vrule());
     }
-    line = line.push(center_column(state, phase));
-    line = line.push(grip(Splitter::Agent, dragging == Some(Splitter::Agent)));
-    // With the grid on show, the right column holds what the reader picked: the editor and its tabs, or the chat.
-    let right: El<'a> = if ide.grid.shown { beside_grid(state, phase) } else { super::agent::panel(state, phase) };
-    line = line.push(container(right).width(agent_w).height(Length::Fill).style(|_| solid(theme::SURFACE)));
+    line = line.push(main_column(state, phase));
+    if right_open {
+        line = line.push(grip(Splitter::Right, dragging == Some(Splitter::Right)));
+        let right: El<'a> = if ide.grid.shown {
+            beside_grid(state, phase)
+        } else if tasks {
+            // beside the board, the chat
+            super::agent::panel(state, phase)
+        } else {
+            editor_panel(state, phase)
+        };
+        line = line.push(container(right).width(right_w).height(Length::Fill).style(|_| solid(theme::SURFACE)));
+    }
     line.into()
+}
+
+/// The page: the chat in a reading column at most [`super::CHAT_MAX`] wide on the page's black (the composer and the
+/// tray's lists stand off it), or the board or the tasks grid in its place with the bottom panel under them (beside
+/// the chat, the bottom panel lies under the editor).
+fn main_column<'a>(state: &'a State, phase: f32) -> El<'a> {
+    let ide = &state.ide;
+    if !ide.tasks_shown() {
+        let chat = container(super::agent::panel(state, phase)).max_width(super::CHAT_MAX).height(Length::Fill);
+        return container(chat).center_x(Length::Fill).height(Length::Fill).style(|_| solid(theme::CANVAS)).into();
+    }
+    let page: El<'a> = if ide.groups.board_shown { super::board::view(state, phase) } else { super::grid::view(state, phase) };
+    let mut col = Column::new().width(Length::Fill).height(Length::Fill);
+    col = col.push(container(page).height(Length::Fill).width(Length::Fill).style(canvas));
+    if ide.panel_open {
+        col = col.push(grip(Splitter::Panel, ide.drag.map(|(w, _)| w) == Some(Splitter::Panel)));
+        col = col.push(container(bottom_panel(state, phase)).height(ide.panel_height).width(Length::Fill).style(bar_style));
+    }
+    col.into()
+}
+
+/// The editor beside the chat: what the agents work on, the tabs, the editor and, under it, the bottom panel.
+fn editor_panel<'a>(state: &'a State, phase: f32) -> El<'a> {
+    let ide = &state.ide;
+    let mut col = Column::new().width(Length::Fill).height(Length::Fill);
+    col = col.push(editor_head(state));
+    col = col.push(tabs_bar(state));
+    col = col.push(container(editor_area(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
+    if ide.panel_open {
+        col = col.push(grip(Splitter::Panel, ide.drag.map(|(w, _)| w) == Some(Splitter::Panel)));
+        col = col.push(container(bottom_panel(state, phase)).height(ide.panel_height).width(Length::Fill).style(bar_style));
+    }
+    col.into()
+}
+
+/// An agent is at work in the chat or task `key`: the open chat's turn, or a task's in the grid.
+fn agent_working(state: &State, key: &str) -> bool {
+    state.open.as_ref().is_some_and(|c| c.id() == key && c.running)
+        || state.ide.grid.tiles.iter().any(|t| t.id == key && t.conversation.as_ref().is_some_and(|c| c.running))
+}
+
+/// The editor panel's head: the numbered editors (the reader's own, then one per agent that worked on files, each with
+/// a dot while it works; Alt+1 to Alt+9), following the agents, and hiding the panel.
+fn editor_head<'a>(state: &'a State) -> El<'a> {
+    let ide = &state.ide;
+    let mut line = Row::new().spacing(6).align_y(Alignment::Center).padding([0.0, 8.0]);
+    let mut editors = Row::new().spacing(2).align_y(Alignment::Center);
+    for (n, slot) in ide.editors.iter().enumerate() {
+        let on = slot.key == ide.shown;
+        let working = slot.key != super::YOURS && agent_working(state, &slot.key);
+        let mut inner = Row::new().spacing(5).align_y(Alignment::Center);
+        inner = inner.push(mono(format!("{}", n + 1), 11.0, if on { theme::GOLD } else { theme::TEXT_FAINT }));
+        inner = inner.push(label(ui::cut(&slot.who, 24), 12.0, if on { theme::TEXT } else { theme::TEXT_DIM }));
+        if working {
+            inner = inner.push(container(space().width(6).height(6)).style(theme::dot(theme::GOLD)));
+        }
+        let tip = match (n < 9, working) {
+            (true, true) => format!("Editor {}: {}, working (Alt+{})", n + 1, slot.who, n + 1),
+            (true, false) => format!("Editor {}: {} (Alt+{})", n + 1, slot.who, n + 1),
+            (false, true) => format!("Editor {}: {}, working", n + 1, slot.who),
+            (false, false) => format!("Editor {}: {}", n + 1, slot.who),
+        };
+        editors = editors.push(tooltip(
+            button(inner).padding([3.0, 8.0]).style(theme::segment_button(on)).on_press(go(IdeMsg::ShowEditor(slot.key.clone()))),
+            container(label(tip, 11.5, theme::TEXT)).padding([4.0, 8.0]).style(theme::card),
+            tooltip::Position::Bottom,
+        ));
+        // the agent's editor on show can be closed (the reader's own stays)
+        if on && slot.key != super::YOURS {
+            editors = editors.push(icon("\u{00D7}", "Close this agent's editor", Some(go(IdeMsg::CloseEditor(slot.key.clone())))));
+        }
+    }
+    let strip = scrollable(editors)
+        .direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(3).scroller_width(3)))
+        .style(theme::scrollbars);
+    line = line.push(container(strip).width(Length::Fill));
+    // Follow the agents: the editor opens beside the chat on the files they work on, a change as its diff.
+    let follow_tip = if ide.follow {
+        "Following the agents: the editor opens on the files they work on (stop following)"
+    } else {
+        "Follow the agents: open the editor on the files they work on"
+    };
+    line = line.push(tooltip(
+        button(label(if ide.follow { "\u{25C9} Following" } else { "\u{25CB} Follow" }, 11.5, if ide.follow { theme::GOLD } else { theme::TEXT_DIM }))
+            .padding([3.0, 8.0])
+            .style(theme::segment_button(ide.follow))
+            .on_press(go(IdeMsg::Follow(!ide.follow))),
+        container(label(follow_tip, 11.5, theme::TEXT)).padding([4.0, 8.0]).style(theme::card),
+        tooltip::Position::Bottom,
+    ));
+    line = line.push(icon("\u{00D7}", "Hide the editor (Ctrl+E)", Some(go(IdeMsg::ToggleEditor))));
+    column![container(line).height(32).width(Length::Fill).center_y(32).style(bar_style), rule()].into()
 }
 
 /// The right column beside the grid: a bar to pick what it holds (and to leave the grid), then that.
@@ -187,7 +280,7 @@ fn beside_grid<'a>(state: &'a State, phase: f32) -> El<'a> {
         );
     }
     line = line.push(space().width(Length::Fill));
-    line = line.push(icon("\u{25A6}", "Back to the editor", Some(grid_go(GridMsg::Show(false)))));
+    line = line.push(icon("\u{25A6}", "Back to the chat", Some(grid_go(GridMsg::Show(false)))));
     let bar = column![container(line).height(36).width(Length::Fill).center_y(36).style(bar_style), rule()];
     let body: El<'a> = match beside {
         Beside::Chat => super::agent::panel(state, phase),
@@ -207,8 +300,10 @@ fn activity_bar<'a>(state: &'a State) -> El<'a> {
     for side in Side::ALL {
         let on = ide.side_open && ide.side == side;
         let mut glyph = Row::new().align_y(Alignment::Center).push(label(side.glyph(), 18.0, if on { theme::GOLD } else { theme::TEXT_DIM }));
-        // A mark on Changes when the agent's changes wait, and on Chats when a chat waits for the reader.
+        // A mark on Changes when the agent's changes wait, on Chats when a chat waits for the reader, and on Work when
+        // one of its lists does.
         let waiting = match side {
+            Side::Work => super::agent::work_calls(state),
             Side::Changes => state.changes.as_ref().is_some_and(|c| c.waiting > 0),
             Side::Chats => state.list.as_ref().is_some_and(|l| l.conversations.iter().any(|c| c.needs_you)) || !state.calling.is_empty(),
             // A mark on Tools when an MCP server stopped with an error.
@@ -251,6 +346,7 @@ fn activity_bar<'a>(state: &'a State) -> El<'a> {
 
 fn side_bar<'a>(state: &'a State, phase: f32) -> El<'a> {
     match state.ide.side {
+        Side::Work => super::agent::work_side(state, phase),
         Side::Explorer => explorer(state, phase),
         Side::Search => super::search::view(state, phase),
         // One chat surface lists no chats: Activity charts what is working, then every topic.
@@ -331,7 +427,7 @@ fn explorer<'a>(state: &'a State, phase: f32) -> El<'a> {
                     let f = &ide.filtered[i];
                     let on = active == Some(f.path.as_str());
                     button(
-                        row![file_dot(&f.path), column![label(file_name(&f.path).to_string(), 12.5, theme::TEXT), label(f.path.clone(), 11.0, theme::TEXT_FAINT)]]
+                        row![file_icon(&f.path), column![label(file_name(&f.path).to_string(), 12.5, theme::TEXT), label(f.path.clone(), 11.0, theme::TEXT_FAINT)]]
                             .spacing(8)
                             .align_y(Alignment::Center),
                     )
@@ -371,9 +467,10 @@ fn tree_row<'a>(r: tree::Row, active: Option<&str>, changed: &[(&str, &ChangeSta
     let mut line = Row::new().spacing(6).align_y(Alignment::Center).push(indent);
     if r.is_dir {
         line = line.push(label(if r.open { "\u{25BE}" } else { "\u{25B8}" }, 11.0, theme::TEXT_FAINT));
+        line = line.push(file_icons::icon(file_icons::folder(r.open), FILE_ICON));
         line = line.push(label(r.name.clone(), 12.5, theme::TEXT_DIM));
     } else {
-        line = line.push(file_dot(&r.path));
+        line = line.push(file_icon(&r.path));
         line = line.push(label(r.name.clone(), 12.5, if on { theme::GOLD } else { theme::TEXT }));
     }
     line = line.push(space().width(Length::Fill));
@@ -584,31 +681,14 @@ pub fn change_state_words(state: &ChangeState) -> (&'static str, Color) {
 
 // ------------------------------------------------------------------------------------------------- the editor
 
-fn center_column<'a>(state: &'a State, phase: f32) -> El<'a> {
-    let ide = &state.ide;
-    let mut col = Column::new().width(Length::Fill).height(Length::Fill);
-    if ide.grid.shown {
-        // The chats side by side take the editor's place; the tabs come back with it.
-        col = col.push(container(super::grid::view(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
-    } else {
-        col = col.push(tabs_bar(state));
-        col = col.push(container(editor_area(state, phase)).height(Length::Fill).width(Length::Fill).style(canvas));
-    }
-    if ide.panel_open {
-        col = col.push(grip(Splitter::Panel, ide.drag.map(|(w, _)| w) == Some(Splitter::Panel)));
-        col = col.push(container(bottom_panel(state, phase)).height(ide.panel_height).width(Length::Fill).style(bar_style));
-    }
-    col.into()
-}
-
 fn tabs_bar<'a>(state: &'a State) -> El<'a> {
     let ide = &state.ide;
     let mut tabs = Row::new().spacing(0).align_y(Alignment::End);
-    for t in &ide.tabs {
+    for t in ide.shown_tabs() {
         let on = ide.active == Some(t.id);
         let mut inner = Row::new().spacing(6).align_y(Alignment::Center);
         inner = inner.push(match &t.kind {
-            TabKind::File { path, .. } => file_dot(path),
+            TabKind::File { path, .. } => file_icon(path),
             TabKind::Diff { .. } => label("\u{00B1}", 12.0, theme::GOLD).into(),
             TabKind::Output { .. } => mono(">_", 10.5, theme::POSITIVE).into(),
             TabKind::Tools => label(Side::Tools.glyph(), 12.0, theme::GOLD).into(),
@@ -649,18 +729,6 @@ fn tabs_bar<'a>(state: &'a State) -> El<'a> {
     }
     let strip = scrollable(tabs).direction(scrollable::Direction::Horizontal(scrollable::Scrollbar::new().width(3).scroller_width(3))).style(theme::scrollbars);
     let mut line = Row::new().align_y(Alignment::Center).push(container(strip).width(Length::Fill));
-    // Follow the agent: each change it stages opens here as its diff.
-    let follow_tip = if ide.follow { "Following the agent: each change it makes opens here (stop following)" } else { "Follow the agent: open each change it makes here" };
-    line = line.push(
-        tooltip(
-            button(label(if ide.follow { "\u{25C9} Following" } else { "\u{25CB} Follow" }, 11.5, if ide.follow { theme::GOLD } else { theme::TEXT_DIM }))
-                .padding([3.0, 8.0])
-                .style(theme::segment_button(ide.follow))
-                .on_press(go(IdeMsg::Follow(!ide.follow))),
-            container(label(follow_tip, 11.5, theme::TEXT)).padding([4.0, 8.0]).style(theme::card),
-            tooltip::Position::Bottom,
-        ),
-    );
     if let Some(t) = ide.active_tab()
         && let TabKind::File { body: Body::Editing(e), .. } = &t.kind
     {
@@ -677,7 +745,9 @@ fn tabs_bar<'a>(state: &'a State) -> El<'a> {
 
 fn editor_area<'a>(state: &'a State, phase: f32) -> El<'a> {
     let ide = &state.ide;
-    let Some(tab) = ide.active_tab() else { return welcome(state) };
+    let Some(tab) = ide.active_tab() else {
+        return if ide.shown == super::YOURS { welcome(state) } else { agent_files(state) };
+    };
     match &tab.kind {
         TabKind::File { path, lang, body, note } => {
             let mut col = Column::new().height(Length::Fill);
@@ -726,6 +796,9 @@ fn editor_area<'a>(state: &'a State, phase: f32) -> El<'a> {
 
 /// An artifact's tab: its title, which version of how many (with the versions either side a click away), Formatted
 /// or Source for Markdown, Preview for a page or a picture, Copy; then the text, formatted or as it is.
+/// The most of an artifact's source the view shows.
+const SOURCE_SHOWN: usize = 200_000;
+
 fn artifact_view<'a>(
     tab: u64,
     view: Option<&'a Result<lattice_protocol::conversation::ArtifactView, String>>,
@@ -761,6 +834,22 @@ fn artifact_view<'a>(
     let body: El<'a> = match rendered {
         Some(content) if !source => {
             iced::widget::markdown::view(content.items(), crate::lattice::view::settings()).map(|_| Msg::Link)
+        }
+        // A page with its pictures embedded (a walkthrough) is long: its source shows its start, and Preview the whole.
+        _ if v.text.len() > SOURCE_SHOWN => {
+            let mut cut = SOURCE_SHOWN;
+            while !v.text.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            Column::new()
+                .spacing(8)
+                .push(label(
+                    format!("Its first {} of {} characters; Preview shows the whole page.", SOURCE_SHOWN, v.text.len()),
+                    12.0,
+                    theme::TEXT_DIM,
+                ))
+                .push(mono(&v.text[..cut], CODE_SIZE, theme::TEXT))
+                .into()
         }
         _ => mono(v.text.as_str(), CODE_SIZE, theme::TEXT).into(),
     };
@@ -1247,6 +1336,27 @@ fn diff_view<'a>(state: &'a State, path: &'a str, phase: f32) -> El<'a> {
 }
 
 /// No tab open: what the IDE does, and where to start.
+/// An agent's editor with no file open yet: what that agent works on, as far as it is known. A file in another folder
+/// than the editor's cannot open here and says so.
+fn agent_files<'a>(state: &'a State) -> El<'a> {
+    let ide = &state.ide;
+    let mut col = Column::new().spacing(6).padding(18);
+    let files: Vec<_> = ide.working_on.iter().filter(|w| w.by == ide.shown).collect();
+    if files.is_empty() {
+        col = col.push(label("No file yet: this agent's files open here as it works on them.", 12.5, theme::TEXT_DIM));
+    } else {
+        col = col.push(label("Working on", 11.5, theme::GOLD));
+        for w in files {
+            let words = if w.here { w.path.clone() } else { format!("{} (in another folder than the editor's)", w.path) };
+            let line = row![file_icon(&w.path), label(words, 12.5, if w.here { theme::TEXT } else { theme::TEXT_DIM })]
+                .spacing(6)
+                .align_y(Alignment::Center);
+            col = col.push(button(line).padding([3.0, 6.0]).style(theme::ghost_button).on_press_maybe(w.here.then(|| go(IdeMsg::Open(w.path.clone())))));
+        }
+    }
+    container(col).width(Length::Fill).height(Length::Fill).style(canvas).into()
+}
+
 fn welcome<'a>(state: &'a State) -> El<'a> {
     let mut col = Column::new().spacing(14).max_width(560).align_x(Alignment::Center);
     col = col.push(label("\u{25C7}", 44.0, theme::GOLD));
@@ -1478,7 +1588,7 @@ fn quick_open<'a>(state: &'a State, q: &'a super::Quick) -> El<'a> {
         list = list.push(
             button(
                 row![
-                    file_dot(&r.path),
+                    file_icon(&r.path),
                     label(file_name(&r.path).to_string(), 13.0, if on { theme::GOLD } else { theme::TEXT }),
                     label(r.path.clone(), 11.5, theme::TEXT_FAINT),
                 ]
@@ -1587,21 +1697,4 @@ fn confirm_card<'a>(state: &'a State, confirm: &'a Confirm) -> El<'a> {
     .max_width(560)
     .style(theme::card)
     .into()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_language_has_a_colour_that_reads_on_the_side_bar() {
-        use lattice_app::theme::{SIDEBAR, contrast};
-        for lang in [
-            Lang::Rust, Lang::Python, Lang::Js, Lang::C, Lang::CSharp, Lang::Go, Lang::Java, Lang::Shader, Lang::Json,
-            Lang::Toml, Lang::Yaml, Lang::Markdown, Lang::Shell, Lang::PowerShell, Lang::Batch, Lang::Sql, Lang::Html,
-            Lang::Css, Lang::Ini, Lang::Plain,
-        ] {
-            assert!(contrast(lang_color(lang), SIDEBAR) >= 4.5, "{lang:?}");
-        }
-    }
 }

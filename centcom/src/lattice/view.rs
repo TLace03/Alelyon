@@ -22,7 +22,12 @@ const PURPOSE: &str = "Chat with a model about your code, with tools: it reads t
                        you review before anything is written, and runs commands only after you confirm each one. \
                        Local and Auto never leave this computer. Below: agent runs with their traces, and the models.";
 
-pub fn view(state: &State, phase: f32) -> El<'_> {
+/// The widest the tabs other than the Chat and IDE run, as the window's own pages do: lines do not run edge to edge
+/// on a large screen.
+pub const MAX_WIDTH: f32 = 1640.0;
+
+/// The page, for a window `width` wide (the rail included): the tabs lay their parts in columns from a laptop's width.
+pub fn view(state: &State, phase: f32, width: f32) -> El<'_> {
     let mut page = Column::new().width(Length::Fill).height(Length::Fill);
     page = page.push(top_bar(state, phase));
     if let Some(problem) = &state.problem {
@@ -44,26 +49,49 @@ pub fn view(state: &State, phase: f32) -> El<'_> {
             .padding([16.0, 24.0])
             .into()
     } else {
-        let content: El<'_> = match state.tab {
-            Tab::Chat => super::ide::view::view(state, phase),
-            Tab::Runs => runs_tab(state, phase),
-            Tab::Models => models_tab(state),
-            Tab::Training => training_tab(state, phase),
-            Tab::Morphometry => super::morphometry::view(&state.morphometry, phase).map(Msg::Morpho),
-            Tab::Foundry => super::foundry::view(&state.foundry, phase).map(Msg::Foundry),
-            Tab::System => system_tab(state, phase),
-        };
-        if state.tab == Tab::Chat {
-            content
-        } else {
-            container(content).padding([16.0, 24.0]).width(Length::Fill).height(Length::Fill).into()
-        }
+        tab_body(state, state.tab, phase, width)
     };
     page = page.push(container(body).height(Length::Fill));
     let page: El<'_> = page.into();
     match &state.dialog {
         Some(dialog) => stack![page, opaque(center(dialog_card(dialog)).style(theme::scrim))].into(),
         None => page,
+    }
+}
+
+/// One tab in a window of its own (`windows`): the tab as the page shows it, without the page's bar.
+pub fn view_tab(state: &State, tab: Tab, phase: f32, width: f32) -> El<'_> {
+    let body: El<'_> = if let Some(why) = &state.failed {
+        container(ui::notice(format!("Lattice could not start: {why}"), theme::DANGER)).padding([16.0, 24.0]).into()
+    } else if state.starting {
+        container(ui::working(phase, "Starting Lattice: the chat core, the local model server's manager and the runs…"))
+            .padding([16.0, 24.0])
+            .into()
+    } else {
+        tab_body(state, tab, phase, width)
+    };
+    container(body).width(Length::Fill).height(Length::Fill).into()
+}
+
+/// A tab's body: the Chat and IDE to the window's edges, any other within the page's margins.
+fn tab_body(state: &State, tab: Tab, phase: f32, width: f32) -> El<'_> {
+    let content: El<'_> = match tab {
+        Tab::Chat => super::ide::view::view(state, phase),
+        Tab::Runs => runs_tab(state, phase),
+        Tab::Models => models_tab(state, width),
+        Tab::Training => training_tab(state, phase, width),
+        Tab::Morphometry => super::morphometry::view(&state.morphometry, phase).map(Msg::Morpho),
+        Tab::Foundry => super::foundry::view(&state.foundry, phase, width).map(Msg::Foundry),
+        Tab::System => system_tab(state, phase),
+    };
+    if tab == Tab::Chat {
+        content
+    } else {
+        container(container(content).max_width(MAX_WIDTH).width(Length::Fill).height(Length::Fill))
+            .padding([16.0, 24.0])
+            .width(Length::Fill)
+            .height(Length::Fill)
+            .into()
     }
 }
 
@@ -79,13 +107,28 @@ fn top_bar(state: &State, phase: f32) -> El<'_> {
     ));
     line = line.push(space().width(8));
     for tab in Tab::ALL {
-        let on = state.tab == tab;
-        line = line.push(
-            button(label(tab.title(), 12.5, if on { theme::GOLD } else { theme::TEXT_DIM }))
-                .padding([4.0, 10.0])
-                .style(theme::segment_button(on))
-                .on_press(Msg::Tab(tab)),
-        );
+        use super::TabWindow;
+        // a tab in a window of its own is marked, and a press on it brings that window forward (`windows`)
+        let out = state.out.contains(&tab);
+        let on = state.tab == tab && !out;
+        let color = if on {
+            theme::GOLD
+        } else if out {
+            theme::TEXT_FAINT
+        } else {
+            theme::TEXT_DIM
+        };
+        let mut words = Row::new().spacing(5).align_y(Alignment::Center).push(label(tab.title(), 12.5, color));
+        if out {
+            words = words.push(label(crate::windows::OUT_MARK, 10.5, theme::GOLD));
+        }
+        // the pointer over the tab, followed, so a press on it can be dragged off the bar to a window of its own
+        let face = iced::widget::mouse_area(container(words).padding([4.0, 10.0]))
+            .on_enter(Msg::Window(TabWindow::Hover(tab, true)))
+            .on_exit(Msg::Window(TabWindow::Hover(tab, false)))
+            .on_middle_press(Msg::Window(TabWindow::PopOut(tab)));
+        let press = if out { Msg::Window(TabWindow::Raise(tab)) } else { Msg::Tab(tab) };
+        line = line.push(button(face).padding(0).style(theme::segment_button(on)).on_press(press));
     }
     line = line.push(space().width(Length::Fill));
     if state.tab != Tab::Chat {
@@ -111,12 +154,7 @@ fn strip(state: &State, phase: f32) -> El<'_> {
         None => {}
     }
     if let Some(local) = &state.local {
-        let (words, color) = match local.state {
-            RuntimeState::Ready => ("Local model ready", theme::POSITIVE),
-            RuntimeState::NoModel => ("No local model chosen", theme::CAUTION),
-            RuntimeState::Offline => ("Local server not running", theme::TEXT_FAINT),
-            RuntimeState::Error => ("Local server failed", theme::DANGER),
-        };
+        let (words, color) = local_words(local.state);
         chips = chips.push(chip(words, color));
     }
     chips.into()
@@ -290,8 +328,17 @@ pub fn bar_portions(from: f64, to: f64, start: f64, total: f64) -> (u16, u16) {
     (a, b)
 }
 
-/// The endpoint form, or the button that opens one; and a removal waiting for Confirm.
-fn endpoint_editor(state: &State) -> El<'_> {
+/// Where model endpoints are kept and how their keys are held, said once on hover beside "Add a model endpoint".
+const ENDPOINTS_HELP: &str = "Endpoints are written to the same model_endpoints.json the Python and web Lattice read. A \
+                              key you type is kept in Windows Credential Manager (as Alelyon/<KEY NAME>), never in a \
+                              plain-text file; the native Lattice and Alelyon read it from there, and the Python and web \
+                              Lattice will once they are taught to. Of a key, only whether it is present is read. The \
+                              Python Lattice reads the same registry, the same choice of local model and the same \
+                              Credential Manager entries.";
+
+/// The endpoint form while one is open, and a removal waiting for Confirm; nothing otherwise (the button that opens a
+/// form sits on the endpoints' own panel).
+fn endpoint_editor(state: &State) -> Option<El<'_>> {
     use super::{FormField as F, FormFlag, RegistryAct};
     let mut col = Column::new().spacing(8);
     if let Some(act) = &state.pending_act {
@@ -319,13 +366,7 @@ fn endpoint_editor(state: &State) -> El<'_> {
         );
     }
     let Some(f) = &state.form else {
-        col = col.push(row![ui::primary("Add a model endpoint", (!state.acting).then_some(Msg::NewEndpoint))]);
-        col = col.push(note(
-            "Endpoints are written to the same model_endpoints.json the Python and web Lattice read. A key you type is \
-             kept in Windows Credential Manager (as Alelyon/<KEY NAME>), never in a plain-text file; the native Lattice \
-             and Alelyon read it from there, and the Python and web Lattice will once they are taught to.",
-        ));
-        return ui::card("Add or edit", col);
+        return state.pending_act.is_some().then(|| col.into());
     };
     let managed = f.editing.as_deref() == Some("llamacpp-local");
     let field = |name: &'static str, value: &str, which: F, hint: &'static str| -> El<'_> {
@@ -405,21 +446,44 @@ fn endpoint_editor(state: &State) -> El<'_> {
         ]
         .spacing(8),
     );
-    ui::card(if f.editing.is_some() { "Edit endpoint" } else { "New endpoint" }, col)
+    Some(ui::card(if f.editing.is_some() { "Edit endpoint" } else { "New endpoint" }, col))
 }
 
 // ------------------------------------------------------------------ training
 
-fn training_tab(state: &State, phase: f32) -> El<'_> {
+/// What a Training Studio workspace is, said once on hover beside the tab's title.
+const TRAINING_HELP: &str = "A Training Studio workspace, as the Python Studio keeps it: a pool of local documents (each \
+                             its normalised text, named by its SHA-256, in an append-only history of revisions) and \
+                             saved plans binding a revision to a preset and its experts. Every file is written new and \
+                             none is replaced or deleted; a window that is not looking at the latest revision is refused. \
+                             Nothing here starts a trainer. A trainer's live metrics (loss, steps, expert use) are on the \
+                             Compute and simulation page, under Training.";
+
+fn training_tab(state: &State, phase: f32, width: f32) -> El<'_> {
     use super::training::PRESETS;
     let t = &state.training;
     let mut col = Column::new().spacing(14);
-    col = col.push(note(
-        "A Training Studio workspace, as the Python Studio keeps it: a pool of local documents (each its normalised \
-         text, named by its SHA-256, in an append-only history of revisions) and saved plans binding a revision to a \
-         preset and its experts. Every file is written new and none is replaced or deleted; a window that is not \
-         looking at the latest revision is refused. Nothing here starts a trainer.",
-    ));
+
+    // At a glance: which workspace is open and what it holds.
+    let (words, color) = match &t.workspace {
+        None => ("No workspace open".to_string(), theme::TEXT_FAINT),
+        Some(Err(_)) => ("The workspace could not be read".to_string(), theme::CAUTION),
+        Some(Ok(w)) => (
+            format!(
+                "{} · revision {} · {} documents · {} saved plan(s)",
+                ui::cut(&w.id, 40),
+                w.revision.number,
+                w.revision.documents.len(),
+                w.plans.len()
+            ),
+            theme::POSITIVE,
+        ),
+    };
+    col = col.push(
+        row![ui::subheading("Training Studio"), ui::help(TRAINING_HELP), space().width(8), ui::dot(color), label(words, 13.0, theme::TEXT)]
+            .spacing(8)
+            .align_y(Alignment::Center),
+    );
     let busy = t.writing || t.opening;
     if t.writing {
         col = col.push(ui::working(phase, "Writing to the workspace…"));
@@ -430,38 +494,9 @@ fn training_tab(state: &State, phase: f32) -> El<'_> {
         None => {}
     }
 
-    // A new workspace.
-    let name_ok = super::simple_folder_name(t.new_name.trim());
-    let can_create = !busy && !t.new_parent.trim().is_empty() && name_ok;
-    let mut create = Column::new().spacing(8);
-    create = create.push(
-        row![
-            text_input("The folder it goes in", &t.new_parent).on_input(Msg::NewParent).padding(8).style(ui::input_style),
-            ui::secondary("Choose…", (!busy).then_some(Msg::ChooseNewParent)),
-            container(
-                text_input("Its name", &t.new_name).on_input(Msg::NewName).padding(8).style(ui::input_style)
-            )
-            .width(220),
-            ui::primary(
-                "Create",
-                can_create.then(|| {
-                    Msg::Train(super::TrainingAct::Create(
-                        std::path::Path::new(t.new_parent.trim()).join(t.new_name.trim()),
-                    ))
-                })
-            ),
-        ]
-        .spacing(8)
-        .align_y(Alignment::Center),
-    );
-    if !t.new_name.trim().is_empty() && !name_ok {
-        create = create.push(note("Choose a simple folder name without path separators."));
-    }
-    col = col.push(ui::card("New workspace", create));
-
-    // The workspace.
-    let mut ws = Column::new().spacing(8);
-    ws = ws.push(
+    // Open a workspace, or make a new one, side by side.
+    let mut open = Column::new().spacing(6);
+    open = open.push(
         row![
             text_input("A Training Studio workspace folder", &t.workspace_path)
                 .on_input(Msg::WorkspacePath)
@@ -473,175 +508,219 @@ fn training_tab(state: &State, phase: f32) -> El<'_> {
         .spacing(8),
     );
     if t.opening {
-        ws = ws.push(ui::working(phase, "Reading the workspace and checking each document against its digest…"));
+        open = open.push(ui::working(phase, "Reading the workspace and checking each document against its digest…"));
     }
     match &t.workspace {
         None => {}
-        Some(Err(why)) => ws = ws.push(ui::notice(why.as_str(), theme::CAUTION)),
+        Some(Err(why)) => open = open.push(ui::notice(why.as_str(), theme::CAUTION)),
         Some(Ok(w)) => {
-            ws = ws.push(fact("Workspace", mono(w.id.as_str(), 12.0, theme::TEXT)));
-            ws = ws.push(fact(
+            open = open.push(fact("Workspace", mono(w.id.as_str(), 12.0, theme::TEXT)));
+            open = open.push(fact(
                 "Revision",
                 label(format!("{} · {} documents · manifest {}", w.revision.number, w.revision.documents.len(), ui::cut(&w.revision.sha256, 16)), 12.5, theme::TEXT),
             ));
-            for d in &w.revision.documents {
-                ws = ws.push(
-                    row![
-                        container(label(ui::cut(&d.name, 40), 12.5, theme::TEXT)).width(320),
-                        container(label(ui::cut(&d.source, 30), 12.0, theme::TEXT_DIM)).width(240),
-                        container(label(ui::cut(&d.license, 20), 12.0, theme::TEXT_DIM)).width(160),
-                        container(label(ui::cut(&d.group, 16), 12.0, theme::TEXT_DIM)).width(130),
-                        container(label(ui::bytes(d.bytes), 12.0, theme::TEXT_DIM)).width(90),
-                        ui::secondary("Remove", (!busy).then(|| Msg::Train(super::TrainingAct::Remove(d.id.clone())))),
-                    ]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-                );
-            }
-            // Adding a document: a UTF-8 .txt or .md file, with where it came from and the permission to use it.
-            let attributed = !t.doc_source.trim().is_empty() && !t.doc_license.trim().is_empty();
-            let can_add = !busy && !t.doc_path.trim().is_empty() && attributed;
-            ws = ws.push(strong("Add a document", 13.0, theme::TEXT));
-            ws = ws.push(
-                row![
-                    text_input("A UTF-8 .txt or .md file", &t.doc_path).on_input(Msg::DocPath).padding(8).style(ui::input_style),
-                    container(text_input("Source ID", &t.doc_source).on_input(Msg::DocSource).padding(8).style(ui::input_style)).width(180),
-                    container(text_input("License or permission", &t.doc_license).on_input(Msg::DocLicense).padding(8).style(ui::input_style)).width(200),
-                    container(text_input("Group (optional)", &t.doc_group).on_input(Msg::DocGroup).padding(8).style(ui::input_style)).width(150),
-                    ui::primary(
-                        "Add",
-                        can_add.then(|| {
-                            Msg::Train(super::TrainingAct::Add {
-                                file: std::path::PathBuf::from(t.doc_path.trim()),
-                                source: t.doc_source.trim().to_string(),
-                                license: t.doc_license.trim().to_string(),
-                                group: t.doc_group.trim().to_string(),
-                            })
-                        })
-                    ),
-                ]
-                .spacing(8)
-                .align_y(Alignment::Center),
-            );
-            ws = ws.push(note(
-                "Every document needs a source ID (letters, numbers or . _ : / @ + -) and a license or permission. Its \
-                 text is stored normalised (UTF-8, LF line ends, NFC, trimmed), at most 4 MiB, 32 MiB in the pool; the \
-                 file itself is only read.",
-            ));
-            ws = ws.push(strong("Saved plans", 13.0, theme::TEXT));
-            if w.plans.is_empty() {
-                ws = ws.push(note("None saved."));
-            }
-            for (index, p) in w.plans.iter().enumerate() {
-                let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-                ws = ws.push(match &p.plan {
-                    Ok(plan) => row![
-                        label(
-                            format!(
-                                "{name}: preset {} ({} layers, {} experts, {} active, width {}), {} experts chosen, revision {}",
-                                plan.preset.label, plan.preset.layers, plan.preset.experts, plan.preset.active,
-                                plan.preset.width, plan.selected_experts.len(), plan.revision
-                            ),
-                            12.0,
-                            theme::TEXT,
-                        ),
-                        ui::secondary("Use", (!busy).then_some(Msg::UsePlan(index))),
-                    ]
-                    .spacing(8)
-                    .align_y(Alignment::Center)
-                    .into(),
-                    Err(why) => El::from(label(format!("{name}: not usable: {why}"), 12.0, theme::CAUTION)),
-                });
-            }
         }
     }
-    if let Some(Ok(w)) = &t.workspace {
-        let can_export = !busy && !w.revision.documents.is_empty() && !t.export_path.trim().is_empty();
-        ws = ws.push(strong("Export a document snapshot", 13.0, theme::TEXT));
-        ws = ws.push(
+    let name_ok = super::simple_folder_name(t.new_name.trim());
+    let can_create = !busy && !t.new_parent.trim().is_empty() && name_ok;
+    let mut create = Column::new().spacing(6);
+    create = create.push(
+        row![
+            text_input("The folder it goes in", &t.new_parent).on_input(Msg::NewParent).padding(8).style(ui::input_style),
+            ui::secondary("Choose…", (!busy).then_some(Msg::ChooseNewParent)),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    create = create.push(
+        row![
+            text_input("Its name", &t.new_name).on_input(Msg::NewName).padding(8).style(ui::input_style),
+            ui::secondary(
+                "Create",
+                can_create.then(|| {
+                    Msg::Train(super::TrainingAct::Create(std::path::Path::new(t.new_parent.trim()).join(t.new_name.trim())))
+                })
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    if !t.new_name.trim().is_empty() && !name_ok {
+        create = create.push(note("Choose a simple folder name without path separators."));
+    }
+    col = col.push(two(width, vec![panel("Workspace", "", None, open)], vec![panel("New workspace", "", None, create)]));
+
+    let Some(Ok(w)) = &t.workspace else {
+        return scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars).into();
+    };
+
+    // The document pool: one line each, and the line that adds one.
+    let mut docs = Column::new().spacing(4);
+    if w.revision.documents.is_empty() {
+        docs = docs.push(note("No documents yet."));
+    } else {
+        docs = docs.push(table_head(&[("Name", 8), ("Source", 6), ("License", 4), ("Group", 3), ("Size", 2), ("", 2)]));
+    }
+    for d in &w.revision.documents {
+        docs = docs.push(
             row![
-                text_input("A new .jsonl file", &t.export_path).on_input(Msg::ExportPath).padding(8).style(ui::input_style),
-                ui::secondary(
-                    "Export",
-                    can_export.then(|| Msg::Train(super::TrainingAct::Export(std::path::PathBuf::from(t.export_path.trim()))))
-                ),
+                container(label(ui::cut(&d.name, 40), 12.5, theme::TEXT)).width(Length::FillPortion(8)),
+                container(label(ui::cut(&d.source, 30), 12.0, theme::TEXT_DIM)).width(Length::FillPortion(6)),
+                container(label(ui::cut(&d.license, 20), 12.0, theme::TEXT_DIM)).width(Length::FillPortion(4)),
+                container(label(ui::cut(&d.group, 16), 12.0, theme::TEXT_DIM)).width(Length::FillPortion(3)),
+                container(label(ui::bytes(d.bytes), 12.0, theme::TEXT_DIM)).width(Length::FillPortion(2)),
+                container(ui::secondary("Remove", (!busy).then(|| Msg::Train(super::TrainingAct::Remove(d.id.clone())))))
+                    .width(Length::FillPortion(2))
+                    .align_x(iced::alignment::Horizontal::Right),
             ]
             .spacing(8)
             .align_y(Alignment::Center),
         );
-        ws = ws.push(note(
-            "One line per document: its normalised text, attribution and provenance, marked not ready to train. A file \
-             that exists is never overwritten.",
-        ));
     }
-    col = col.push(ui::card("Workspace", ws));
+    // Adding a document: a UTF-8 .txt or .md file, with where it came from and the permission to use it.
+    let attributed = !t.doc_source.trim().is_empty() && !t.doc_license.trim().is_empty();
+    let can_add = !busy && !t.doc_path.trim().is_empty() && attributed;
+    docs = docs.push(
+        row![
+            text_input("Add a UTF-8 .txt or .md file", &t.doc_path).on_input(Msg::DocPath).padding(8).style(ui::input_style),
+            container(text_input("Source ID", &t.doc_source).on_input(Msg::DocSource).padding(8).style(ui::input_style)).width(180),
+            container(text_input("License or permission", &t.doc_license).on_input(Msg::DocLicense).padding(8).style(ui::input_style)).width(200),
+            container(text_input("Group (optional)", &t.doc_group).on_input(Msg::DocGroup).padding(8).style(ui::input_style)).width(150),
+            ui::primary(
+                "Add",
+                can_add.then(|| {
+                    Msg::Train(super::TrainingAct::Add {
+                        file: std::path::PathBuf::from(t.doc_path.trim()),
+                        source: t.doc_source.trim().to_string(),
+                        license: t.doc_license.trim().to_string(),
+                        group: t.doc_group.trim().to_string(),
+                    })
+                })
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(panel(
+        "Documents",
+        "Every document needs a source ID (letters, numbers or . _ : / @ + -) and a license or permission. Its text \
+             is stored normalised (UTF-8, LF line ends, NFC, trimmed), at most 4 MiB, 32 MiB in the pool; the file \
+             itself is only read.",
+        Some(label(format!("{} in revision {}", w.revision.documents.len(), w.revision.number), 12.0, theme::TEXT_DIM).into()),
+        docs,
+    ));
+
+    // The saved plans and the export, side by side.
+    let mut plans = Column::new().spacing(4);
+    if w.plans.is_empty() {
+        plans = plans.push(note("None saved."));
+    }
+    for (index, p) in w.plans.iter().enumerate() {
+        let name = p.path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        plans = plans.push(match &p.plan {
+            Ok(plan) => row![
+                label(
+                    format!(
+                        "{name}: preset {} ({} layers, {} experts, {} active, width {}), {} experts chosen, revision {}",
+                        plan.preset.label, plan.preset.layers, plan.preset.experts, plan.preset.active,
+                        plan.preset.width, plan.selected_experts.len(), plan.revision
+                    ),
+                    12.0,
+                    theme::TEXT,
+                )
+                .width(Length::Fill),
+                ui::secondary("Use", (!busy).then_some(Msg::UsePlan(index))),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center)
+            .into(),
+            Err(why) => El::from(label(format!("{name}: not usable: {why}"), 12.0, theme::CAUTION)),
+        });
+    }
+    let can_export = !busy && !w.revision.documents.is_empty() && !t.export_path.trim().is_empty();
+    let export = Column::new().push(
+        row![
+            text_input("A new .jsonl file", &t.export_path).on_input(Msg::ExportPath).padding(8).style(ui::input_style),
+            ui::secondary(
+                "Export",
+                can_export.then(|| Msg::Train(super::TrainingAct::Export(std::path::PathBuf::from(t.export_path.trim()))))
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
+    col = col.push(two(
+        width,
+        vec![panel("Saved plans", "", None, plans)],
+        vec![panel(
+            "Export a document snapshot",
+            "One line per document: its normalised text, attribution and provenance, marked not ready to train. A \
+                 file that exists is never overwritten.",
+            None,
+            export,
+        )],
+    ));
 
     // A plan: a preset and the experts it trains, bound to the latest revision when saved.
-    if let Some(Ok(w)) = &t.workspace {
-        let mut plan = Column::new().spacing(8);
-        let keys: Vec<&'static str> = PRESETS.iter().map(|p| p.key).collect();
-        plan = plan.push(ui::tabs(
-            &keys,
-            t.preset,
-            |key| {
-                let p = super::training::preset(key).expect("a preset's own key");
-                format!("{} · {} layers × {} experts ({} active), width {}", p.label, p.layers, p.experts, p.active, p.width)
-            },
-            Msg::PlanPreset,
-        ));
-        if let Some(shape) = super::training::preset(t.preset) {
-            for layer in 0..shape.layers {
-                let mut line = Row::new().spacing(3).push(container(label(format!("Layer {layer}"), 12.0, theme::TEXT_DIM)).width(70));
-                for expert in 0..shape.experts {
-                    let key = format!("{layer}:{expert}");
-                    let on = t.experts.contains(&key);
-                    line = line.push(
-                        button(label(expert.to_string(), 12.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
-                            .padding([4.0, 7.0])
-                            .on_press(Msg::ToggleExpert(key))
-                            .style(theme::segment_button(on)),
-                    );
-                }
-                plan = plan.push(line.wrap());
+    let mut plan = Column::new().spacing(6);
+    let keys: Vec<&'static str> = PRESETS.iter().map(|p| p.key).collect();
+    plan = plan.push(ui::tabs(
+        &keys,
+        t.preset,
+        |key| {
+            let p = super::training::preset(key).expect("a preset's own key");
+            format!("{} · {} layers × {} experts ({} active), width {}", p.label, p.layers, p.experts, p.active, p.width)
+        },
+        Msg::PlanPreset,
+    ));
+    if let Some(shape) = super::training::preset(t.preset) {
+        for layer in 0..shape.layers {
+            let mut line = Row::new().spacing(3).push(container(label(format!("Layer {layer}"), 12.0, theme::TEXT_DIM)).width(70));
+            for expert in 0..shape.experts {
+                let key = format!("{layer}:{expert}");
+                let on = t.experts.contains(&key);
+                line = line.push(
+                    button(label(expert.to_string(), 12.0, if on { theme::GOLD } else { theme::TEXT_DIM }))
+                        .padding([4.0, 7.0])
+                        .on_press(Msg::ToggleExpert(key))
+                        .style(theme::segment_button(on)),
+                );
             }
+            plan = plan.push(line.wrap());
         }
-        let can_save = !busy && !t.experts.is_empty() && !w.revision.documents.is_empty();
-        plan = plan.push(
-            row![
-                label(format!("{} experts chosen", t.experts.len()), 12.5, theme::TEXT),
-                space().width(Length::Fill),
-                ui::primary(
-                    "Save training plan",
-                    can_save.then(|| {
-                        Msg::Train(super::TrainingAct::SavePlan { preset: t.preset, experts: t.experts.iter().cloned().collect() })
-                    })
-                ),
-            ]
-            .align_y(Alignment::Center),
-        );
-        plan = plan.push(note(
-            "A plan binds this revision's documents by their digests and the manifest's SHA-256; it is never marked ready \
-             to train. Saving needs a document in the pool and at least one expert.",
-        ));
-        col = col.push(ui::card("Training plan", plan));
     }
-
-    col = col.push(note("A trainer's live metrics (loss, steps, expert use) are on the Compute and simulation page, under Training."));
+    let can_save = !busy && !t.experts.is_empty() && !w.revision.documents.is_empty();
+    let save = row![
+        label(format!("{} experts chosen", t.experts.len()), 12.5, theme::TEXT),
+        ui::primary(
+            "Save training plan",
+            can_save.then(|| Msg::Train(super::TrainingAct::SavePlan { preset: t.preset, experts: t.experts.iter().cloned().collect() }))
+        ),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center);
+    col = col.push(panel(
+        "Training plan",
+        "A plan binds this revision's documents by their digests and the manifest's SHA-256; it is never marked ready \
+             to train. Saving needs a document in the pool and at least one expert.",
+        Some(save.into()),
+        plan,
+    ));
     scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars).into()
 }
 
 // ------------------------------------------------------------------ system
+
+/// The System tab's closed-by-default part, by name (`State::open_parts`).
+const STACK_GAPS: &str = "lattice.system.gaps";
 
 fn system_tab(state: &State, phase: f32) -> El<'_> {
     let Some(sys) = &state.system else {
         return ui::working(phase, "Reading the stack and the Action Gate's ledger…");
     };
     let mut col = Column::new().spacing(14);
-    let mut stack = Column::new().spacing(10);
-    stack = stack.push(note(
-        "Each row reports what this build could actually reach. Linked is not published, published is not externally \
-         verified, and none of them is a statement that a number is right.",
-    ));
+    // The stack: one line a layer, what it reached in words and colour; how it is wired on hover.
+    let mut stack = Column::new().spacing(4);
     for r in &sys.stack {
         let (word, color) = match r.level {
             Level::Present => ("PRESENT", theme::POSITIVE),
@@ -649,21 +728,35 @@ fn system_tab(state: &State, phase: f32) -> El<'_> {
             Level::Absent => ("ABSENT", theme::TEXT_FAINT),
         };
         stack = stack.push(
-            column![
-                row![strong(r.name, 13.5, theme::TEXT), chip(word, color)].spacing(8).align_y(Alignment::Center),
-                mono(r.headline.as_str(), 12.0, theme::TEXT_DIM),
-                label(r.detail, 12.0, theme::TEXT_DIM),
+            row![
+                container(row![strong(r.name, 13.0, theme::TEXT), ui::help(r.detail)].spacing(6).align_y(Alignment::Center)).width(260),
+                container(chip(word, color)).width(90),
+                mono(r.headline.as_str(), 12.0, theme::TEXT_DIM).width(Length::Fill),
             ]
-            .spacing(3),
+            .spacing(10)
+            .align_y(Alignment::Center),
         );
     }
-    stack = stack.push(strong("What this stack does not establish", 13.0, theme::CAUTION));
+    let mut gaps = Column::new().spacing(3);
     for gap in super::system::STANDING_GAPS {
-        stack = stack.push(label(format!("• {gap}"), 12.0, theme::TEXT_DIM));
+        gaps = gaps.push(label(format!("• {gap}"), 12.0, theme::TEXT_DIM));
     }
-    col = col.push(ui::card("Stack: what sits underneath an answer", stack));
+    stack = stack.push(ui::disclosure(
+        "What this stack does not establish",
+        label(format!("{} standing gaps", super::system::STANDING_GAPS.len()), 12.0, theme::CAUTION),
+        state.open_parts.contains(STACK_GAPS),
+        Msg::Disclose(STACK_GAPS),
+        gaps,
+    ));
+    col = col.push(panel(
+        "Stack: what sits underneath an answer",
+        "Each row reports what this build could actually reach. Linked is not published, published is not \
+             externally verified, and none of them is a statement that a number is right.",
+        None,
+        stack,
+    ));
 
-    let mut gate = Column::new().spacing(8);
+    let mut gate = Column::new().spacing(6);
     match &sys.ledger {
         Err(why) => gate = gate.push(ui::notice(why.as_str(), theme::CAUTION)),
         Ok(l) => {
@@ -676,10 +769,16 @@ fn system_tab(state: &State, phase: f32) -> El<'_> {
             } else {
                 let v = &l.verdict;
                 if v.ok {
-                    gate = gate.push(ui::notice(
-                        format!("The chain re-derives: {} records, each link from its own content. It cannot show that later records were not cut off; compare the head below with one kept elsewhere.", v.checked),
-                        theme::POSITIVE,
-                    ));
+                    gate = gate.push(
+                        row![
+                            ui::notice(format!("The chain re-derives: {} records, each link from its own content.", v.checked), theme::POSITIVE),
+                            ui::help(
+                                "It cannot show that later records were not cut off; compare the head below with one kept elsewhere."
+                            ),
+                        ]
+                        .spacing(8)
+                        .align_y(Alignment::Center),
+                    );
                 } else {
                     gate = gate.push(ui::notice(format!("The chain does not re-derive after {} records: {}", v.checked, v.reason), theme::DANGER));
                 }
@@ -706,12 +805,18 @@ fn system_tab(state: &State, phase: f32) -> El<'_> {
                 }
             }
             if !sys.evidence.is_empty() {
-                gate = gate.push(strong("What each session was observed to do", 13.0, theme::TEXT));
-                gate = gate.push(note(
-                    "Replayed from the records the harness wrote when each tool call happened; a session's own say-so \
-                     counts only for its falsifier. As the Python view does, any read of AGENTS.md holds P1 here (a \
-                     changed policy is not compared).",
-                ));
+                gate = gate.push(
+                    row![
+                        strong("What each session was observed to do", 13.0, theme::TEXT),
+                        ui::help(
+                            "Replayed from the records the harness wrote when each tool call happened; a session's own \
+                             say-so counts only for its falsifier. As the Python view does, any read of AGENTS.md holds \
+                             P1 here (a changed policy is not compared)."
+                        ),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                );
             }
             for (session, e) in &sys.evidence {
                 let mut line =
@@ -719,13 +824,11 @@ fn system_tab(state: &State, phase: f32) -> El<'_> {
                 if e.held.is_empty() {
                     line = line.push(label("nothing observed", 11.5, theme::TEXT_FAINT));
                 }
+                // Each obligation held, its meaning on hover.
                 for h in &e.held {
-                    line = line.push(chip(h.as_str(), theme::POSITIVE));
+                    line = line.push(ui::tip(chip(h.as_str(), theme::POSITIVE), format!("{h}: {}", super::obligations::meaning(h))));
                 }
                 let mut block = Column::new().spacing(2).push(line.wrap());
-                for h in &e.held {
-                    block = block.push(label(format!("{h}: {}", super::obligations::meaning(h)), 11.0, theme::TEXT_FAINT));
-                }
                 if !e.falsifier.is_empty() {
                     block = block.push(label(format!("Falsifier: {}", ui::cut(&e.falsifier, 200)), 11.5, theme::TEXT_DIM));
                 }
@@ -737,37 +840,26 @@ fn system_tab(state: &State, phase: f32) -> El<'_> {
                 }
                 gate = gate.push(block);
             }
-            gate = gate.push(note(
-                "Not read here: the trading gate's decisions (gate_decisions.jsonl) and the intent ledger (fam.db) belong \
-                 to the Financial Markets platform, which Alelyon leaves out for now.",
-            ));
         }
     }
-    col = col.push(ui::card("Action Gate: what agents were allowed or refused", gate));
+    col = col.push(panel(
+        "Action Gate: what agents were allowed or refused",
+        "Not read here: the trading gate's decisions (gate_decisions.jsonl) and the intent ledger (fam.db) belong \
+             to the Financial Markets platform, which Alelyon leaves out for now.",
+        None,
+        gate,
+    ));
     scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars).into()
 }
 
 // ------------------------------------------------------------------ models
 
-fn models_tab(state: &State) -> El<'_> {
+fn models_tab(state: &State, width: f32) -> El<'_> {
     let mut col = Column::new().spacing(14);
-    let mut choices = Column::new().spacing(8);
-    if state.choices.is_empty() {
-        choices = choices.push(note("Reading the model choices…"));
-    }
-    for c in &state.choices {
-        let mut line = Row::new().spacing(8).align_y(Alignment::Center);
-        line = line.push(strong(c.label.as_str(), 13.5, theme::TEXT));
-        line = line.push(chip(if c.locality == Locality::Local { "This computer" } else { "Off this computer" }, if c.locality == Locality::Local { theme::POSITIVE } else { theme::CAUTION }));
-        line = line.push(chip(if c.ready { "Ready" } else { "Not ready" }, if c.ready { theme::POSITIVE } else { theme::TEXT_FAINT }));
-        let mut item = Column::new().spacing(3).push(line).push(label(c.detail.as_str(), 12.0, theme::TEXT_DIM));
-        if let Some(r) = &c.refusal {
-            item = item.push(label(r.as_str(), 12.0, theme::CAUTION));
-        }
-        choices = choices.push(item);
-    }
-    col = col.push(ui::card("Chat's model choices", choices));
-    let mut reg = Column::new().spacing(8);
+    col = col.push(ui::grid(models_glance(state), 3, 12.0));
+
+    // The endpoints: one line each, what they are and whether they answer, with their actions at the right.
+    let mut reg = Column::new().spacing(4);
     match &state.endpoints {
         None => reg = reg.push(note("Reading the model registry…")),
         Some(e) => {
@@ -775,40 +867,177 @@ fn models_tab(state: &State) -> El<'_> {
             for issue in &e.issues {
                 reg = reg.push(ui::notice(format!("Part of the registry could not be read: {issue}"), theme::CAUTION));
             }
+            reg = reg.push(table_head(&[("Name", 5), ("Kind", 2), ("Where", 2), ("State", 3), ("", 3)]));
+            let free = !state.acting && state.pending_act.is_none();
             for r in &e.rows {
-                let mut line = Row::new().spacing(8).align_y(Alignment::Center);
-                line = line.push(strong(r.label.as_str(), 13.0, theme::TEXT));
-                line = line.push(label(r.kind, 11.5, theme::TEXT_FAINT));
-                line = line.push(chip(if r.local { "This computer" } else { "Off this computer" }, if r.local { theme::POSITIVE } else { theme::CAUTION }));
-                line = line.push(label(r.status.as_str(), 12.0, if r.ready { theme::POSITIVE } else { theme::TEXT_DIM }));
-                let mut sub = Row::new().spacing(10);
-                if !r.model.is_empty() {
-                    sub = sub.push(mono(r.model.as_str(), 11.5, theme::TEXT_DIM));
-                }
-                if !r.key_name.is_empty() {
-                    sub = sub.push(label(format!("key: {} (only whether it is present is read)", r.key_name), 11.5, theme::TEXT_FAINT));
-                }
-                if r.builtin {
-                    sub = sub.push(label("built in", 11.5, theme::TEXT_FAINT));
-                }
-                if let Some(source) = &r.key_source {
-                    sub = sub.push(label(format!("key found in {source}"), 11.5, theme::TEXT_FAINT));
-                }
-                let free = !state.acting && state.pending_act.is_none();
-                let mut acts = Row::new().spacing(6).push(ui::secondary("Edit", free.then(|| Msg::EditEndpoint(r.saved.id.clone()))));
-                if r.saved.id != "llamacpp-local" {
-                    acts = acts.push(ui::secondary(if r.builtin { "Disable" } else { "Remove" }, free.then(|| Msg::AskRemove(r.saved.id.clone()))));
-                }
-                if r.key_source.as_deref() == Some("Credential Manager") {
-                    acts = acts.push(ui::secondary("Forget key", free.then(|| Msg::AskForgetKey(r.key_name.clone()))));
-                }
-                reg = reg.push(column![row![line, space().width(Length::Fill), acts].align_y(Alignment::Center), sub].spacing(2));
+                reg = reg.push(endpoint_line(r, free));
             }
         }
     }
-    col = col.push(ui::card("Model endpoints", reg));
-    col = col.push(endpoint_editor(state));
-    let mut local = Column::new().spacing(8);
+    let add = ui::primary("Add a model endpoint", (!state.acting).then_some(Msg::NewEndpoint));
+    col = col.push(panel("Model endpoints", ENDPOINTS_HELP, Some(add), reg));
+    if let Some(editor) = endpoint_editor(state) {
+        col = col.push(editor);
+    }
+
+    // What the chat can use, and the local server it may start.
+    let mut choices = Column::new().spacing(4);
+    if state.choices.is_empty() {
+        choices = choices.push(note("Reading the model choices…"));
+    }
+    for c in &state.choices {
+        let local = c.locality == Locality::Local;
+        let mut line = Row::new().spacing(8).align_y(Alignment::Center);
+        line = line.push(strong(c.label.as_str(), 13.0, theme::TEXT));
+        if !c.detail.is_empty() {
+            line = line.push(ui::help(c.detail.as_str()));
+        }
+        line = line.push(space().width(Length::Fill));
+        if c.id == state.choice {
+            line = line.push(chip("In use", theme::GOLD));
+        }
+        line = line.push(chip(if local { "This computer" } else { "Off this computer" }, if local { theme::POSITIVE } else { theme::CAUTION }));
+        line = line.push(chip(if c.ready { "Ready" } else { "Not ready" }, if c.ready { theme::POSITIVE } else { theme::TEXT_FAINT }));
+        let mut item = Column::new().spacing(2).push(line);
+        if let Some(r) = &c.refusal {
+            item = item.push(label(r.as_str(), 12.0, theme::CAUTION));
+        }
+        choices = choices.push(item);
+    }
+    let choices = panel("Chat's model choices", "", None, choices);
+    col = col.push(two(width, vec![choices], vec![local_server(state)]));
+
+    // What is read once in a while: the chat core, and the agent runs' models.
+    let mut core = Column::new().spacing(6);
+    let mut core_summary = String::from("not read yet");
+    if let Some(s) = &state.status {
+        core_summary = format!("{} · {} agent turn(s) running", s.runtime, s.agent_turns);
+        core = core.push(fact("Runtime", label(s.runtime.as_str(), 13.0, theme::TEXT)));
+        core = core.push(fact("Agent turns running", label(s.agent_turns.to_string(), 13.0, theme::TEXT)));
+        core = core.push(fact("Chats saved", label(if s.shared_writes { "yes, with the web Lattice's" } else { "no: read only until the gate opens" }, 13.0, theme::TEXT)));
+        if let Some(r) = &s.refusal {
+            core = core.push(ui::notice(r.as_str(), theme::CAUTION));
+        }
+    }
+    if let Some(l) = &state.list {
+        core = core.push(fact("Chat store", mono(l.store_dir.as_str(), 12.0, theme::TEXT_DIM)));
+        core = core.push(fact("Chats kept listed", label(format!("{} (older ones are archived, never deleted)", l.limit), 12.5, theme::TEXT_DIM)));
+    }
+    if state.status.is_none() && state.list.is_none() {
+        core = core.push(note("Reading the chat core…"));
+    }
+    col = col.push(ui::disclosure(
+        "The chat core",
+        label(core_summary, 12.0, theme::TEXT_DIM),
+        state.open_parts.contains(CHAT_CORE),
+        Msg::Disclose(CHAT_CORE),
+        core,
+    ));
+    let mut runs = Column::new().spacing(4);
+    for m in &state.runs.models {
+        runs = runs.push(row![strong(m.label.as_str(), 13.0, theme::TEXT), label(if m.ready { "ready" } else { m.refusal.as_deref().unwrap_or("not ready") }, 12.0, theme::TEXT_DIM)].spacing(10));
+    }
+    let runs_summary = if state.runs.models.is_empty() {
+        runs = runs.push(note("Open the runs tab to read the agent runs' models."));
+        "not read yet: open the Runs tab".to_string()
+    } else {
+        format!("{} of {} ready", state.runs.models.iter().filter(|m| m.ready).count(), state.runs.models.len())
+    };
+    col = col.push(ui::disclosure(
+        "Agent runs' models",
+        label(runs_summary, 12.0, theme::TEXT_DIM),
+        state.open_parts.contains(RUNS_MODELS),
+        Msg::Disclose(RUNS_MODELS),
+        runs,
+    ));
+    scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars).into()
+}
+
+/// The Models tab's closed-by-default parts, by name (`State::open_parts`).
+const CHAT_CORE: &str = "lattice.models.core";
+const RUNS_MODELS: &str = "lattice.models.runs";
+
+/// The Models tab at a glance: the chat's model, the local server and the endpoints, each its state in words.
+fn models_glance(state: &State) -> Vec<El<'_>> {
+    let chat = match state.choices.iter().find(|c| c.id == state.choice) {
+        None if state.choices.is_empty() => tile("Chat model", "Reading…", theme::TEXT_FAINT, String::new()),
+        None => tile("Chat model", "None chosen", theme::CAUTION, "choose one in the chat"),
+        Some(c) => {
+            let where_ = if c.locality == Locality::Local { "This computer" } else { "Off this computer" };
+            let more = match &c.refusal {
+                Some(r) if !c.ready => ui::cut(r, 80),
+                _ => format!("{where_} · {}", if c.ready { "ready" } else { "not ready" }),
+            };
+            tile("Chat model", c.label.as_str(), if c.ready { theme::POSITIVE } else { theme::CAUTION }, more)
+        }
+    };
+    let local = match &state.local {
+        None => tile("Local server", "Reading…", theme::TEXT_FAINT, String::new()),
+        Some(l) => {
+            let (words, color) = local_words(l.state);
+            tile("Local server", words, color, if l.model.is_empty() { "no model chosen".to_string() } else { ui::cut(&l.model, 60) })
+        }
+    };
+    let endpoints = match &state.endpoints {
+        None => tile("Endpoints", "Reading…", theme::TEXT_FAINT, String::new()),
+        Some(e) => {
+            let ready = e.rows.iter().filter(|r| r.ready).count();
+            let more = if e.issues.is_empty() {
+                format!("{} on this computer", e.rows.iter().filter(|r| r.local).count())
+            } else {
+                format!("{} part(s) of the registry unread", e.issues.len())
+            };
+            let color = if !e.issues.is_empty() || ready == 0 { theme::CAUTION } else { theme::POSITIVE };
+            tile("Endpoints", format!("{ready} of {} ready", e.rows.len()), color, more)
+        }
+    };
+    vec![chat, local, endpoints]
+}
+
+/// One endpoint as a line of the table: its name and model (the rest of what is known about it on hover), kind,
+/// where it runs, its state, and what can be done to it.
+fn endpoint_line(r: &super::EndpointRow, free: bool) -> El<'_> {
+    let mut name = Row::new().spacing(8).align_y(Alignment::Center).push(strong(r.label.as_str(), 13.0, theme::TEXT));
+    if !r.model.is_empty() {
+        name = name.push(mono(ui::cut(&r.model, 30), 11.5, theme::TEXT_DIM));
+    }
+    let mut more = Vec::new();
+    if r.builtin {
+        more.push("Built in.".to_string());
+    }
+    if !r.key_name.is_empty() {
+        more.push(format!("Key: {} (only whether it is present is read).", r.key_name));
+    }
+    if let Some(source) = &r.key_source {
+        more.push(format!("Key found in {source}."));
+    }
+    if !more.is_empty() {
+        name = name.push(ui::help(more.join(" ")));
+    }
+    let mut acts = Row::new().spacing(6).push(ui::secondary("Edit", free.then(|| Msg::EditEndpoint(r.saved.id.clone()))));
+    if r.saved.id != "llamacpp-local" {
+        acts = acts.push(ui::secondary(if r.builtin { "Disable" } else { "Remove" }, free.then(|| Msg::AskRemove(r.saved.id.clone()))));
+    }
+    if r.key_source.as_deref() == Some("Credential Manager") {
+        acts = acts.push(ui::secondary("Forget key", free.then(|| Msg::AskForgetKey(r.key_name.clone()))));
+    }
+    row![
+        container(name).width(Length::FillPortion(5)),
+        container(label(r.kind, 12.0, theme::TEXT_DIM)).width(Length::FillPortion(2)),
+        container(chip(if r.local { "This computer" } else { "Off this computer" }, if r.local { theme::POSITIVE } else { theme::CAUTION }))
+            .width(Length::FillPortion(2)),
+        container(label(r.status.as_str(), 12.0, if r.ready { theme::POSITIVE } else { theme::TEXT_DIM })).width(Length::FillPortion(3)),
+        container(acts).width(Length::FillPortion(3)).align_x(iced::alignment::Horizontal::Right),
+    ]
+    .spacing(10)
+    .align_y(Alignment::Center)
+    .into()
+}
+
+/// The local model server: its state, the model it runs (chosen here from the GGUF files installed, as the Python
+/// model bar chooses it) and what is installed.
+fn local_server(state: &State) -> El<'_> {
+    let mut local = Column::new().spacing(6);
     match &state.local {
         None => local = local.push(note("Reading the local server…")),
         Some(l) => {
@@ -816,7 +1045,6 @@ fn models_tab(state: &State) -> El<'_> {
             if !l.detail.is_empty() {
                 local = local.push(note(l.detail.as_str()));
             }
-            // The model Local runs, chosen here as the Python model bar chooses it: from the GGUF files installed.
             let chosen: Element<'_, Msg> = if l.installed.is_empty() {
                 label(if l.model.is_empty() { "none" } else { l.model.as_str() }, 13.0, theme::TEXT).into()
             } else {
@@ -835,45 +1063,99 @@ fn models_tab(state: &State) -> El<'_> {
             if !l.model.is_empty() && !l.installed.contains(&l.model) {
                 local = local.push(note("The chosen model is not among the GGUF files in the models folder; choose one that is."));
             }
-            local = local.push(note("Local and Auto use only this server, on this computer: llama.cpp, started when a chat first needs it and stopped when idle."));
         }
     }
-    col = col.push(ui::card("The local model server", local));
-    let mut core = Column::new().spacing(8);
-    if let Some(s) = &state.status {
-        core = core.push(fact("Runtime", label(s.runtime.as_str(), 13.0, theme::TEXT)));
-        core = core.push(fact("Agent turns running", label(s.agent_turns.to_string(), 13.0, theme::TEXT)));
-        core = core.push(fact("Chats saved", label(if s.shared_writes { "yes, with the web Lattice's" } else { "no: read only until the gate opens" }, 13.0, theme::TEXT)));
-        if let Some(r) = &s.refusal {
-            core = core.push(ui::notice(r.as_str(), theme::CAUTION));
-        }
+    panel(
+        "The local model server",
+        "Local and Auto use only this server, on this computer: llama.cpp, started when a chat first needs it and stopped when idle.",
+        None,
+        local,
+    )
+}
+
+/// The local server's state in words and its colour (the bar's chip and the glance's tile say the same).
+fn local_words(state: RuntimeState) -> (&'static str, iced::Color) {
+    match state {
+        RuntimeState::Ready => ("Local model ready", theme::POSITIVE),
+        RuntimeState::NoModel => ("No local model chosen", theme::CAUTION),
+        RuntimeState::Offline => ("Local server not running", theme::TEXT_FAINT),
+        RuntimeState::Error => ("Local server failed", theme::DANGER),
     }
-    if let Some(l) = &state.list {
-        core = core.push(fact("Chat store", mono(l.store_dir.as_str(), 12.0, theme::TEXT_DIM)));
-        core = core.push(fact("Chats kept listed", label(format!("{} (older ones are archived, never deleted)", l.limit), 12.5, theme::TEXT_DIM)));
+}
+
+// ------------------------------------------------------------------ the parts the tabs share
+
+/// A panel: its title in small capitals, what it is for on hover (`ui::help`; none when `help` is empty), and at its
+/// right `aside` (a button, a count). An explanation is read once, so it waits on hover rather than standing on the page (UX-PRINCIPLES B2).
+pub(super) fn panel<'a, M: 'a>(
+    title: impl text::IntoFragment<'a>,
+    help: impl text::IntoFragment<'a>,
+    aside: Option<Element<'a, M>>,
+    body: Column<'a, M>,
+) -> Element<'a, M> {
+    let mut head = Row::new().spacing(8).align_y(Alignment::Center).push(ui::subheading(title));
+    let help = help.into_fragment();
+    if !help.is_empty() {
+        head = head.push(ui::help(help));
     }
-    col = col.push(ui::card("The chat core", core));
-    let mut runs = Column::new().spacing(6);
-    for m in &state.runs.models {
-        runs = runs.push(row![strong(m.label.as_str(), 13.0, theme::TEXT), label(if m.ready { "ready" } else { m.refusal.as_deref().unwrap_or("not ready") }, 12.0, theme::TEXT_DIM)].spacing(10));
+    head = head.push(space().width(Length::Fill));
+    if let Some(aside) = aside {
+        head = head.push(aside);
     }
-    if state.runs.models.is_empty() {
-        runs = runs.push(note("Open the runs tab to read the agent runs' models."));
+    container(column![head, body.spacing(6)].spacing(10)).padding([12.0, 14.0]).width(Length::Fill).style(theme::panel).into()
+}
+
+/// One tile of a tab's glance: what it is, its state in words beside a dot of its colour, and one line more.
+pub(super) fn tile<'a, M: 'a>(
+    name: &'a str,
+    state: impl text::IntoFragment<'a>,
+    color: iced::Color,
+    more: impl text::IntoFragment<'a>,
+) -> Element<'a, M> {
+    container(
+        column![
+            ui::caps(name, 10.5, theme::TEXT_DIM),
+            row![ui::dot(color), strong(state, 14.0, theme::TEXT)].spacing(8).align_y(Alignment::Center),
+            label(more, 11.5, theme::TEXT_FAINT),
+        ]
+        .spacing(4),
+    )
+    .padding([10.0, 14.0])
+    .width(Length::Fill)
+    .style(theme::panel)
+    .into()
+}
+
+/// Two columns of parts from a laptop's width (`ui::columns_for`), one after the other on a narrow window.
+pub(super) fn two<'a, M: 'a>(width: f32, left: Vec<Element<'a, M>>, right: Vec<Element<'a, M>>) -> Element<'a, M> {
+    let stack = |items: Vec<Element<'a, M>>| items.into_iter().fold(Column::new().spacing(14), |c, e| c.push(e));
+    if ui::columns_for(width) >= 2 {
+        row![stack(left).width(Length::FillPortion(1)), stack(right).width(Length::FillPortion(1))].spacing(14).into()
+    } else {
+        stack(left.into_iter().chain(right).collect()).into()
     }
-    col = col.push(ui::card("Agent runs' models", runs));
-    col = col.push(note("Endpoints, their keys and the local model are set up here; the Python Lattice reads the same registry, the same choice of model and the same Credential Manager entries."));
-    col = col.push(ui::subheading("The section's features"));
-    for feature in crate::catalogue::Section::Lattice.features() {
-        col = col.push(ui::feature_row(feature));
+}
+
+/// A table's header: each column's name over its share of the width, as the rows below share it.
+pub(super) fn table_head<'a, M: 'a>(columns: &[(&'a str, u16)]) -> Element<'a, M> {
+    let mut line = Row::new().spacing(10);
+    for &(name, share) in columns {
+        line = line.push(container(label(name, 11.0, theme::TEXT_FAINT)).width(Length::FillPortion(share)));
     }
-    scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars).into()
+    line.into()
 }
 
 /// How an answer's markdown is drawn (the IDE's agent panel uses it too).
 pub(crate) fn settings() -> markdown::Settings {
+    settings_sized(14.0)
+}
+
+/// How an answer's markdown is drawn, its body text `size` pixels high (the chat's answers are set larger, to read
+/// at length).
+pub(crate) fn settings_sized(size: f32) -> markdown::Settings {
     let f = fonts();
     markdown::Settings::with_text_size(
-        14,
+        size,
         markdown::Style {
             font: f.ui,
             inline_code_highlight: markdown::Highlight { background: theme::RAISED.into(), border: iced::border::rounded(4) },

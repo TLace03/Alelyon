@@ -133,7 +133,12 @@ pub fn go(msg: GridMsg) -> Msg {
 impl State {
     pub(in crate::lattice) fn grid(&mut self, msg: GridMsg) -> Task<Msg> {
         match msg {
-            GridMsg::Show(on) => self.ide.grid.shown = on,
+            GridMsg::Show(on) => {
+                self.ide.grid.shown = on;
+                if on {
+                    self.ide.groups.board_shown = false;
+                }
+            }
             GridMsg::Add(id) => {
                 self.ide.grid.shown = true;
                 if self.ide.grid.holds(&id) {
@@ -249,7 +254,12 @@ impl State {
         }
         let answers = matches!(
             msg,
-            Msg::Decide(..) | Msg::AllowAlways(..) | Msg::Answer(..) | Msg::Ide(IdeMsg::PlanApprove(..)) | Msg::Ide(IdeMsg::PlanKeep(..))
+            Msg::Decide(..)
+                | Msg::AllowAlways(..)
+                | Msg::Answer(..)
+                | Msg::Ide(IdeMsg::PlanApprove(..))
+                | Msg::Ide(IdeMsg::PlanKeep(..))
+                | Msg::Ide(IdeMsg::Choose(..))
         );
         if !answers {
             self.problem = Some("A task is steered from the main chat: tell the agent what it should do.".to_string());
@@ -266,6 +276,12 @@ impl State {
                 on(&services, async move { agent.allow_always(&id, &call, MatchScope::Exact).await.map(|_| ()).map_err(|r| r.message) }),
                 finished,
             ),
+            Msg::Ide(IdeMsg::Choose(call, option)) => {
+                if let Err(refusal) = services.chat.answer(&id, &call, option) {
+                    self.problem = Some(refusal.message);
+                }
+                Task::none()
+            }
             Msg::Answer(call) => {
                 let text = self.answers.remove(&call).unwrap_or_default();
                 if let Err(refusal) = services.chat.answer(&id, &call, text) {

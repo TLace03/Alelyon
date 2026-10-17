@@ -64,12 +64,12 @@ pub enum Feed {
     Gone(i64),
 }
 
-/// The windows on the Stage: Sinai's (when its hands are armed on one) first, then the pinned, never Alelyon's own,
-/// each once, at most `MOST`.
-pub fn on_show(sinais: Option<i64>, pinned: &[i64], own: i64) -> Vec<i64> {
+/// The windows on the Stage: Sinai's (when its hands are armed on one) first, then the pinned, never one of Alelyon's
+/// own (`own`: the main window and each page's own, `windows`), each once, at most `MOST`.
+pub fn on_show(sinais: Option<i64>, pinned: &[i64], own: &[i64]) -> Vec<i64> {
     let mut out: Vec<i64> = Vec::new();
     for h in sinais.into_iter().chain(pinned.iter().copied()) {
-        if h != 0 && h != own && !out.contains(&h) && out.len() < MOST {
+        if h != 0 && !own.contains(&h) && !out.contains(&h) && out.len() < MOST {
             out.push(h);
         }
     }
@@ -78,23 +78,23 @@ pub fn on_show(sinais: Option<i64>, pinned: &[i64], own: i64) -> Vec<i64> {
 
 /// Capture `windows` in turn while the subscription lives; read the window list now and then. Ends when the window
 /// stops listening (the Stage is hidden, or what is on show changes and a new one starts).
-pub fn subscription(windows: Vec<i64>, own: i64) -> Subscription<Feed> {
+pub fn subscription(windows: Vec<i64>, own: Vec<i64>) -> Subscription<Feed> {
     Subscription::run_with((windows, own), |(windows, own)| {
-        let (windows, own) = (windows.clone(), *own);
+        let (windows, own) = (windows.clone(), own.clone());
         iced::stream::channel(4, async move |output: stream_mpsc::Sender<Feed>| {
             let _ = std::thread::Builder::new().name("centcom-stage".into()).spawn(move || run(windows, own, output));
         })
     })
 }
 
-fn run(windows: Vec<i64>, own: i64, mut output: stream_mpsc::Sender<Feed>) {
+fn run(windows: Vec<i64>, own: Vec<i64>, mut output: stream_mpsc::Sender<Feed>) {
     let mut emit = |feed: Feed| futures::executor::block_on(output.send(feed)).is_ok();
     let mut listed: Option<Instant> = None;
     let mut turn = 0usize;
     loop {
         if listed.is_none_or(|t| t.elapsed() >= LIST_EVERY) {
             listed = Some(Instant::now());
-            if !emit(Feed::Windows(open_windows(own))) {
+            if !emit(Feed::Windows(open_windows(&own))) {
                 return;
             }
         }
@@ -243,9 +243,9 @@ mod win {
 }
 
 /// Every top-level window worth offering: visible, not cloaked, not the shell, titled, not minimized, big enough,
-/// and not `exclude` (Alelyon's own window).
+/// and not in `exclude` (Alelyon's own windows).
 #[cfg(windows)]
-pub fn open_windows(exclude: i64) -> Vec<Window> {
+pub fn open_windows(exclude: &[i64]) -> Vec<Window> {
     use std::cell::RefCell;
     // EnumWindows takes a plain function pointer, so the list comes back through a thread-local.
     thread_local! {
@@ -286,12 +286,12 @@ pub fn open_windows(exclude: i64) -> Vec<Window> {
         win::EnumWindows(visit, 0);
     }
     let mut found = FOUND.with(|f| f.borrow_mut().split_off(0));
-    found.retain(|w| w.handle != exclude);
+    found.retain(|w| !exclude.contains(&w.handle));
     found
 }
 
 #[cfg(not(windows))]
-pub fn open_windows(_exclude: i64) -> Vec<Window> {
+pub fn open_windows(_exclude: &[i64]) -> Vec<Window> {
     Vec::new()
 }
 
@@ -380,11 +380,12 @@ mod tests {
 
     #[test]
     fn the_stage_shows_sinais_window_then_the_pinned_and_never_alelyon() {
-        assert_eq!(on_show(None, &[], 99), Vec::<i64>::new(), "nothing by default");
-        assert_eq!(on_show(Some(5), &[7, 5, 99, 8], 99), [5, 7, 8], "Sinai's first, each once, never Alelyon's own");
-        assert_eq!(on_show(Some(99), &[], 99), Vec::<i64>::new(), "not even when Sinai works in it");
+        assert_eq!(on_show(None, &[], &[99]), Vec::<i64>::new(), "nothing by default");
+        assert_eq!(on_show(Some(5), &[7, 5, 99, 8], &[99]), [5, 7, 8], "Sinai's first, each once, never Alelyon's own");
+        assert_eq!(on_show(Some(99), &[], &[99]), Vec::<i64>::new(), "not even when Sinai works in it");
+        assert_eq!(on_show(Some(5), &[7, 42, 8], &[99, 42]), [5, 7, 8], "nor a page's own window (`windows`)");
         let many: Vec<i64> = (1..=20).collect();
-        assert_eq!(on_show(None, &many, 0).len(), MOST);
+        assert_eq!(on_show(None, &many, &[]).len(), MOST);
     }
 
     #[test]
@@ -421,7 +422,7 @@ mod tests {
     fn nothing_is_captured_from_a_window_that_is_not_there() {
         assert!(shoot(0).is_none());
         assert!(shoot(0x7fff_fff0).is_none(), "no such window");
-        assert!(open_windows(0).iter().all(|w| !w.title.trim().is_empty() && w.aspect > 0.0));
+        assert!(open_windows(&[]).iter().all(|w| !w.title.trim().is_empty() && w.aspect > 0.0));
     }
 
     /// By hand (`cargo test -- --ignored a_real_window_draws`): the open windows on this PC are listed and each is
@@ -430,7 +431,7 @@ mod tests {
     #[test]
     #[ignore]
     fn a_real_window_draws() {
-        let windows = open_windows(0);
+        let windows = open_windows(&[]);
         assert!(!windows.is_empty(), "no window offered");
         let mut drawn = 0;
         for w in &windows {

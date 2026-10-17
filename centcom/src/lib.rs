@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! centcom [--section overview|sinai|words|lattice|fleet|data|trust|compute|account] [--tab captions|dictation|pc|files|library|<a Fleet, Compute or Lattice tab>|<a Data store>[/<table>]|appearance]
-//!         [--verify <receipt.json>] [--screenshot <file.png> [--after-ms N]]
+//!         [--verify <receipt.json>] [--screenshot <file.png> [--after-ms N] [--scale N]]
 //! ```
 //!
 //! Since 2026-10-03 the project's applications are becoming one CENTCOM-style window on iced,
@@ -12,7 +12,9 @@
 //! each of its features with where it lives today.
 //!
 //! `--screenshot` draws the chosen page, writes it as a PNG after `--after-ms` (2500 by default) and exits:
-//! the proof a change looks right, without anyone watching the screen.
+//! the proof a change looks right, without anyone watching the screen. `--scale 2` draws it at twice the pixels: the
+//! same layout in a window twice the size, larger than the screen if need be, for a picture that stays sharp on a
+//! high-density screen.
 //!
 //! The speech engine: CENTCOM reads one that is running, and starts one (`<engine> serve`, adding
 //! `CENTCOM_EARS_ARGS`, ended when CENTCOM ends) where its build says where the engine is (`installed.rs`).
@@ -28,6 +30,7 @@
 mod app;
 // The sign-in screen's living backdrop: a carbon-fibre plain under a rolling gold fog the cursor stirs.
 mod backdrop;
+mod bridge;
 mod brand;
 pub mod capability;
 pub mod catalogue;
@@ -90,6 +93,8 @@ pub mod ui;
 pub mod utc;
 mod view;
 mod voice;
+// Pages in windows of their own: a pop-out button, a drag out of the rail, the windows' keys and panels.
+mod windows;
 
 // Sinai's bust, its expressions, the appearance a person gives it, and where a window keeps that appearance: the
 // `sinai-face` crate (../crates/sinai-face), which the Angel window links too, so both windows draw one Sinai (no
@@ -146,25 +151,36 @@ pub fn run(registry: Registry) -> ExitCode {
     // the window as large as it was left, and maximised if it was (`session`); a photograph opens at the usual size
     let kept = session::path(screenshot).map(|at| session::load(&at)).unwrap_or_default();
     let size = kept.size.map(|(w, h)| Size::new(w.clamp(980.0, 7680.0), h.clamp(640.0, 4320.0))).unwrap_or(Size::new(1440.0, 900.0));
+    // a photograph at `--scale` times the pixels: the layout of `size`, drawn into a window that many times larger.
+    // Windows holds a window to the screen's size unless it names a largest size of its own, so a scaled photograph
+    // names one; any other run keeps the screen's.
+    let scale = options.scale.filter(|_| screenshot).unwrap_or(1.0);
+    let size = size * scale;
+    let max_size = (scale > 1.0).then(|| Size::new(7680.0, 4320.0) * scale);
     prefer_opengl();
     lattice_app::theme::set_fonts(lattice_app::theme::Fonts::detect());
     theme::set_display(theme::detect_display());
-    let ran = iced::application(move || app::App::boot_with(options.clone(), &registry), app::App::update, view::view)
-        .title(|_: &app::App| "Alelyon".to_string())
+    let main = window::Settings {
+        size,
+        maximized: kept.maximised,
+        min_size: Some(Size::new(980.0, 640.0)),
+        max_size,
+        icon: brand::window_icon(),
+        // no Windows frame: the title bar and edges are the window's own (src/chrome.rs)
+        decorations: false,
+        // its close asks first: friends are told the app went offline, then every window goes (`windows`)
+        exit_on_close_request: false,
+        #[cfg(windows)]
+        platform_specific: window::settings::PlatformSpecific { undecorated_shadow: true, ..Default::default() },
+        ..window::Settings::default()
+    };
+    // A daemon, which opens its own windows: the main one at boot, and a page's own when it is popped out (src/windows.rs).
+    let ran = iced::daemon(move || app::App::boot_in(options.clone(), &registry, main.clone()), app::App::update, view::view)
+        .title(app::App::title)
         .subscription(app::App::subscription)
-        .theme(|_: &app::App| theme::theme())
+        .theme(|_: &app::App, _: window::Id| theme::theme())
         .style(|_: &app::App, t: &iced::Theme| theme::app_style(t))
-        .window(window::Settings {
-            size,
-            maximized: kept.maximised,
-            min_size: Some(Size::new(980.0, 640.0)),
-            icon: brand::window_icon(),
-            // no Windows frame: the title bar and edges are the window's own (src/chrome.rs)
-            decorations: false,
-            #[cfg(windows)]
-            platform_specific: window::settings::PlatformSpecific { undecorated_shadow: true, ..Default::default() },
-            ..window::Settings::default()
-        })
+        .scale_factor(move |_: &app::App, _: window::Id| scale)
         .default_font(theme::fonts().ui)
         .antialiasing(true)
         .run();

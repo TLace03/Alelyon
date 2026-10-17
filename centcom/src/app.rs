@@ -152,12 +152,15 @@ pub struct Options {
     pub file: Option<String>,
     pub screenshot: Option<PathBuf>,
     pub after_ms: u64,
+    /// A `--screenshot` drawn at this many times the pixels: the same layout in a window that many times the size, so
+    /// the picture stays sharp on a high-density screen. Ignored without `--screenshot`.
+    pub scale: Option<f32>,
     /// Show the sign-in screen even in a `--screenshot` run (which otherwise opens straight onto the page, offline).
     pub sign_in: bool,
 }
 
 pub const USAGE: &str = "usage: centcom [--section overview|sinai|words|lattice|fleet|data|research|trust|compute|account] \
-[--tab captions|dictation|pc|files|library|queue|sessions|landing|bus|machine|simulator|training|<a plug-in's tab>|<scene>|chat|runs|models|morphometry|foundry|<store>[/<table>]|appearance|brain] [--verify <receipt.json>] [--folder <folder> [--file <path in it>]] [--screenshot <file.png> [--after-ms N]] [--sign-in]";
+[--tab captions|dictation|pc|files|library|queue|sessions|landing|bus|machine|simulator|training|<a plug-in's tab>|<scene>|chat|runs|models|morphometry|foundry|<store>[/<table>]|appearance|brain] [--verify <receipt.json>] [--folder <folder> [--file <path in it>]] [--screenshot <file.png> [--after-ms N] [--scale N]] [--sign-in]";
 
 impl Options {
     #[cfg(test)]
@@ -208,6 +211,11 @@ impl Options {
                 "--screenshot" => options.screenshot = Some(PathBuf::from(value()?)),
                 "--sign-in" => options.sign_in = true,
                 "--after-ms" => options.after_ms = value()?.parse().map_err(|e| format!("--after-ms: {e}"))?,
+                "--scale" => {
+                    let given = value()?;
+                    let scale = given.parse::<f32>().ok().filter(|s| (1.0..=4.0).contains(s));
+                    options.scale = Some(scale.ok_or_else(|| format!("--scale takes a number from 1 to 4, not {given:?}"))?);
+                }
                 "--help" | "-h" => return Err(USAGE.to_string()),
                 other => return Err(format!("unknown argument {other:?}\n{USAGE}")),
             }
@@ -219,6 +227,8 @@ impl Options {
 pub struct App {
     pub section: Section,
     pub tab: Tab,
+    /// Transcription's tabs in windows of their own (`windows`).
+    pub words_out: Vec<Tab>,
     /// The spinners' angle.
     pub phase: f32,
     pub link: Link,
@@ -238,6 +248,12 @@ pub struct App {
     pub jobs: Vec<ears::Job>,
     /// The last thing that went wrong, until it is dismissed.
     pub notice: Option<String>,
+    /// The agent bridge while Settings has it on (`bridge`): the person's own agent drives this window.
+    pub bridge: Option<crate::bridge::Bridge>,
+    /// The person allowed the agent to act in this window, until it closes or the bridge is switched off.
+    pub bridge_writes: bool,
+    /// What an agent asked to do before it was allowed: the banner that asks the person.
+    pub bridge_asking: Option<String>,
     pub probes: Vec<probe::Reading>,
     /// When the services last changed, as `probe::watch` said (it says only a change).
     pub services_fresh: crate::live::Freshness,
@@ -283,6 +299,8 @@ pub struct App {
     pub window_id: Option<window::Id>,
     pub maximised: bool,
     pub bar_pressed: Option<std::time::Instant>,
+    /// The pages in windows of their own, the window the keyboard is in, and a drag out of the rail (`windows`).
+    pub windows: crate::windows::Windows,
     /// The company mark, made once, for the sign-in screen.
     pub mark: Option<iced::widget::image::Handle>,
     /// Alelyon's own window (its HWND), once the window system has said: never captured, and named to the loop so
@@ -296,11 +314,14 @@ pub struct App {
     pub stage_shots: std::collections::HashMap<i64, (iced::widget::image::Handle, f32)>,
     pub stage_gone: Vec<i64>,
     /// The loop has been told which window this is, on this connection.
-    watch_sent: bool,
+    /// The window last named to the loop as showing what Sinai sees (`sinai::watch`).
+    watch_sent: Option<u64>,
     /// Sinai's face: its animation, which runs only while it is on show, and what the graphics card made of it.
     pub face: face::Face,
     /// The measured brain last put inside Sinai's glass head, so it goes in once per measurement.
     sinai_brain: Option<Arc<lattice::brain::Brain>>,
+    /// The plan's harness limits Lattice was last given (`sync_plan_limits`); `None` until it has been given any.
+    plan_limits_applied: Option<Option<lattice_core::convo::plan_limits::PlanLimits>>,
     /// Sinai's appearance as the Angel window keeps it (with the looks a person kept), and where that file is.
     pub appearance: appearance::Saved,
     appearance_path: Option<PathBuf>,
@@ -379,6 +400,8 @@ pub struct App {
     resized_to: Option<iced::Size>,
     options: Options,
     shot_taken: bool,
+    /// The parts of pages that are open (`ui::disclosure`), by name; closed unless a person opened one.
+    pub open_parts: std::collections::BTreeSet<&'static str>,
 }
 
 #[derive(Clone, Debug)]
@@ -412,6 +435,10 @@ pub enum Message {
     OpenFolder(String),
     CopyTranscript(Vec<String>),
     DismissNotice,
+    /// A request of the person's own agent through the bridge (`bridge`).
+    Bridge(crate::bridge::AskCell),
+    /// The person's answer to the banner: allow their agent to act in this window, or not.
+    BridgeAllow(bool),
     Sinai(sinai::Feed),
     Typed(String),
     SayTyped,
@@ -511,6 +538,10 @@ pub enum Message {
     SignIn(crate::signin::Msg),
     /// The window's own title bar and edges.
     Chrome(crate::chrome::Act),
+    /// Pages in windows of their own (`windows`).
+    Windows(crate::windows::Msg),
+    /// A message from a page's own window, or a key or a file from a window: handled as from that window.
+    In(window::Id, Box<Message>),
     /// Tab (forward) or Shift+Tab (back) that no widget used: focus moves to the next or previous field.
     FocusMove(bool),
     /// Esc, wherever the keyboard is (and whether a widget took it): it closes what lies topmost over the page (the
@@ -527,9 +558,12 @@ pub enum Message {
     RailFocus,
     RailMove(i32),
     RailEnter,
-    WindowId(Option<window::Id>),
     Maximised(bool),
     Resized(iced::Size),
+    /// A part of a page opened or closed (`ui::disclosure`).
+    Disclose(&'static str),
+    /// The page's scroller moved (Pages reads its next page near the end).
+    PageScrolled(iced::widget::scrollable::Viewport),
     /// Where the window was left changed a second ago: it is kept (`session`).
     SaveSession,
     Social(crate::social::Msg),
@@ -540,6 +574,17 @@ impl App {
     #[cfg(test)]
     pub fn boot(options: Options) -> (App, Task<Message>) {
         App::boot_with(options, &Registry::default())
+    }
+
+    /// The app with its main window open, as `main` says: it runs as a daemon, so a page can have a window of its own
+    /// (`windows`) and the app ends when the main window closes.
+    pub fn boot_in(options: Options, registry: &Registry, main: window::Settings) -> (App, Task<Message>) {
+        let (mut app, first) = App::boot_with(options, registry);
+        let (id, opened) = window::open(main);
+        app.window_id = Some(id);
+        // Alelyon's own window: the Stage never captures it, and the loop is told which it is.
+        let own = opened.then(window::raw_id::<Message>).map(Message::OwnWindow);
+        (app, Task::batch([own, first]))
     }
 
     /// The window as `registry` makes it: the public build's is empty.
@@ -594,6 +639,9 @@ impl App {
             formats: [true, true, false, false],
             jobs: Vec::new(),
             notice: layout_note,
+            bridge: None,
+            bridge_writes: false,
+            bridge_asking: None,
             probes: Vec::new(),
             services_fresh: crate::live::Freshness::waiting(),
             voice_fresh: crate::live::Freshness::waiting(),
@@ -621,6 +669,8 @@ impl App {
             window_id: None,
             maximised: false,
             bar_pressed: None,
+            windows: crate::windows::Windows::default(),
+            words_out: Vec::new(),
             mark: crate::brand::mark_rgba().ok().map(|(rgba, w, h)| iced::widget::image::Handle::from_rgba(w, h, rgba)),
             own_window: None,
             stage_pinned: Vec::new(),
@@ -628,9 +678,10 @@ impl App {
             stage_windows: Vec::new(),
             stage_shots: std::collections::HashMap::new(),
             stage_gone: Vec::new(),
-            watch_sent: false,
+            watch_sent: None,
             face: face::Face::new(appearance.current.clone()),
             sinai_brain: None,
+            plan_limits_applied: None,
             appearance,
             appearance_path,
             creator: None,
@@ -681,6 +732,7 @@ impl App {
             resized_to: None,
             options,
             shot_taken: false,
+            open_parts: Default::default(),
         };
         app.restore_session();
         // A debug build's photograph of the command palette (`CENTCOM_PALETTE=<typed>`): it opens with that typed.
@@ -698,9 +750,6 @@ impl App {
         // `--tab library`, reads what switching to it would have read).
         let mut first = Vec::new();
         first.push(signin_task.map(Message::SignIn));
-        // Alelyon's own window: the Stage never captures it, and the loop is told which it is.
-        first.push(window::latest().and_then(window::raw_id::<Message>).map(Message::OwnWindow));
-        first.push(window::latest().map(Message::WindowId));
         if matches!(app.section, Section::Overview | Section::Sinai) {
             // the parts' cards: each part's choice, and the models they name
             first.push(app.parts.read().map(Message::Parts));
@@ -836,7 +885,133 @@ impl App {
         if app.section == Section::Trust {
             first.push(app.open_trust_cards());
         }
+        app.bridge_sync();
         (app, Task::batch(first))
+    }
+
+    /// Start or stop the agent bridge as Settings has it.
+    fn bridge_sync(&mut self) {
+        let wanted = self.signin.agent_bridge && self.options.screenshot.is_none();
+        if wanted && self.bridge.is_none() {
+            match crate::bridge::Bridge::start(crate::bridge::handoff_path()) {
+                Ok((bridge, _token)) => self.bridge = Some(bridge),
+                Err(why) => self.notice = Some(format!("The agent bridge could not start: {why}")),
+            }
+        } else if !wanted && self.bridge.is_some() {
+            self.bridge = None;
+            self.bridge_writes = false;
+            self.bridge_asking = None;
+        }
+    }
+
+    /// Answer one request of the person's agent (`bridge`). Reading answers at once; anything that changes the window
+    /// waits until the person allows the agent, then shows in the window's notice as it happens.
+    fn bridge_answer(&mut self, cell: crate::bridge::AskCell) -> Task<Message> {
+        use serde_json::{Value, json};
+        let ask = cell.0;
+        let f = ask.fields.clone();
+        let text = |k: &str| f.get(k).and_then(Value::as_str).map(str::to_string);
+        let name = |s: Section| format!("{s:?}").to_lowercase();
+        match ask.command.as_str() {
+            "status" => {
+                ask.answer(200, json!({
+                    "app": "Alelyon", "section": name(self.section),
+                    "sections": Section::ALL.iter().map(|s| name(*s)).collect::<Vec<_>>(),
+                    "lattice_ready": self.lattice.services_ready(), "actions_allowed": self.bridge_writes,
+                }));
+                return Task::none();
+            }
+            "chats" => {
+                let chats = self.lattice.list.as_ref().map(|l| {
+                    l.conversations.iter().take(50).map(|c| json!({
+                        "id": c.id, "title": c.title, "updated": c.updated, "turns": c.turns, "running": c.running,
+                    })).collect::<Vec<_>>()
+                });
+                ask.answer(200, json!({"chats": chats.unwrap_or_default(), "read": self.lattice.list.is_some()}));
+                return Task::none();
+            }
+            "chat_read" => {
+                let last = f.get("last").and_then(Value::as_u64).unwrap_or(10).clamp(1, 50) as usize;
+                match self.lattice.open.as_ref() {
+                    Some(c) => {
+                        let turns: Vec<Value> = c.turns.iter().rev().take(last).rev()
+                            .map(|t| json!({"role": format!("{:?}", t.role).to_lowercase(), "text": t.text}))
+                            .collect();
+                        ask.answer(200, json!({"id": c.summary.id, "title": c.summary.title, "running": c.running,
+                                               "turns": turns, "writing": c.live_text}));
+                    }
+                    None => ask.answer(200, json!({"id": null, "turns": [], "running": false})),
+                }
+                return Task::none();
+            }
+            "runs" => {
+                let runs: Vec<Value> = self.lattice.runs.list.iter().take(50).map(|r| json!({
+                    "id": r.id, "task": r.task, "agent": r.agent_label, "model": r.model_label,
+                    "status": format!("{:?}", r.status).to_lowercase(), "created_at": r.created_at,
+                })).collect();
+                ask.answer(200, json!({"runs": runs}));
+                return Task::none();
+            }
+            _ => {}
+        }
+        // Everything below changes the window.
+        let said = match ask.command.as_str() {
+            "go" => text("section").map(|s| format!("open {s}")),
+            "chat_new" => Some("start a new chat".to_string()),
+            "chat_open" => text("id").map(|_| "open a chat".to_string()),
+            "chat_send" => text("text").map(|t| format!("send \"{}\"", t.chars().take(60).collect::<String>())),
+            "open_url" => text("url").map(|u| format!("open {u}")),
+            "run_start" => text("task").map(|t| format!("start a run: \"{}\"", t.chars().take(60).collect::<String>())),
+            _ => {
+                ask.answer(404, json!({"error": "unknown-command", "message": "That is not a bridge command."}));
+                return Task::none();
+            }
+        };
+        let Some(said) = said else {
+            ask.answer(400, json!({"error": "missing-field", "message": "A field this command needs is missing."}));
+            return Task::none();
+        };
+        if !self.bridge_writes {
+            self.bridge_asking = Some(said);
+            ask.answer(409, json!({"error": "ask-pending", "message":
+                "The Alelyon window is asking the person to allow their agent to act in it. Try again once they allow it."}));
+            return Task::none();
+        }
+        let go_lattice = || Task::done(Message::Go(Section::Lattice));
+        let task = match ask.command.as_str() {
+            "go" => {
+                let wanted = text("section").unwrap_or_default();
+                match Section::ALL.into_iter().find(|s| name(*s) == wanted) {
+                    Some(section) => Task::done(Message::Go(section)),
+                    None => {
+                        ask.answer(404, json!({"error": "unknown-section", "message": "There is no such section; see status."}));
+                        return Task::none();
+                    }
+                }
+            }
+            "chat_new" => Task::batch([go_lattice(), Task::done(Message::Lattice(lattice::Msg::New))]),
+            "chat_open" => Task::batch([go_lattice(), Task::done(Message::Lattice(lattice::Msg::Open(text("id").unwrap_or_default())))]),
+            "chat_send" => {
+                self.lattice.composer = text_editor::Content::with_text(&text("text").unwrap_or_default());
+                Task::batch([go_lattice(), Task::done(Message::Lattice(lattice::Msg::Send))])
+            }
+            "open_url" => {
+                let url = text("url").unwrap_or_default();
+                if !url.to_ascii_lowercase().starts_with("https://") || url.len() > 4096 || url.chars().any(char::is_whitespace) {
+                    ask.answer(400, json!({"error": "bad-url", "message": "Only an https:// address opens."}));
+                    return Task::none();
+                }
+                Task::batch([go_lattice(), self.lattice.open_web(url).map(Message::Lattice)])
+            }
+            _ => Task::batch([
+                go_lattice(),
+                Task::done(Message::Lattice(lattice::Msg::Task(text("task").unwrap_or_default()))),
+                Task::done(Message::Lattice(lattice::Msg::StartRun)),
+            ]),
+        };
+        self.notice = Some(format!("Your agent: {said}."));
+        ask.answer(200, json!({"done": said}));
+        task
     }
 
     pub fn connected(&self) -> bool {
@@ -856,7 +1031,14 @@ impl App {
             Link::Connecting | Link::Lost(_) => true,
             Link::Unavailable(_) => self.starting,
         };
-        ears || match self.section {
+        ears || Section::ALL.into_iter().any(|s| self.on_show(s) && self.page_busy(s))
+            || (self.models.open && self.models.busy())
+            || (self.parts.open.is_some() && (self.parts.busy() || self.models.busy()))
+    }
+
+    /// Whether `section`'s page has something under way that its spinner turns for.
+    fn page_busy(&self, section: Section) -> bool {
+        match section {
             // the services' tiles until the first look is in (later looks are said only when something changed)
             Section::Overview => self.probes.is_empty(),
             Section::Sinai => {
@@ -875,8 +1057,7 @@ impl App {
             Section::Pages => self.pages.busy(),
             Section::Lattice => self.lattice.busy(),
             Section::Account => self.signin.busy.is_some(),
-        } || (self.models.open && self.models.busy())
-            || (self.parts.open.is_some() && (self.parts.busy() || self.models.busy()))
+        }
     }
 
     /// A research gap for Sinai: where its loop works gaps itself, it is asked to (it reads the archive, looks for newer
@@ -933,6 +1114,14 @@ impl App {
     }
 
     /// The strip on Sinai's page sends to the mind's cloud model while it is the one answering.
+    /// The signed-in plan's limits on the harness reach Lattice whenever they change (`signin::State::harness_limits`).
+    fn sync_plan_limits(&mut self) {
+        let limits = self.signin.harness_limits();
+        if self.plan_limits_applied != Some(limits) && self.lattice.set_plan_limits(limits) {
+            self.plan_limits_applied = Some(limits);
+        }
+    }
+
     fn sync_cloud_mind(&mut self) {
         self.models.cloud_mind = match self.answering() {
             crate::models::Answering::Cloud(pick) => Some(pick),
@@ -1080,13 +1269,13 @@ impl App {
         Timers {
             spin: self.spinning(),
             // Not behind the sign-in screen: each look made the busy spinner redraw the whole window for a second.
-            services: self.signin.through() && matches!(self.section, Section::Overview | Section::Sinai),
+            services: self.signin.through() && (self.on_show(Section::Overview) || self.on_show(Section::Sinai)),
             // The voiceprint's folder, watched while the Sinai page shows it (it was read again every 30 s).
-            speaker: self.signin.through() && self.section == Section::Sinai,
+            speaker: self.signin.through() && self.on_show(Section::Sinai),
             // A re-enrolment's script is read while it runs, wherever the window is; quickly only where it is on show.
-            voice: self.voice.running().then_some(if self.section == Section::Sinai { VOICE_ON_SHOW } else { VOICE_ELSEWHERE }),
+            voice: self.voice.running().then_some(if self.on_show(Section::Sinai) { VOICE_ON_SHOW } else { VOICE_ELSEWHERE }),
             // A held act's countdown moves once a second, only while one is still counting and its page is open.
-            held: self.section == Section::Sinai
+            held: self.on_show(Section::Sinai)
                 && self.conversation.held.iter().any(|h| h.left(held_at, std::time::Instant::now()) > 0.0),
         }
     }
@@ -1099,7 +1288,7 @@ impl App {
 
     /// Whether the Stage is on show: the Sinai page is open and a dock shows the Stage tab.
     pub fn stage_visible(&self) -> bool {
-        self.section == Section::Sinai
+        self.on_show(Section::Sinai)
             && self.grants_draft.is_none()
             && self.creator.is_none()
             && self.dock.iter().any(|(_, tabs)| tabs.views.get(tabs.active) == Some(&dock::View::Stage))
@@ -1128,24 +1317,30 @@ impl App {
     /// Whether Sinai's face is on show: the Sinai page is open and a dock shows Sinai's tab. Only then is the face in
     /// the window at all, so only then does its frame clock run.
     pub fn face_visible(&self) -> bool {
-        face::on_show(self.section == Section::Sinai, self.grants_draft.is_some() || self.creator.is_some(), self.dock.iter().filter_map(|(_, tabs)| tabs.views.get(tabs.active).copied()))
+        face::on_show(self.on_show(Section::Sinai), self.grants_draft.is_some() || self.creator.is_some(), self.dock.iter().filter_map(|(_, tabs)| tabs.views.get(tabs.active).copied()))
     }
 
     /// The windows on the Stage now: Sinai's first, then the pinned, never Alelyon's own.
     pub fn stage_on_show(&self) -> Vec<i64> {
-        stage::on_show(self.sinai_window(), &self.stage_pinned, self.own_window.unwrap_or(0) as i64)
+        stage::on_show(self.sinai_window(), &self.stage_pinned, &self.own_windows())
     }
 
     /// Name this window to the loop once a connection, when the Stage is first on show (as the Angel window does), so
     /// Sinai never observes the window that shows what it sees; `on` is the loop's own word for a view being shown.
-    fn tell_loop_which_window(&mut self) {
-        if self.watch_sent || !self.stage_visible() {
+    /// The window is the one Sinai's page is in: the main window, or the page's own (`windows`), named again when the
+    /// page moves.
+    pub(crate) fn tell_loop_which_window(&mut self) {
+        if !self.stage_visible() {
             return;
         }
-        if let (Some(own), Some(c)) = (self.own_window, &self.sinai_commands)
-            && c.send(sinai::watch(own))
+        let Some(mine) = self.stage_window() else { return };
+        if self.watch_sent == Some(mine) {
+            return;
+        }
+        if let Some(c) = &self.sinai_commands
+            && c.send(sinai::watch(mine))
         {
-            self.watch_sent = true;
+            self.watch_sent = Some(mine);
         }
     }
 
@@ -1221,6 +1416,7 @@ impl App {
         self.lattice.restore_place(kept.lattice.clone());
         self.palette_recent = kept.recent.clone();
         self.window_size = kept.size.map(|(w, h)| iced::Size::new(w, h));
+        self.pages.width = kept.size.map(|(w, _)| w);
         self.maximised = kept.maximised;
         self.session_kept = kept;
     }
@@ -1293,6 +1489,10 @@ impl App {
         let keeps = !matches!(message, Message::Tick | Message::SaveSession);
         self.sync_cloud_mind();
         let task = self.handle(message);
+        self.sync_plan_limits();
+        if !self.panel_open() {
+            self.windows.panel_in = None;
+        }
         self.sync_cloud_mind();
         if keeps && self.session_path.is_some() && !self.session_changed && self.session() != self.session_kept {
             self.session_changed = true;
@@ -1301,59 +1501,87 @@ impl App {
         task
     }
 
+    /// `section` left the main window for another page, or its own window closed: unless it is still on show
+    /// somewhere, the pages that run only while they show stop.
+    pub(crate) fn leave(&mut self, section: Section) {
+        // the page itself: one of its tabs in a window of its own runs on by itself (Compute's simulator stops with
+        // the page unless its own tab is out)
+        if self.page_on_show(section) {
+            return;
+        }
+        match section {
+            // The simulator runs only while its page is on show.
+            Section::Compute => self.compute.close(),
+            Section::Lattice => self.lattice.close(),
+            Section::Trust => self.trust_cards.iter_mut().for_each(|c| c.page.close()),
+            _ => {}
+        }
+    }
+
+    /// `section` comes on show, in the main window or in a window of its own: what opening it reads.
+    pub(crate) fn enter(&mut self, section: Section) -> Task<Message> {
+        self.tell_loop_which_window();
+        // The services are looked at by `probe::watch` while these pages are open; Sinai's slow facts are read now.
+        // the parts' cards show each part's choice and the models they name
+        let cards = if matches!(section, Section::Overview | Section::Sinai) {
+            let parts = if self.parts.snapshot.is_none() { self.parts.read().map(Message::Parts) } else { Task::none() };
+            let models = if self.models.catalog.is_none() { self.models.read().map(Message::Models) } else { Task::none() };
+            Task::batch([parts, models])
+        } else {
+            Task::none()
+        };
+        if section == Section::Sinai {
+            self.voice.refresh();
+            let look = self.auto_update(crate::sinai_parts::auto::Msg::Look);
+            return Task::batch([self.read_listening(), cards, look]);
+        }
+        if section == Section::Overview {
+            return cards;
+        }
+        if section == Section::Fleet {
+            return self.fleet.as_mut().map_or_else(Task::none, |f| f.open().map(Message::Fleet));
+        }
+        if section == Section::Data {
+            return self.data.open().map(Message::Data);
+        }
+        if section == Section::Research {
+            return self.research.open().map(Message::Research);
+        }
+        if section == Section::Compute {
+            return self.compute.open().map(Message::Compute);
+        }
+        if section == Section::Pages && self.pages.active() {
+            return self.pages.open().map(Message::Pages);
+        }
+        if section == Section::Lattice {
+            return self.lattice.open().map(Message::Lattice);
+        }
+        if section == Section::Trust {
+            return self.open_trust_cards();
+        }
+        Task::none()
+    }
+
     fn handle(&mut self, message: Message) -> Task<Message> {
         match message {
+            Message::In(id, message) => return self.handle_in(id, *message),
+            Message::Windows(msg) => return self.windows_update(msg),
             Message::Go(section) => {
-                // The simulator runs only while its page is on show.
-                if self.section == Section::Compute && section != Section::Compute {
-                    self.compute.close();
+                // a page in a window of its own: that window comes forward (`windows`)
+                if let Some(p) = self.windows.of(section) {
+                    return crate::windows::raise(p.id);
                 }
-                if self.section == Section::Lattice && section != Section::Lattice {
-                    self.lattice.close();
-                }
-                if self.section == Section::Trust && section != Section::Trust {
-                    self.trust_cards.iter_mut().for_each(|c| c.page.close());
-                }
+                let was = self.section;
                 self.section = section;
-                self.tell_loop_which_window();
-                // The services are looked at by `probe::watch` while these pages are open; Sinai's slow facts are read now.
-                // the parts' cards show each part's choice and the models they name
-                let cards = if matches!(section, Section::Overview | Section::Sinai) {
-                    let parts = if self.parts.snapshot.is_none() { self.parts.read().map(Message::Parts) } else { Task::none() };
-                    let models = if self.models.catalog.is_none() { self.models.read().map(Message::Models) } else { Task::none() };
-                    Task::batch([parts, models])
-                } else {
-                    Task::none()
-                };
-                if section == Section::Sinai {
-                    self.voice.refresh();
-                    let look = self.auto_update(crate::sinai_parts::auto::Msg::Look);
-                    return Task::batch([self.read_listening(), cards, look]);
+                self.windows.shown(section);
+                if was != section {
+                    self.leave(was);
                 }
-                if section == Section::Overview {
-                    return cards;
-                }
-                if section == Section::Fleet {
-                    return self.fleet.as_mut().map_or_else(Task::none, |f| f.open().map(Message::Fleet));
-                }
-                if section == Section::Data {
-                    return self.data.open().map(Message::Data);
-                }
-                if section == Section::Research {
-                    return self.research.open().map(Message::Research);
-                }
-                if section == Section::Compute {
-                    return self.compute.open().map(Message::Compute);
-                }
-                if section == Section::Pages && self.pages.active() {
-                    return self.pages.open().map(Message::Pages);
-                }
-                if section == Section::Lattice {
-                    return self.lattice.open().map(Message::Lattice);
-                }
-                if section == Section::Trust {
-                    return self.open_trust_cards();
-                }
+                return self.enter(section);
+            }
+            // a tab in a window of its own is not shown twice: its window comes forward (`windows`)
+            Message::Tab(tab) if self.words_out.contains(&tab) => {
+                return self.windows.of_part(crate::windows::Part::Words(tab)).map_or_else(Task::none, |p| crate::windows::raise(p.id));
             }
             Message::Tab(tab) => {
                 self.tab = tab;
@@ -1377,7 +1605,26 @@ impl App {
                 return Task::batch([marked, self.hand_gap_to_sinai(&subject, &headline, brief)]);
             }
             Message::Research(msg) => return self.research.update(msg).map(Message::Research),
-            Message::Compute(msg) => return self.compute.update(msg).map(Message::Compute),
+            // a tab's place on Compute's bar, for the windows (`windows`)
+            Message::Compute(compute::Msg::Window(act)) => {
+                use crate::ui::TabAct;
+                use crate::windows::{Msg as W, Part, What};
+                return self.windows_update(match act {
+                    TabAct::Hover(tab, on) => W::Hover(What::Part(Part::Compute(tab)), on),
+                    TabAct::PopOut(tab) => W::PopOutPart(Part::Compute(tab)),
+                    TabAct::Raise(tab) => W::RaisePart(Part::Compute(tab)),
+                });
+            }
+            Message::Compute(msg) => {
+                let task = self.compute.update(msg).map(Message::Compute);
+                // a tab in a window of its own was asked for: that window comes forward
+                if let Some(tab) = self.compute.raise_out.take()
+                    && let Some(p) = self.windows.of_part(crate::windows::Part::Compute(tab))
+                {
+                    return Task::batch([task, crate::windows::raise(p.id)]);
+                }
+                return task;
+            }
             Message::Social(msg) => return self.social.update(msg).map(Message::Social),
             Message::Pages(msg) => return self.pages.update(msg).map(Message::Pages),
             Message::Escape(captured) => {
@@ -1400,7 +1647,9 @@ impl App {
                     return self.update(Message::Social(crate::social::Msg::Panel(false)));
                 } else if self.signin.whats_new_open {
                     return self.update(Message::SignIn(crate::signin::Msg::WhatsNew(false)));
-                } else if self.section == Section::Lattice && self.lattice.tab == lattice::Tab::Chat {
+                } else if self.acting_section() == Section::Pages && self.pages.viewing.is_some() {
+                    return self.update(Message::Pages(crate::pages::Msg::ViewPhoto(None)));
+                } else if self.lattice_tab_in(self.windows.acting) == Some(lattice::Tab::Chat) {
                     let key = lattice::ide::update::escape(captured);
                     return self.update(Message::Lattice(lattice::Msg::Ide(lattice::ide::IdeMsg::Key(key))));
                 }
@@ -1456,7 +1705,6 @@ impl App {
             Message::FocusMove(back) => {
                 return if back { iced::widget::operation::focus_previous() } else { iced::widget::operation::focus_next() };
             }
-            Message::WindowId(id) => self.window_id = id,
             Message::Maximised(m) => {
                 self.maximised = m;
                 // a size is kept only from a window that is not maximised (a maximised one is the screen's)
@@ -1466,8 +1714,21 @@ impl App {
                     self.window_size = Some(size);
                 }
             }
+            Message::PageScrolled(viewport) => {
+                if self.acting_section() == Section::Pages {
+                    return self.pages.update(crate::pages::Msg::Scrolled(viewport.relative_offset().y)).map(Message::Pages);
+                }
+            }
+            Message::Disclose(part) => {
+                if !self.open_parts.remove(part) {
+                    self.open_parts.insert(part);
+                }
+            }
             Message::Resized(size) => {
                 self.resized_to = Some(size);
+                if !self.windows.is_out(Section::Pages) {
+                    self.pages.width = Some(size.width);
+                }
                 if let Some(id) = self.window_id {
                     return window::is_maximized(id).map(Message::Maximised);
                 }
@@ -1491,7 +1752,9 @@ impl App {
                     // as the account menu's Exit: friends are told this app went offline first
                     Act::Close => self.update(Message::SignIn(crate::signin::Msg::Exit)),
                     Act::Resize(direction) if !self.maximised => window::drag_resize(id, direction),
-                    Act::Resize(_) => Task::none(),
+                    // the page on show, to a window of its own (`windows`)
+                    Act::PopOut => self.windows_update(crate::windows::Msg::PopOut(self.section)),
+                    Act::Resize(_) | Act::Back => Task::none(),
                 };
             }
             // A web page of the account panel, when Settings sends them to Lattice's own browser (`signin::web`): the
@@ -1505,10 +1768,13 @@ impl App {
                 // The account menu's Exit acts on the whole app (its Settings opens the panel over the page).
                 let exit = matches!(msg, crate::signin::Msg::Exit);
                 let task = self.signin.update(msg).map(Message::SignIn);
+                self.bridge_sync();
+                // the chat greets the reader by the account's name, and by none once signed out
+                self.lattice.reader = self.signin.account().map(|a| a.display_name.trim().to_string()).filter(|name| !name.is_empty());
                 // the friends panel follows the session: it starts on signing in and forgets on signing out
                 let friends = self.social.attach(self.signin.session().filter(|_| self.can(Capability::Friends))).map(Message::Social);
                 // so does the Pages page: it is read again on signing in, and forgotten on signing out
-                let on_show = self.section == Section::Pages;
+                let on_show = self.on_show(Section::Pages);
                 let pages = self.pages.attach(self.signin.session().filter(|_| self.can(Capability::Pages)), on_show).map(Message::Pages);
                 if exit {
                     // tell friends this app went offline before the window closes
@@ -1553,10 +1819,26 @@ impl App {
             // Under the palette or a panel of the window's, the IDE's own keys (Ctrl+P, the arrows...) do nothing.
             Message::Lattice(lattice::Msg::Ide(lattice::ide::IdeMsg::Key(_)))
                 if self.palette.is_some() || self.overlay_open() || self.rail_focus.is_some() => {}
+            // a tab's place on Lattice's bar, for the windows (`windows`)
+            Message::Lattice(lattice::Msg::Window(w)) => {
+                use crate::windows::{Msg as W, Part, What};
+                use lattice::TabWindow;
+                return self.windows_update(match w {
+                    TabWindow::Hover(tab, on) => W::Hover(What::Part(Part::Lattice(tab)), on),
+                    TabWindow::PopOut(tab) => W::PopOutPart(Part::Lattice(tab)),
+                    TabWindow::Raise(tab) => W::RaisePart(Part::Lattice(tab)),
+                });
+            }
             Message::Lattice(msg) => {
                 let task = self.lattice.update(msg).map(Message::Lattice);
                 self.put_brain_in_sinai();
                 self.take_web_said();
+                // a tab in a window of its own was asked for (the jump menu, the palette): that window comes forward
+                if let Some(tab) = self.lattice.raise_out.take()
+                    && let Some(p) = self.windows.of_part(crate::windows::Part::Lattice(tab))
+                {
+                    return Task::batch([task, crate::windows::raise(p.id)]);
+                }
                 // The jump menu picked a Fleet tab: that tab, on the Fleet page.
                 if let Some(tab) = self.lattice.jump_out.take() {
                     if let Some(fleet) = self.fleet.as_mut() {
@@ -1598,7 +1880,7 @@ impl App {
             Message::VoiceStop => self.voice.stop(),
             Message::VoiceTick => self.voice.tick(crate::utc::now()),
             Message::ObserveChoose(open) => {
-                self.observe_windows = open.then(|| stage::open_windows(self.own_window.unwrap_or(0) as i64));
+                self.observe_windows = open.then(|| stage::open_windows(&self.own_windows()));
             }
             Message::Looked(readings) => {
                 self.probes = readings;
@@ -1698,7 +1980,7 @@ impl App {
                     }
                     self.sinai_up = Some(true);
                     self.sinai_commands = Some(commands);
-                    self.watch_sent = false;
+                    self.watch_sent = None;
                     self.tell_loop_which_window();
                     self.listening_at = f64::NEG_INFINITY;
                     return self.read_listening();
@@ -2056,19 +2338,32 @@ impl App {
             }
             Message::Dropped(path) => {
                 self.hovering = false;
+                self.windows.hovered = None;
                 // On the Trust page a dropped file is a receipt, a test case or the data; on the Lattice page a folder
-                // to open in the IDE (or a file of the folder it shows); anywhere else, audio.
-                if self.section == Section::Trust {
+                // to open in the IDE (or a file of the folder it shows); anywhere else, audio. The page is the one of
+                // the window it was dropped on.
+                let on = self.acting_section();
+                if on == Section::Trust {
                     self.trust_dropped(&path);
-                } else if self.section == Section::Lattice {
+                } else if on == Section::Lattice {
                     return self.lattice.update(lattice::Msg::Ide(lattice::ide::IdeMsg::Dropped(path))).map(Message::Lattice);
                 } else {
-                    self.section = Section::Transcription;
+                    // the Transcription page shows its job: in its own window when it has one
+                    let out = self.windows.of(Section::Transcription).map(|p| p.id);
+                    if out.is_none() {
+                        self.section = Section::Transcription;
+                    }
                     self.tab = Tab::Files;
                     self.transcribe(&path.display().to_string());
+                    if let Some(id) = out {
+                        return crate::windows::raise(id);
+                    }
                 }
             }
-            Message::Hovering(on) => self.hovering = on,
+            Message::Hovering(on) => {
+                self.hovering = on;
+                self.windows.hovered = self.windows.acting.filter(|id| self.windows.get(*id).is_some());
+            }
             Message::Cancel(job) => self.send(ears::cancel(&job)),
             Message::OpenFolder(path) => {
                 // Explorer opens the folder with the file selected; it is the user's own file, by their click.
@@ -2083,10 +2378,20 @@ impl App {
                 }
             }
             Message::DismissNotice => self.notice = None,
+            Message::Bridge(cell) => return self.bridge_answer(cell),
+            Message::BridgeAllow(allow) => {
+                self.bridge_writes = allow;
+                self.bridge_asking = None;
+                self.notice = Some(if allow {
+                    "Your agent may act in this window until it closes. Switch it off in Settings, Agents.".into()
+                } else {
+                    "Your agent was not allowed to act; it can still read.".into()
+                });
+            }
             Message::Shoot => {
                 if !self.shot_taken {
                     self.shot_taken = true;
-                    return window::latest().and_then(window::screenshot).map(Message::Shot);
+                    return self.window_id.map_or_else(Task::none, |id| window::screenshot(id).map(Message::Shot));
                 }
             }
             Message::Shot(shot) => {
@@ -2172,13 +2477,28 @@ impl App {
     }
 
     /// Whether `capability` is available now (capability.rs holds the list of what unlocks each).
+    /// The window's width as last reported, or a laptop's until it has said (`ui::columns_for`).
+    pub fn window_width(&self) -> f32 {
+        self.resized_to.or(self.window_size).map(|s| s.width).unwrap_or(1280.0)
+    }
+
+    /// The main window's size as last reported (a page's window opens no larger).
+    pub fn main_size(&self) -> iced::Size {
+        self.resized_to.or(self.window_size).unwrap_or(iced::Size::new(1280.0, 800.0))
+    }
+
+    /// Whether a part of a page is open (`ui::disclosure`).
+    pub fn is_open(&self, part: &str) -> bool {
+        self.open_parts.contains(part)
+    }
+
     pub fn can(&self, capability: Capability) -> bool {
         let context = capability::Context { signed_in: self.signin.session().is_some(), plugins: &self.plugin_ids, dev_checkout: self.dev_checkout };
         capability::available(capability, &context)
     }
 
     /// Read the library off the window's thread.
-    fn load_library(&mut self) -> Task<Message> {
+    pub(crate) fn load_library(&mut self) -> Task<Message> {
         let Some(root) = library::dir() else {
             return Task::none();
         };
@@ -2214,7 +2534,7 @@ impl App {
     /// Ask the loop how Sinai listens, when it runs, the Sinai page is open and the last answer is a minute old.
     fn read_listening(&mut self) -> Task<Message> {
         let now = crate::utc::now();
-        if self.sinai_up != Some(true) || self.section != Section::Sinai || self.listening_asked || now - self.listening_at < crate::machine::ABOUT_EVERY_S {
+        if self.sinai_up != Some(true) || !self.on_show(Section::Sinai) || self.listening_asked || now - self.listening_at < crate::machine::ABOUT_EVERY_S {
             return Task::none();
         }
         self.listening_asked = true;
@@ -2356,11 +2676,20 @@ impl App {
     pub fn subscription(&self) -> Subscription<Message> {
         let mut subscriptions = vec![
             ears::subscription().map(Message::Ears),
-            event::listen_with(files),
+            event::listen_with(files_in),
             event::listen_with(tab_keys),
-            event::listen_with(escape_key),
-            event::listen_with(shell_keys),
+            event::listen_with(escape_in),
+            event::listen_with(shell_in),
+            // the windows: which has the keyboard, and closing (`windows`)
+            event::listen_with(crate::windows::window_events),
         ];
+        // a press on a place on the rail, which may be dragged out of the window
+        if self.windows.hover.is_some() || self.windows.drag.is_some() {
+            subscriptions.push(event::listen_with(crate::windows::pointer_buttons));
+        }
+        if self.windows.drag.is_some() {
+            subscriptions.push(event::listen_with(crate::windows::pointer_moves));
+        }
         // Sinai's mind is a plug-in: the public build has none to connect to (installed.rs).
         if self.can(Capability::SinaiMind) {
             subscriptions.push(sinai::subscription().map(Message::Sinai));
@@ -2382,8 +2711,7 @@ impl App {
             );
         }
         if self.signin.through()
-            && self.section == Section::Transcription
-            && self.tab == Tab::Library
+            && self.words_shown(Tab::Library)
             && let Some(root) = library::dir()
         {
             subscriptions.push(
@@ -2394,15 +2722,16 @@ impl App {
         }
         subscriptions.push(self.signin.subscription().map(Message::SignIn));
         // The identity service's status, while the sign-in screen or the Account page shows it (change-only).
-        if !self.signin.through() || self.section == Section::Account {
+        if !self.signin.through() || self.on_show(Section::Account) {
             subscriptions.push(self.signin.status_watch().map(Message::SignIn));
         }
         subscriptions.push(self.social.subscription().map(Message::Social));
-        subscriptions.push(window::resize_events().map(|(_, size)| Message::Resized(size)));
-        if self.palette.is_some() {
+        subscriptions.push(window::resize_events().map(|(id, size)| Message::Windows(crate::windows::Msg::Resized(id, size))));
+        // the palette and the rail are the main window's: their keys listen while the keyboard is in it
+        if self.palette.is_some() && self.main_keyed() {
             subscriptions.push(event::listen_with(crate::palette::nav_keys));
         }
-        if self.rail_focus.is_some() {
+        if self.rail_focus.is_some() && self.main_keyed() {
             subscriptions.push(event::listen_with(rail_keys));
         }
         if self.session_changed {
@@ -2415,35 +2744,42 @@ impl App {
         if self.stage_visible() {
             let on_show = self.stage_on_show();
             if !on_show.is_empty() || self.stage_choosing {
-                subscriptions.push(stage::subscription(on_show, self.own_window.unwrap_or(0) as i64).map(Message::Stage));
+                subscriptions.push(stage::subscription(on_show, self.own_windows()).map(Message::Stage));
             }
         }
         if timers.held {
             subscriptions.push(iced::time::every(Duration::from_secs(1)).map(|_| Message::HeldTick));
         }
         // Undo and redo in the creator, from the keyboard, unless a text box took the key.
-        if self.section == Section::Sinai && self.creator.is_some() {
+        if self.keyed() == Section::Sinai && self.creator.is_some() {
             subscriptions.push(event::listen_with(creator_keys));
         }
-        if self.section == Section::Fleet {
+        if self.on_show(Section::Fleet) {
             if let Some(fleet) = &self.fleet {
                 subscriptions.push(fleet.subscription().map(Message::Fleet));
             }
         }
-        if self.section == Section::Data {
+        if self.on_show(Section::Data) {
             subscriptions.push(self.data.subscription().map(Message::Data));
         }
-        if self.section == Section::Compute {
+        if self.on_show(Section::Compute) {
             subscriptions.push(self.compute.subscription().map(Message::Compute));
         }
-        if self.section == Section::Lattice {
-            subscriptions.push(self.lattice.subscription().map(Message::Lattice));
+        // Lattice's keys listen only while the keyboard is in a window that shows its Chat and IDE
+        if self.on_show(Section::Lattice) {
+            let keys = self.lattice_tab_in(self.windows.focus) == Some(lattice::Tab::Chat);
+            subscriptions.push(self.lattice.subscription(keys).map(Message::Lattice));
+        }
+        // Pages' keys while its page is on show, as X binds them (`pages::keys`): j and k through the posts, then l, r,
+        // t, b, o, n, / and . (rules A1 and A2 of the interface principles).
+        if self.keyed() == Section::Pages && self.pages.active() {
+            subscriptions.push(event::listen_with(crate::pages::keys).map(Message::Pages));
         }
         // The Models panel's watch and knocks, while it shows, or while Sinai's page talks to a model of the person's own.
         let own_on_show =
-            self.signin.through() && self.section == Section::Sinai && matches!(self.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_));
+            self.signin.through() && self.on_show(Section::Sinai) && matches!(self.answering(), crate::models::Answering::Own(_) | crate::models::Answering::Cloud(_));
         // The parts' cards (the Overview, the Machine list) and a part's picker: their choices and the models they name.
-        let cards_on_show = self.signin.through() && matches!(self.section, Section::Overview | Section::Sinai);
+        let cards_on_show = self.signin.through() && (self.on_show(Section::Overview) || self.on_show(Section::Sinai));
         let picker = self.parts.open.is_some();
         subscriptions.push(
             self.models
@@ -2451,7 +2787,7 @@ impl App {
                 .map(Message::Models),
         );
         subscriptions.push(self.parts.subscription(cards_on_show).map(Message::Parts));
-        subscriptions.push(self.auto.subscription(self.signin.through() && self.section == Section::Sinai).map(Message::Auto));
+        subscriptions.push(self.auto.subscription(self.signin.through() && self.on_show(Section::Sinai)).map(Message::Auto));
         // A harvest's progress is polled while it runs, whichever page is shown.
         subscriptions.push(self.research.subscription().map(Message::Research));
         // The dialogs Lattice's core asks for are answered whichever page is shown.
@@ -2471,6 +2807,10 @@ impl App {
         }
         if self.options.screenshot.is_some() && !self.shot_taken {
             subscriptions.push(iced::time::every(Duration::from_millis(self.options.after_ms.max(1))).map(|_| Message::Shoot));
+        }
+        if let Some(bridge) = &self.bridge {
+            let key = crate::bridge::Asks(bridge.asks(), bridge.port());
+            subscriptions.push(Subscription::run_with(key, crate::bridge::ask_stream).map(Message::Bridge));
         }
         Subscription::batch(subscriptions)
     }
@@ -2603,6 +2943,20 @@ fn rail_keys(event: iced::Event, _status: event::Status, _window: window::Id) ->
     }
 }
 
+/// Esc, a window key and files, as from the window they came in (`Message::In`): Esc acts on that window's page, a
+/// file goes to it, and the main window's keys bring the main window forward.
+fn escape_in(event: iced::Event, status: event::Status, window: window::Id) -> Option<Message> {
+    escape_key(event, status, window).map(|m| Message::In(window, Box::new(m)))
+}
+
+fn shell_in(event: iced::Event, status: event::Status, window: window::Id) -> Option<Message> {
+    shell_keys(event, status, window).map(|m| Message::In(window, Box::new(m)))
+}
+
+fn files_in(event: iced::Event, status: event::Status, window: window::Id) -> Option<Message> {
+    files(event, status, window).map(|m| Message::In(window, Box::new(m)))
+}
+
 /// Files dragged over and dropped on the window.
 fn files(event: iced::Event, _status: event::Status, _window: window::Id) -> Option<Message> {
     match event {
@@ -2620,6 +2974,43 @@ mod tests {
 
     fn app() -> App {
         App::boot(Options::default()).0
+    }
+
+    /// The agent bridge's commands, as the window answers them: reads at once; the first action of a session waits
+    /// for the person, and once allowed, an action happens and shows in the notice.
+    #[test]
+    fn the_agent_bridge_reads_at_once_and_acts_only_once_allowed() {
+        let mut a = app();
+        let ask = |a: &mut App, command: &str, fields: serde_json::Value| {
+            let (cell, rx) = crate::bridge::asked(command, fields);
+            let _ = a.update(Message::Bridge(cell));
+            rx.try_recv().expect("every command is answered at once")
+        };
+        let (status, body) = ask(&mut a, "status", json!({}));
+        assert_eq!(status, 200);
+        assert_eq!(body["actions_allowed"], false);
+        assert!(body["sections"].as_array().unwrap().iter().any(|s| s == "lattice"));
+        assert_eq!(ask(&mut a, "chat_read", json!({})).1["turns"], json!([]));
+
+        let (status, body) = ask(&mut a, "chat_send", json!({"text": "Hello"}));
+        assert_eq!((status, body["error"].as_str()), (409, Some("ask-pending")));
+        assert!(a.bridge_asking.as_deref().is_some_and(|s| s.contains("Hello")), "the banner says what it asked");
+        assert!(a.lattice.composer.text().trim().is_empty(), "nothing was typed before the person allowed it");
+
+        let _ = a.update(Message::BridgeAllow(true));
+        assert!(a.bridge_writes && a.bridge_asking.is_none());
+        let (status, _) = ask(&mut a, "chat_send", json!({"text": "Hello"}));
+        assert_eq!(status, 200);
+        assert_eq!(a.lattice.composer.text().trim(), "Hello");
+        assert!(a.notice.as_deref().is_some_and(|n| n.starts_with("Your agent:")), "{:?}", a.notice);
+
+        assert_eq!(ask(&mut a, "go", json!({"section": "nowhere"})).0, 404);
+        assert_eq!(ask(&mut a, "open_url", json!({"url": "http://x.test"})).0, 400);
+        assert_eq!(ask(&mut a, "chat_send", json!({})).0, 400);
+        assert_eq!(ask(&mut a, "format_disk", json!({})).0, 404);
+
+        let _ = a.update(Message::BridgeAllow(false));
+        assert_eq!(ask(&mut a, "chat_new", json!({})).0, 409, "taking it back asks again");
     }
 
     #[test]
@@ -3252,7 +3643,12 @@ mod tests {
     #[test]
     fn the_command_line_is_checked() {
         let o = Options::parse(["--section", "words", "--tab", "files", "--screenshot", "x.png"].map(String::from)).unwrap();
-        assert_eq!((o.section, o.tab, o.after_ms), (Some(Section::Transcription), Some(Tab::Files), 2500));
+        assert_eq!((o.section, o.tab, o.after_ms, o.scale), (Some(Section::Transcription), Some(Tab::Files), 2500, None));
+        let o = Options::parse(["--screenshot", "x.png", "--scale", "2"].map(String::from)).unwrap();
+        assert_eq!(o.scale, Some(2.0));
+        for wrong in ["0", "0.5", "5", "two"] {
+            assert!(Options::parse(["--scale", wrong].map(String::from)).is_err(), "--scale {wrong} is refused");
+        }
         assert!(Options::parse(["--section".to_string(), "markets".to_string()]).is_err(), "no Markets section");
         assert!(Options::parse(["--fly".to_string()]).is_err());
         assert!(Options::parse(["--section", "fleet", "--tab", "landing"].map(String::from)).is_err(), "no Fleet tab without its page");

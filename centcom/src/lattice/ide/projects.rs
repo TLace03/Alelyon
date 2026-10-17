@@ -50,6 +50,8 @@ pub struct ProjectsState {
     pub said: Option<(String, bool)>,
     /// The Chats view lists the archived projects too.
     pub show_archived: bool,
+    /// What was done without the reader in the project whose page is open (allow all), newest first.
+    pub decided: Vec<lattice_core::convo::allow::Entry>,
 }
 
 impl ProjectsState {
@@ -91,6 +93,12 @@ pub enum ProjectsMsg {
     AssignOpen(bool),
     Assigned(Result<(), String>),
     ShowArchived(bool),
+    /// Switch allow all on or off for a project.
+    AllowAll(String, bool),
+    /// What was done without the reader in a project.
+    Decided(Vec<lattice_core::convo::allow::Entry>),
+    /// Put an automatic decision in the composer, to be changed.
+    Revisit(usize),
 }
 
 fn go(msg: ProjectsMsg) -> Msg {
@@ -171,11 +179,18 @@ impl State {
                     });
                 }
                 let existing = self.ide.tabs.iter().find(|t| matches!(&t.kind, TabKind::Project { id: open, .. } if *open == id)).map(|t| t.id);
+                let decided_of = id.clone();
                 let tab = match existing {
                     Some(tab) => tab,
                     None => self.ide.push(TabKind::Project { id, name }),
                 };
                 self.ide.active = Some(tab);
+                // What was done without the reader in it (allow all).
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                return Task::perform(on(&services, async move { chat.auto_decisions(Some(&decided_of)) }), |r| {
+                    go(ProjectsMsg::Decided(r.unwrap_or_default()))
+                });
             }
             ProjectsMsg::Name(name) => {
                 if let Some(edit) = &mut self.ide.projects.edit {
@@ -268,6 +283,7 @@ impl State {
                     files: Some(edit.files.clone()),
                     choice: Some(edit.choice.clone()),
                     archived: None,
+                    allow_all: None,
                 };
                 let (chat, id) = (services.chat.clone(), edit.id.clone());
                 return Task::perform(
@@ -298,6 +314,23 @@ impl State {
                 }
                 return self.read_projects();
             }
+            ProjectsMsg::AllowAll(id, enable) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                let change = Change { allow_all: Some(enable), ..Change::default() };
+                return Task::perform(
+                    on(&services, async move { chat.project_change(id, change).await.map_err(|r| r.message) }),
+                    |r| go(ProjectsMsg::Archived(r.unwrap_or_else(|| Err(STOPPED.to_string())))),
+                );
+            }
+            ProjectsMsg::Decided(entries) => self.ide.projects.decided = entries,
+            ProjectsMsg::Revisit(n) => {
+                let Some(e) = self.ide.projects.decided.get(n) else { return Task::none() };
+                let text = format!("With allow all on, you {}: {}. Change that: ", e.kind.words().to_lowercase(), e.what);
+                self.composer = iced::widget::text_editor::Content::with_text(&text);
+                self.composer.perform(iced::widget::text_editor::Action::Move(iced::widget::text_editor::Motion::DocumentEnd));
+                return iced::widget::operation::focus(super::composer_id());
+            }
             ProjectsMsg::Archive(id, archived) => {
                 let Some(services) = self.services.clone() else { return Task::none() };
                 let chat = services.chat.clone();
@@ -315,7 +348,10 @@ impl State {
                         }
                         ("Archived. Its chats are kept, under Every chat; it can be brought back here.".to_string(), false)
                     }
-                    Ok(_) => ("It is back in the Chats view.".to_string(), false),
+                    Ok(project) if project.allow_all => {
+                        ("Allow all is on: the agent acts without asking in this project's chats; only what moves money still asks.".to_string(), false)
+                    }
+                    Ok(_) => ("Saved.".to_string(), false),
                     Err(why) => (why, true),
                 });
                 return self.read_projects();
@@ -580,7 +616,50 @@ pub fn page<'a>(state: &'a State, id: &'a str) -> El<'a> {
     actions = actions.push(space().width(Length::Fill));
     actions = actions.push(label(format!("{} chat(s)", project.chats.len()), 11.5, theme::TEXT_FAINT));
     col = col.push(actions);
+    col = col.push(allow_all_card(state, project));
     scrollable(container(col).center_x(Length::Fill)).height(Length::Fill).style(theme::scrollbars).into()
+}
+
+/// Allow all: the switch, what it lets through and what still asks, and what was done without the reader, each
+/// with Change this (it goes to the composer).
+fn allow_all_card<'a>(state: &'a State, project: &'a Project) -> El<'a> {
+    let mut col = Column::new().spacing(8);
+    let mut head = Row::new().spacing(10).align_y(Alignment::Center).push(strong("Allow all", 14.0, theme::TEXT));
+    if project.allow_all {
+        head = head.push(ui::chip("on", theme::GOLD));
+    }
+    head = head.push(space().width(Length::Fill));
+    head = head.push(ui::secondary(
+        if project.allow_all { "Turn off" } else { "Turn on" },
+        Some(go(ProjectsMsg::AllowAll(project.id.clone(), !project.allow_all))),
+    ));
+    col = col.push(head);
+    col = col.push(label(
+        "So a task can finish without you: commands run, tools and the agent's browser are used, file changes are kept as they are made, stack decisions take the recommended option, and the agent answers its own questions. Still asking: anything that spends money. The agent never types a password or a card number. The folder must be trusted, and every change keeps a checkpoint to restore.",
+        12.0,
+        theme::TEXT_DIM,
+    ));
+    let decided = &state.ide.projects.decided;
+    if decided.is_empty() {
+        col = col.push(note("Nothing has been done without you in this project."));
+    } else {
+        col = col.push(label(format!("Decided for you ({})", decided.len()), 12.5, theme::TEXT));
+        for (n, e) in decided.iter().enumerate().take(100) {
+            let when = super::ago(crate::utc::now() - e.at);
+            col = col.push(
+                row![
+                    label(e.kind.words(), 11.5, theme::GOLD).width(Length::Fixed(150.0)),
+                    container(label(ui::cut(&e.what, 120), 12.0, theme::TEXT)).width(Length::Fill),
+                    label(when, 11.0, theme::TEXT_FAINT),
+                    super::view::ghost("Change this", Some(go(ProjectsMsg::Revisit(n)))),
+                    super::view::ghost("Its topic", Some(Msg::Open(e.conversation.clone()))),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            );
+        }
+    }
+    container(col).padding(14).width(Length::Fill).style(theme::card).into()
 }
 
 #[cfg(test)]
@@ -604,6 +683,7 @@ mod tests {
             created: 1.0,
             updated: 1.0,
             archived: false,
+            allow_all: false,
         }
     }
 
@@ -635,6 +715,23 @@ mod tests {
 
     /// A send with no chat open names the picked project (the core puts the new chat in it); a send to an open chat
     /// names none, so a chat keeps its own project.
+    #[test]
+    fn the_decided_for_you_list_is_kept_and_one_goes_to_the_composer_to_be_changed() {
+        use lattice_core::convo::allow::{Entry, Kind};
+        let mut state = State::new();
+        let entry = |kind, what: &str| Entry { at: 1.0, project: "p".into(), conversation: "c".into(), kind, what: what.into() };
+        let _ = state.update(go(ProjectsMsg::Decided(vec![entry(Kind::Choice, "Primary database: SQLite"), entry(Kind::Command, "npm install")])));
+        assert_eq!(state.ide.projects.decided.len(), 2);
+        let _ = state.update(go(ProjectsMsg::Revisit(0)));
+        assert_eq!(
+            state.composer.text().trim_end(),
+            "With allow all on, you chose for a decision: Primary database: SQLite. Change that:"
+        );
+        // One that is not there changes nothing.
+        let _ = state.update(go(ProjectsMsg::Revisit(9)));
+        assert!(state.composer.text().contains("SQLite"));
+    }
+
     #[test]
     fn a_new_chat_joins_the_picked_project_and_an_open_one_keeps_its_own() {
         let mut state = State::new();
