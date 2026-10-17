@@ -2,7 +2,8 @@
 //! opened from the account menu, so the page behind it stays on show and live. A list of its parts on the left with a search above it, the part chosen on the right; Esc, a click beside
 //! the panel or its close button closes it.
 //!
-//! Only what works is here: who is signed in, their plan (Upgrade, Manage billing) and their account pages; whether this PC keeps a session, and
+//! Only what works is here: who is signed in, their plan (Upgrade and Manage billing only while [`PURCHASES_OPEN`];
+//! the credits line only while [`CREDITS_OPEN`]) and their account pages; whether this PC keeps a session, and
 //! forgetting it, and which sign-in service Alelyon uses and what it says now (its state, ways of signing in,
 //! notices); where web pages open (Lattice's own browser or yours, `web`); appearance (whether the sign-in background
 //! moves, the same switch as the sign-in screen's Motion button); and about Alelyon (the version, What's New, the
@@ -21,6 +22,34 @@ const PRIVACY_URL: &str = "https://www.alelyon.com/legal/privacy/";
 /// The plans and their prices; buying one happens on the website and Stripe's page, never in this window.
 pub const PRICING_URL: &str = "https://www.alelyon.com/pricing/";
 
+/// Whether Settings offers anything to buy: Upgrade (the pricing page) and Manage billing (Stripe's portal).
+/// Nothing is on sale yet, so this is false: the Account part still says the account's plan, but neither button
+/// shows, the search does not find them, and Manage billing asks the service for nothing. The paths stay built,
+/// behind this switch, for when purchases open.
+pub const PURCHASES_OPEN: bool = false;
+
+/// Whether the Account part shows the credits line ("N credits" and Buy credits). Credits are built and switched
+/// off until they are offered: while false nothing about credits shows, is found by the search or is asked of any
+/// service.
+pub const CREDITS_OPEN: bool = false;
+
+/// The credits service's origin (no trailing slash). Empty: not deployed, so the credits line shows nothing and
+/// nothing is asked, even with [`CREDITS_OPEN`].
+pub const CREDITS_ORIGIN: &str = "";
+
+/// Where credits are bought: the website's account page, always in the person's own browser.
+pub const CREDITS_URL: &str = "https://www.alelyon.com/account/#credits";
+
+/// Whether the credits line shows and its balance is asked for: switched on, with a service to ask.
+pub fn credits_shown() -> bool {
+    credits_shown_when(CREDITS_OPEN, CREDITS_ORIGIN)
+}
+
+/// [`credits_shown`], with the switch and the origin given (a test reaches both states).
+pub fn credits_shown_when(open: bool, origin: &str) -> bool {
+    open && !origin.trim().is_empty()
+}
+
 /// The panel's size, when the window has room for it.
 const WIDTH: f32 = 940.0;
 const HEIGHT: f32 = 640.0;
@@ -31,18 +60,20 @@ pub enum Pane {
     Account,
     Security,
     WebPages,
+    Agents,
     Appearance,
     About,
 }
 
 impl Pane {
-    pub const ALL: [Pane; 5] = [Pane::Account, Pane::Security, Pane::WebPages, Pane::Appearance, Pane::About];
+    pub const ALL: [Pane; 6] = [Pane::Account, Pane::Security, Pane::WebPages, Pane::Agents, Pane::Appearance, Pane::About];
 
     pub fn title(self) -> &'static str {
         match self {
             Pane::Account => "Account",
             Pane::Security => "Sign-in & security",
             Pane::WebPages => "Web pages",
+            Pane::Agents => "Agents",
             Pane::Appearance => "Appearance",
             Pane::About => "About",
         }
@@ -54,6 +85,7 @@ impl Pane {
             Pane::Account => "Who is signed in, your plan, and your account's pages.",
             Pane::Security => "Staying signed in on this PC, and the sign-in service Alelyon uses.",
             Pane::WebPages => "Where the account pages, the Terms and the Privacy Notice open.",
+            Pane::Agents => "Whether your own AI agent may drive this app, through alelyon-cli.",
             Pane::Appearance => "How the sign-in screen looks.",
             Pane::About => "This version of Alelyon, what is new, and its terms.",
         }
@@ -63,22 +95,41 @@ impl Pane {
     fn says(self) -> &'static str {
         match self {
             Pane::Account => {
-                "account signed in sign out name email ways to sign in account details account security offline plan                  upgrade manage billing subscription payment pricing seats paid through pro team max ultra"
+                "account signed in sign out name email ways to sign in account details account security offline plan \
+                 seats paid through pro team max ultra"
             }
             Pane::Security => {
                 "stay signed in kept session forget session sealed windows user sign-in service address state notice \
                  providers security password"
             }
             Pane::WebPages => "web pages open links browser lattice's browser your browser agent default browser",
+            Pane::Agents => "agents agent bridge mcp alelyon-cli claude code cursor codex control drive automation",
             Pane::Appearance => "appearance motion background fog animation still sign-in screen theme",
             Pane::About => "about version what's new terms of service privacy notice legal",
+        }
+    }
+
+    /// The words of settings that show only while switched on: the purchase buttons ([`PURCHASES_OPEN`]) and the
+    /// credits line ([`credits_shown`]). A hidden button is not found by the search.
+    fn says_when_open(self, purchases: bool, credits: bool) -> &'static str {
+        match (self, purchases, credits) {
+            (Pane::Account, true, true) => " upgrade manage billing subscription payment pricing credits buy credits balance",
+            (Pane::Account, true, false) => " upgrade manage billing subscription payment pricing",
+            (Pane::Account, false, true) => " credits buy credits balance",
+            _ => "",
         }
     }
 
     /// Whether the part answers `query` (every word of it, in any case, in its title, its description or what its
     /// settings say); an empty query matches every part.
     pub fn matches(self, query: &str) -> bool {
-        let said = format!("{} {} {}", self.title(), self.description(), self.says()).to_lowercase();
+        self.matches_when(query, PURCHASES_OPEN, credits_shown())
+    }
+
+    /// [`Pane::matches`], with the switches given.
+    pub fn matches_when(self, query: &str, purchases: bool, credits: bool) -> bool {
+        let said = format!("{} {} {}{}", self.title(), self.description(), self.says(), self.says_when_open(purchases, credits))
+            .to_lowercase();
         query.split_whitespace().all(|word| said.contains(&word.to_lowercase()))
     }
 }
@@ -120,14 +171,14 @@ fn group<'a>(title: &'a str, body: El<'a>) -> El<'a> {
         .into()
 }
 
-fn line<'a>(name: &'a str, value: impl Into<String>, color: iced::Color) -> El<'a> {
+pub(super) fn line<'a>(name: &'a str, value: impl Into<String>, color: iced::Color) -> El<'a> {
     row![container(words(name, 13.0, theme::TEXT_DIM)).width(180), words(value.into(), 13.0, color)]
         .spacing(12)
         .align_y(Alignment::Center)
         .into()
 }
 
-fn action<'a>(label: &'a str, msg: Option<Msg>) -> El<'a> {
+pub(super) fn action<'a>(label: &'a str, msg: Option<Msg>) -> El<'a> {
     button(words(label, 12.5, theme::TEXT)).padding([6.0, 12.0]).on_press_maybe(msg).style(theme::ghost_button).into()
 }
 
@@ -151,31 +202,86 @@ pub fn plan_words(s: &State) -> (String, iced::Color) {
     }
 }
 
-/// The plan's line and its buttons: Upgrade (the pricing page) on Free, Manage billing (Stripe's portal, in
-/// your own browser) when the account has billing to manage. No card is entered here.
+/// A button under the plan's line.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlanButton {
+    /// The pricing page.
+    Upgrade,
+    /// Stripe's billing portal, in the person's own browser.
+    ManageBilling,
+}
+
+/// The plan's buttons that show now: none while [`PURCHASES_OPEN`] is false.
+pub fn plan_buttons(s: &State) -> Vec<PlanButton> {
+    plan_buttons_when(PURCHASES_OPEN, s)
+}
+
+/// [`plan_buttons`], with the switch given: Upgrade on a plan that is not paid for, Manage billing when the account
+/// has billing to manage.
+pub fn plan_buttons_when(open: bool, s: &State) -> Vec<PlanButton> {
+    let mut shown = Vec::new();
+    if let (true, Some(Ok(p))) = (open, &s.plan) {
+        if p.upgradable() {
+            shown.push(PlanButton::Upgrade);
+        }
+        if p.manage_available {
+            shown.push(PlanButton::ManageBilling);
+        }
+    }
+    shown
+}
+
+/// The plan's line and its buttons ([`plan_buttons`]). No card is entered here.
 fn plan<'a>(s: &'a State) -> El<'a> {
     let (said, color) = plan_words(s);
     let mut col = column![line("Plan", said, color)].spacing(6);
-    let mut buttons = row![].spacing(4).align_y(Alignment::Center);
-    let mut any = false;
-    if let Some(Ok(p)) = &s.plan {
-        if p.upgradable() {
-            buttons = buttons.push(action("Upgrade ↗", Some(Msg::Open(PRICING_URL.into())))).push(yours(PRICING_URL));
-            any = true;
+    let shown = plan_buttons(s);
+    if !shown.is_empty() {
+        let mut buttons = row![].spacing(4).align_y(Alignment::Center);
+        for b in shown {
+            buttons = match b {
+                PlanButton::Upgrade => buttons.push(action("Upgrade ↗", Some(Msg::Open(PRICING_URL.into())))).push(yours(PRICING_URL)),
+                PlanButton::ManageBilling => {
+                    let label = if s.billing_busy { "Opening billing…" } else { "Manage billing ⇗" };
+                    buttons.push(action(label, (!s.billing_busy).then_some(Msg::ManageBilling)))
+                }
+            };
         }
-        if p.manage_available {
-            let label = if s.billing_busy { "Opening billing…" } else { "Manage billing ⇗" };
-            buttons = buttons.push(action(label, (!s.billing_busy).then_some(Msg::ManageBilling)));
-            any = true;
-        }
-    }
-    if any {
         col = col.push(row![Space::new().width(192), buttons]);
     }
     if let Some(why) = &s.billing_said {
         col = col.push(row![Space::new().width(192), words(why.as_str(), 12.0, theme::CAUTION)]);
     }
     col.into()
+}
+
+/// The credits in words: "N credits" (and that spending is paused after a disputed payment), or why they could not
+/// be read, or that they are being asked for.
+pub fn credits_words(s: &State) -> (String, iced::Color) {
+    match &s.credits {
+        Some(Ok(b)) => {
+            let n = b.available_credits;
+            let said = format!("{n} {}", if n == 1 { "credit" } else { "credits" });
+            if b.blocked {
+                return (format!("{said} · Spending is paused until a disputed payment is settled"), theme::CAUTION);
+            }
+            (said, theme::TEXT)
+        }
+        Some(Err(why)) => (why.clone(), theme::CAUTION),
+        None if s.credits_asking => ("Asking…".into(), theme::TEXT_DIM),
+        None => ("—".into(), theme::TEXT_DIM),
+    }
+}
+
+/// The credits line and Buy credits (the website's account page, always in the person's own browser).
+fn credits<'a>(s: &'a State) -> El<'a> {
+    let (said, color) = credits_words(s);
+    column![
+        line("Credits", said, color),
+        row![Space::new().width(192), action("Buy credits ↗", Some(Msg::OpenYours(CREDITS_URL.into())))],
+    ]
+    .spacing(6)
+    .into()
 }
 
 fn account<'a>(s: &'a State) -> El<'a> {
@@ -185,11 +291,19 @@ fn account<'a>(s: &'a State) -> El<'a> {
         Gate::SignedIn(session) => {
             let a = &session.account;
             let ways = if a.providers.is_empty() { "—".to_string() } else { a.providers.join(", ") };
-            column![
+            let mut col = column![
                 line("Signed in as", a.name().to_string(), theme::TEXT),
                 line("Email", if a.email.is_empty() { "none on the account".to_string() } else { a.email.clone() }, theme::TEXT),
                 line("Ways to sign in", ways, theme::TEXT),
                 plan(s),
+                super::team::view(s),
+            ]
+            .spacing(8);
+            // nothing about credits while they are switched off or not deployed
+            if credits_shown() {
+                col = col.push(credits(s));
+            }
+            col.push(
                 row![
                     action("Account details ↗", open(&urls.account_url)),
                     yours(&urls.account_url),
@@ -200,8 +314,7 @@ fn account<'a>(s: &'a State) -> El<'a> {
                 ]
                 .spacing(4)
                 .align_y(Alignment::Center),
-            ]
-            .spacing(8)
+            )
             .into()
         }
         _ => column![
@@ -301,6 +414,34 @@ fn web_pages<'a>(s: &'a State) -> El<'a> {
     col.into()
 }
 
+fn agents<'a>(s: &'a State) -> El<'a> {
+    let choice = |label: &'a str, on: bool| -> El<'a> {
+        button(words(label, 12.5, theme::TEXT))
+            .padding([6.0, 12.0])
+            .on_press(Msg::AgentBridge(on))
+            .style(theme::segment_button(s.agent_bridge == on))
+            .into()
+    };
+    column![
+        row![
+            container(words("Let my agent drive Alelyon", 13.0, theme::TEXT_DIM)).width(180),
+            row![choice("Off", false), choice("On", true)].spacing(4),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+        words(
+            "On, a program you run on this PC, such as alelyon-cli's MCP server for Claude Code, Cursor or Codex, can \
+             read this window's chats and runs, and, once you allow it in the banner that asks, open sections, start \
+             and send chats, open web pages and start runs. It listens on this computer only, with a new secret each \
+             time Alelyon starts, kept in a file only your Windows user can read. Everything it does shows here.",
+            12.0,
+            theme::TEXT_FAINT,
+        ),
+    ]
+    .spacing(6)
+    .into()
+}
+
 fn appearance<'a>(s: &'a State) -> El<'a> {
     let m = &s.motion;
     let mut appearance = column![
@@ -349,6 +490,7 @@ fn pane<'a>(s: &'a State, pane: Pane) -> El<'a> {
         Pane::Account => group("Account", account(s)),
         Pane::Security => column![group("This PC", this_pc(s)), group("Sign-in service", service(s))].spacing(12).into(),
         Pane::WebPages => group("Web pages", web_pages(s)),
+        Pane::Agents => group("Your agent", agents(s)),
         Pane::Appearance => group("Appearance", appearance(s)),
         Pane::About => group("About Alelyon", about()),
     }

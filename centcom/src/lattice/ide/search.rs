@@ -15,7 +15,7 @@ use lattice_core::text::find::Query;
 use lattice_core::tools::read::{FileMatches, LineMatch, SearchReport};
 
 use super::find::Toggle;
-use super::view::{file_dot, ghost, section_title};
+use super::view::{file_icon, ghost, section_title};
 use crate::lattice::ide::{IdeMsg, file_name};
 use crate::lattice::{Msg, State};
 use crate::ui::{self, label, mono, note};
@@ -141,7 +141,7 @@ fn file_head<'a>(file: &'a FileMatches, folded: bool) -> El<'a> {
     let head = button(
         row![
             label(if folded { "\u{25B8}" } else { "\u{25BE}" }, 11.0, theme::TEXT_FAINT),
-            file_dot(&file.path),
+            file_icon(&file.path),
             label(name, 12.5, theme::TEXT),
             label(dir, 11.0, theme::TEXT_FAINT),
             iced::widget::space().width(Length::Fill),

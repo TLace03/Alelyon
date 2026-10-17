@@ -3,6 +3,162 @@
 Shown by the account menu's "What's New" (src/signin/mod.rs reads this file at build time). Newest first. Each
 release is a `## ` heading (a date, then an optional title after " — "), followed by `- ` lines in plain words.
 
+## 2026-10-15 — Work goes to the group already doing it
+
+- Pick No group in the side list for a fresh page, and say what you want done. Lattice sends it to the group already doing that work and takes you to that group's chat, even when that chat is busy and your message waits its turn there.
+- Work that one of a group's tasks did goes to the chat that started the task, and a group's name and plan count toward what it does.
+- Work no group does yet starts a new group.
+
+## 2026-10-15 — The chat box at the centre, your work at the side
+
+- Before your first message, the chat box sits in the middle of the page, with the greeting above it and the suggestions below.
+- The suggestions go away once you send your first message, and the chat box moves to the foot of the conversation.
+- The side bar opens on Work, where the file list was. It shows what the agents are working on now: each agent by name, the step it is on, and the files it has open. Press a file to open it in the editor.
+- Your to-do list, the changes waiting for review, the stack's suggestions, your checklists and the tools are lists there too. Each folds to its heading, which says how much it holds. Nothing stacks over the chat box any more, so the conversation keeps its room.
+- The Tools chip in the chat box shows the tools on the side bar, and each of their two parts folds on its own.
+
+## 2026-10-15 — The tools, a press away
+
+- A Tools chip in the chat box opens the tools over it: Agent or Ask, each saying what it may do, and a card for everything the agent can use, with what it asks you before acting.
+- Switch the agent's browser and auto mode on your desktop on or off right there. MCP servers, plugins, skills and commands are counted, a press from the Tools page.
+- The empty chat greets you by name and the time of day, and asks what to build, fix or explain in the folder you have open.
+- The side list has your projects: press one to work in it, or its arrow to see its topics.
+
+## 2026-10-15 — The agent can suggest connectors
+
+- When a task needs something Lattice's own tools do not have (driving a browser with Playwright, Git, time zones, a memory between chats), the agent can find a connector for it in Lattice's catalog and offer it. It is added to your MCP settings only if you say yes, and it starts only when you allow it.
+
+## 2026-10-15 — A new look for the chat
+
+- Your messages sit on the right in a bubble. Lattice's answers read as text under its mark, a size larger, with Copy and Regenerate beneath.
+- Each turn's work is one line, such as "Worked for 1 min 12 s · 9 steps · 2 files edited", that opens to every step. It is open while the agent works and folds when it is done. Questions, approvals and plans waiting for you stay in view either way.
+- The to-do list, your checklists, the stack's suggestions and the changes waiting for review are chips above the chat box. Press one to open its list, and again to close it. The changes chip keeps Review and Keep all beside it, and a new checklist opens by itself.
+- The chat box is rounder and roomier. Images (+), Agent or Ask, the project, the folder and the file in view are chips along its bottom, with the model and Send at its end.
+- Earlier topics in the chat fold to a single line, and open again with a press.
+- In the side list, the Groups and Topics sections fold away. A group's arrow shows its topics without opening it.
+- With no chat yet, Lattice greets you with four ways to start.
+## 2026-10-15 — Notebooks, cell by cell
+
+- The agent reads Jupyter notebooks cell by cell, with their outputs, and changes one cell at a time: replace, insert or delete. Each change waits in the Changes panel for your review, like any other edit.
+
+## 2026-10-15 — Pages and tabs in windows of their own
+
+- Any page can have a window of its own, so Lattice, Sinai, Fleet, Pages and the rest can be open side by side, on one screen or across several.
+- Drag a page's place off the rail and let go, over the desktop or over the page: its window opens there. The pop-out button beside the window's buttons does the same for the page on show, and so does a middle-click on its place on the rail or the command palette.
+- A page in its own window moves there: the main window shows the page before it, and the page's place on the rail is marked; a press on it brings its window forward. Back in its window's bar returns it to the main window, and closing its window returns it to the rail.
+- The tabs of Lattice, Transcription and Compute can have windows of their own too: drag one down off its page's bar, middle-click it, or use the palette. Agent runs can sit beside the chat, live captions in a small window of their own, or the simulator on a second screen.
+- The keys of a page work in the window it is in. The palette, the keyboard's sheet and Ctrl+1 to Ctrl+9 bring the main window forward.
+
+## 2026-10-15 — Chat first
+
+- Lattice opens on the chat: the conversation sits in a reading column in the middle of the window.
+- The editor is a panel beside the chat. Ctrl+E or the </> button in the chat's header shows or hides it, and opening a file, a change or the terminal brings it.
+- While agents work, the editor opens on the files they read and edit, a change as its diff. Following can be switched off there, and hiding the editor while an agent works keeps it hidden until that agent's next turn.
+- The editor has numbered editors: 1 is yours, and each agent that works on files gets the next, with its own tabs and a dot while it works. An agent's files open in its own editor, so the one you are reading stays put; Alt+1 to Alt+9 picks one.
+
+## 2026-10-15 — Walkthroughs of what the agent did
+
+- When the agent works in its browser or on your desktop, it can save a walkthrough: the pictures it took, in order, each with its caption and a note, after a summary of what it did. It sits beside the chat with the other artifacts; Preview shows it as a page.
+
+## 2026-10-15 — More hands on the desktop in auto mode
+
+- In auto mode the agent can right-click, middle-click and triple-click, drag (files, sliders, selections) and hold a key down.
+- It can look closer at a small part of the screen, and work on any of your displays, not only the main one.
+- It can put text on the clipboard, and read it only after you allow it, every time.
+- It can open a program by its name from the Start menu. It never opens Alelyon itself, a password manager or Windows' sign-in prompts.
+
+## 2026-10-15 — The agent and your terminals
+
+- Ask the agent what your terminal printed: it can read the last lines of one of your terminals, after you allow it, every time.
+- The agent can start something where you can watch it (a dev server, an interactive tool) in a new terminal of its own, after you allow the command. It never types into a terminal you opened.
+
+## 2026-10-15 — Helpers that work alongside the agent
+
+- The agent can send a helper off to work while it carries on, then collect its answer when it is ready.
+- It can send a working helper more instructions, ask a helper that has finished a follow-up question, or stop one.
+- It can split a job over a list (files, modules, questions) into one helper per item, four working at a time, and get every answer back together.
+- Helpers stop when the agent's turn ends, so nothing keeps working after it has answered you.
+
+## 2026-10-15 — Schedules and watches
+
+- The agent can schedule a prompt to run later, once or again and again (such as "check the build every hour"), or ask to be woken in the same chat after a while. You are asked first, every time.
+- Schedules run only while Alelyon is open; one that was due while it was closed is reported in its chat, not run late.
+- The Tools page lists every schedule with when it runs next, and Cancel.
+- The agent can wait for a command it started to print something (a server saying it is ready, a build finishing) instead of checking again and again.
+
+## 2026-10-15 — Reading web pages and images
+
+- The agent can now read a web page as text without opening the browser, which is quicker for documentation and articles. It reaches only the public web, never this PC or your network, and sends no sign-ins.
+- The agent can look at an image in your folder (a screenshot, a mockup, a diagram), and read a PDF page by page, when its model can see images. PDFs are drawn by Windows itself, on this PC.
+
+## 2026-10-15 — The agent can check your own app
+
+- The agent's browser can now open your app running on this PC (localhost) when the agent started its dev server in the chat, so it can check a change in the running app.
+- Any other localhost port asks you first; a yes lasts until you close Alelyon.
+- It can work in several tabs, and put a file from your folder into a page's upload field. Every upload asks you first, and files that hold secrets (such as .env files and keys) are never uploaded.
+
+## 2026-10-15 — Checklists that fold and scroll
+
+- The checklists above the chat's composer now sit in one list that scrolls once it reaches two fifths of the panel, so the conversation and the composer always stay in view.
+- Press a checklist's title to fold it to one line: its title and how many steps are done. Press it again to open it.
+- With more than one checklist, Collapse all folds them all, and Expand all opens them again.
+
+## 2026-10-15 — The agent's browser gets developer tools
+
+- The agent can now debug a web page the way you would with the browser's developer tools: run a script in the page, read the console and its errors, and list the page's network requests and read a response.
+- It can find buttons and fields by their words and fill in forms, and size the page like a phone or switch it to dark mode to check a layout.
+- The same rules as clicks apply: anything that posts, pays, deletes or changes an account asks you first, and it never fills a password or card field or touches your cookies or a site's saved data.
+
+## 2026-10-15 — Cost and time per group
+
+- Each card on the board now says what its group's work spent: tokens in and out, and time worked.
+- It says how the answers are paid for: on this PC (free), on your own subscription, or at a price Alelyon does not know.
+- Answers whose model reported no token counts are listed apart, never counted as zero.
+- Commands that may cost money (creating cloud resources, deploying, paid APIs) show how many the agent asked to run and how many you approved.
+
+## 2026-10-15 — Plans and milestones
+
+- Each group can have a plan: a goal and milestones in order, each with an optional date.
+- The agent working in a group proposes the plan, works toward the next milestone and ticks each one off as it finishes the tasks under it.
+- Plan, on a group's card or in the side panel, opens the plan to edit. Once you save it, the agent suggests changes in words instead of replacing it, and it never moves a date.
+- When a milestone passes its date unfinished, the group is marked behind on the board, and the agent tells you.
+
+## 2026-10-15 — The board
+
+- The new Board button above the chat shows every group of your project as a card: Planned, In progress, Waiting on you or Done.
+- A card moves by itself as the work goes: it shows how many steps are done, its tasks, and what it is waiting for from you (an approval, a question or a decision).
+- Move a card to another column with one click: it stays there until that group's work changes, and Follow the work puts it back.
+- Put your groups in order with the arrows. When your limit of tasks at once is reached, a task you start waits its turn instead of being refused, and the highest group's tasks start first.
+- What is working now is at the bottom of the board.
+
+## 2026-10-15 — Brainstorm
+
+- Brainstorm, at the top of the groups, is a chat beside your work for talking ideas through, so you need not interrupt a group that is busy with a task.
+- It knows every group and what each is doing, and it changes nothing: it only reads and talks.
+- When an idea belongs to a group, it shows you a card: Send to that group, or Start a new group with it. Nothing is sent until you press it, and you stay in Brainstorm while the group works on it.
+
+## 2026-10-15 — Groups
+
+- Your work is now split into groups by what is being done, at the top of the Chats side. Each group has its own session: one continuing chat for that line of work, with its tasks beside it.
+- Send a message with no group open and Lattice puts it with the group it is about, or starts a new group for it. In an open group, your messages stay in that group.
+- Tasks join the group of the chat they were started from.
+- You can rename a group, merge it into another, move a chat to another group or to a new one of its own, and archive a group (nothing is deleted).
+- Your earlier chats were put in groups once; look them over and keep them, or move what does not fit.
+
+## 2026-10-14 — Allow all
+
+- A project can now let the agent finish work without you: turn on Allow all on its page. Commands run, tools and the agent's browser are used, file changes are kept as they are made, stack decisions take the recommended option, and the agent answers its own questions.
+- Anything that spends money still asks you, and the agent never types a password or a card number. Every change still keeps a checkpoint you can restore.
+- Commands that may cost money (creating cloud servers or databases, deploying, scaling, calling a paid API) are marked “May cost money” on their approval card, with why, and always ask, even with Allow all on.
+- Everything done without you is listed on the project's page under Decided for you; Change this puts any of it in the chat box so you can ask for something else. A gold Allow all beside Working in shows it is on.
+
+## 2026-10-14 — Stack advice on the to-do list
+
+- When the agent's to-do list has a step that needs a choice of technology (a language, a database, sign-in, payments, email, hosting, a framework or the architecture), the step says “decide”.
+- The agent then shows you the options from Lattice's own catalog, ranked for what you need and for what your project already uses: each with what it is, how it fits your project, its pros and cons, licence and cost. You pick; the step shows your pick.
+- Your choice is remembered for the folder, and its setup steps are pinned above the chat box as a checklist to follow.
+- When you open a folder, Lattice reads its package and build files and suggests improvements for what it already uses (a lock file, a connection pool, security headers…); “Ask the agent” hands one to the agent.
+
 ## 2026-10-14 — Tasks side by side
 
 - The tasks you start from suggestion chips now show in a Tasks view, several side by side (the ▦ button above the chat). Each one shows what it is doing; you don't type into a task, you steer it from the main chat.

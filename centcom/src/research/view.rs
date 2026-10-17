@@ -17,8 +17,30 @@ const PURPOSE: &str = "Every paper on a subject, not just the ones today's keywo
                        then follows citations backward and forward until a round finds nothing new, and keeps each paper \
                        with the reason it belongs.";
 
+/// The page's purpose on its title line; the rest of `PURPOSE` is on the "?" beside it.
+const PURPOSE_SHORT: &str = "Every paper on a subject, each kept with the reason it belongs.";
+
+/// Why a key, read once: on a "?" beside the line that asks for one.
+const KEY_WHY: &str = "OpenAlex is the archive's citation graph: about 250 million papers and what each one cites. Without a key, \
+                       it answers from a small daily budget shared by everyone on your internet connection, which one subject can \
+                       use up. A key is free and takes about thirty seconds: make an account, then copy the key from its API settings.";
+
+/// Where a pasted key goes.
+const KEY_KEPT: &str = "The key is kept in Windows Credential Manager, never in a file, and is sent to api.openalex.org only.";
+
+/// The parts of the page that open and close (`State::open`).
+const KEY: &str = "key";
+const AGENTS: &str = "agents";
+
+/// How tall the papers list stands: with the page's lines above it, the list's first rows show in a 1280 by 800
+/// window without scrolling the page; the list scrolls inside itself.
+const PAPERS_H: f32 = 440.0;
+
 pub fn view(state: &State, phase: f32) -> El<'_> {
-    let mut page = Column::new().spacing(18).push(ui::heading("Research", PURPOSE)).push(key_card(state, phase));
+    let mut page = Column::new()
+        .spacing(14)
+        .push(row![container(ui::heading("Research", PURPOSE_SHORT)).width(Length::Fill), ui::help(PURPOSE)].spacing(8))
+        .push(key(state, phase));
     if let Some(why) = &state.error {
         page = page.push(ui::notice(why.as_str(), theme::CAUTION));
     }
@@ -26,8 +48,9 @@ pub fn view(state: &State, phase: f32) -> El<'_> {
         .into()
 }
 
-fn key_card(state: &State, phase: f32) -> El<'_> {
-    let mut body = Column::new().spacing(10);
+/// The OpenAlex key: without one, a short card that asks for it (the next thing to do); with one, a single line
+/// (where it is, today's budget) that opens to its settings.
+fn key(state: &State, phase: f32) -> El<'_> {
     let paste = || {
         row![
             text_input("Paste your OpenAlex API key", &state.key_input)
@@ -44,52 +67,66 @@ fn key_card(state: &State, phase: f32) -> El<'_> {
         .align_y(Alignment::Center)
     };
     match &state.key {
-        KeyState::Looking => body = body.push(ui::working(phase, "Looking for a key…")),
-        KeyState::Missing => {
-            body = body
-                .push(label(
-                    "OpenAlex is the archive's citation graph: about 250 million papers and what each one cites. Without a key, \
-                     it answers from a small daily budget shared by everyone on your internet connection, which one subject can \
-                     use up. A key is free and takes about thirty seconds: make an account, then copy the key from its API settings.",
-                    13.0,
-                    theme::TEXT_DIM,
-                ))
+        KeyState::Looking => ui::working(phase, "Looking for a key…"),
+        KeyState::Missing => card(
+            "OpenAlex key",
+            Column::new()
+                .spacing(10)
+                .push(
+                    row![
+                        label("No key yet: searches share a small daily budget with everyone on your connection. A key is free.", 13.0, theme::TEXT_DIM),
+                        ui::help(KEY_WHY),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center),
+                )
                 .push(
                     row![ui::primary("Get a free key at OpenAlex", Some(Msg::GetKey)), ui::secondary("How keys work", Some(Msg::KeyHelp))]
                         .spacing(8),
                 )
-                .push(paste())
-                .push(note("The key is kept in Windows Credential Manager, never in a file, and is sent to api.openalex.org only."));
-        }
+                .push(row![container(paste()).width(Length::Fill), ui::help(KEY_KEPT)].spacing(8).align_y(Alignment::Center)),
+        ),
         KeyState::Present(source) => {
-            let budget: El<'_> = match (&state.budget, state.checking) {
-                (_, true) => ui::working(phase, "Asking OpenAlex for today's budget…"),
+            // The line: where the key is and today's budget, always on show.
+            let (colour, budget): (_, El<'_>) = match (&state.budget, state.checking) {
+                (_, true) => (theme::POSITIVE, ui::working(phase, "Asking OpenAlex for today's budget…")),
                 (Some(Ok(b)), _) => {
                     let left = b.credits_remaining as f64 / b.credits_limit.max(1) as f64;
                     let colour = if left < 0.1 { theme::CAUTION } else { theme::TEXT };
                     let refill = b.resets_in_seconds.map(|s| format!("; refills in {} h {} min", s / 3600, (s % 3600) / 60)).unwrap_or_default();
-                    label(format!("{} of {} credits left today{refill}. A page of results costs 1, a search 10.", b.credits_remaining, b.credits_limit), 13.0, colour)
-                        .into()
+                    (
+                        theme::POSITIVE,
+                        row![
+                            label(format!("{} of {} credits left today{refill}", b.credits_remaining, b.credits_limit), 12.5, colour),
+                            ui::help("A page of results costs 1 credit, a search 10."),
+                        ]
+                        .spacing(6)
+                        .align_y(Alignment::Center)
+                        .into(),
+                    )
                 }
-                (Some(Err(why)), _) => ui::notice(format!("OpenAlex did not confirm the key: {why}"), theme::CAUTION),
-                (None, false) => label("Budget not checked yet.", 13.0, theme::TEXT_DIM).into(),
+                (Some(Err(why)), _) => (theme::CAUTION, label(ui::cut(&format!("OpenAlex did not confirm the key: {why}"), 110), 12.5, theme::CAUTION).into()),
+                (None, false) => (theme::POSITIVE, label("Budget not checked yet", 12.5, theme::TEXT_DIM).into()),
             };
-            body = body
-                .push(row![ui::dot(theme::POSITIVE), label(format!("Key found in {source}."), 13.0, theme::TEXT)].spacing(8).align_y(Alignment::Center))
-                .push(budget);
+            let summary = row![ui::dot(colour), label(format!("In {source}"), 12.5, theme::TEXT), budget].spacing(10).align_y(Alignment::Center);
+            // Opened: what can be done with it.
+            let mut body = Column::new().spacing(8);
+            if let Some(Err(why)) = &state.budget {
+                body = body.push(ui::notice(format!("OpenAlex did not confirm the key: {why}"), theme::CAUTION));
+            }
             let mut actions = Row::new().spacing(8).push(ui::secondary("Check budget", (!state.checking).then_some(Msg::CheckBudget)));
             actions = actions.push(ui::secondary(if state.replacing { "Keep this key" } else { "Replace key" }, Some(Msg::ReplaceKey)));
             if source == "Credential Manager" {
                 actions = actions.push(ui::secondary("Forget key", Some(Msg::ForgetKey)));
             }
             actions = actions.push(ui::secondary("OpenAlex key settings", Some(Msg::GetKey)));
-            body = body.push(actions);
+            body = body.push(actions.wrap());
             if state.replacing {
-                body = body.push(paste());
+                body = body.push(row![container(paste()).width(Length::Fill), ui::help(KEY_KEPT)].spacing(8).align_y(Alignment::Center));
             }
+            ui::disclosure("OpenAlex key", summary, state.open.contains(KEY), Msg::Disclose(KEY), body)
         }
     }
-    card("OpenAlex key", body)
 }
 
 fn subjects(state: &State) -> El<'_> {
@@ -133,10 +170,14 @@ fn main(state: &State, phase: f32) -> El<'_> {
         let verb = if r.update { "Updating" } else { "Gathering" };
         // A still line, not a turning spinner: a run lasts minutes to an hour and must not keep the window redrawing.
         let _ = phase;
-        let mut lines = Column::new()
-            .spacing(4)
-            .push(strong(format!("{verb} \"{}\" in the background", r.topic), 13.5, theme::TEXT))
-            .push(note("The run is a process of its own and saves after every round: closing this window does not stop it."));
+        let mut lines = Column::new().spacing(4).push(
+            row![
+                strong(format!("{verb} \"{}\" in the background", r.topic), 13.5, theme::TEXT),
+                ui::help("The run is a process of its own and saves after every round: closing this window does not stop it."),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
         for l in &r.lines {
             lines = lines.push(mono(l.as_str(), 12.0, theme::TEXT_DIM));
         }
@@ -163,80 +204,59 @@ fn main(state: &State, phase: f32) -> El<'_> {
         Some(Ok(t)) => t.iter().find(|t| &t.name == name),
         _ => None,
     };
+    // The subject on one line (its name, how many papers, whether complete, and what can be done with it), then the
+    // views with the watch beside them; both stay where they are whichever view is chosen (UX-PRINCIPLES B4).
+    let tabs = ui::tabs(&[View::Papers, View::Map, View::Gaps], state.view, |v: View| match v {
+        View::Papers => "Papers".to_string(),
+        View::Map => "Map of connections".to_string(),
+        View::Gaps => "Gaps".to_string(),
+    }, Msg::ShowView);
     if let Some(t) = topic {
-        let mut facts = Column::new().spacing(6);
-        facts = facts.push(ui::fact("Searches", label(t.queries.join(" · "), 13.0, theme::TEXT)));
-        facts = facts.push(ui::fact("Concepts", label(t.phrases.iter().map(|p| p.replace('|', " / ")).collect::<Vec<_>>().join(" · "), 13.0, theme::TEXT)));
-        if let Some(r) = &t.last {
-            let kind = if r.kind == "update" { "Update" } else { "Full gathering" };
-            facts = facts
-                .push(ui::fact("Last run", label(format!("{kind}: {} ({})", stop_words(&r.stop), r.finished_at), 13.0, theme::TEXT)))
-                .push(ui::fact("Papers", label(format!("{} accepted of {} read, {} requests", r.accepted, r.archived, r.calls), 13.0, theme::TEXT)))
-                .push(ui::fact(
-                    "Found by",
-                    label(format!("search {}, citations {}, both {}", r.by_search, r.by_citation, r.by_both), 13.0, theme::TEXT),
-                ))
-                .push(match &t.last_full {
-                    Some(full) => ui::fact(
-                        "Still missing",
-                        label(full.missing.as_str(), 13.0, if full.missing.starts_with("UNMEASURED") { theme::TEXT_DIM } else { theme::TEXT }),
-                    ),
-                    None => ui::fact("Still missing", label("UNMEASURED: no full gathering saved", 13.0, theme::TEXT_DIM)),
-                });
-            if let Some(h) = &r.halt_reason {
-                facts = facts.push(ui::fact("Why it stopped", label(h.as_str(), 13.0, theme::CAUTION)));
-            }
-        }
         let idle = state.running.is_none();
-        facts = facts.push(ui::fact(
-            "Watch",
+        let status = match &t.last {
+            Some(r) => format!("{} papers · {}", t.members, stop_words(&r.stop)),
+            None => format!("{} papers", t.members),
+        };
+        body = body.push(
             row![
+                row![strong(t.name.as_str(), 18.0, theme::TEXT), label(status, 12.5, theme::TEXT_DIM)]
+                    .spacing(12)
+                    .align_y(Alignment::Center)
+                    .width(Length::Fill),
+                ui::primary("Update now", idle.then_some(Msg::UpdateNow)),
+                ui::secondary("Gather again in full", idle.then_some(Msg::GatherAgain)),
+                ui::secondary("Forget subject", idle.then_some(Msg::Forget)),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        );
+        let watch_words = match t.watch {
+            Watch::Off => "Off: not updated on its own.".to_string(),
+            _ => format!("Updated with what is new while Alelyon is open, up to {} requests each time.", super::UPDATE_CALLS),
+        };
+        body = body.push(
+            row![
+                container(tabs).width(Length::Fill),
+                label("Watch", 12.5, theme::TEXT_DIM),
                 ui::tabs(&Watch::ALL, t.watch, |w: Watch| match w {
                     Watch::Off => "Off".to_string(),
                     Watch::Daily => "Daily".to_string(),
                     Watch::Weekly => "Weekly".to_string(),
                 }, Msg::SetWatch),
-                label(
-                    match t.watch {
-                        Watch::Off => "Not updated on its own.".to_string(),
-                        _ => format!("Updated with what is new while Alelyon is open, up to {} requests each time.", super::UPDATE_CALLS),
-                    },
-                    12.0,
-                    theme::TEXT_FAINT,
-                ),
+                ui::help(watch_words),
             ]
-            .spacing(10)
+            .spacing(8)
             .align_y(Alignment::Center),
-        ));
-        facts = facts.push(
-            row![
-                ui::primary("Update now", idle.then_some(Msg::UpdateNow)),
-                ui::secondary("Gather again in full", idle.then_some(Msg::GatherAgain)),
-                ui::secondary("Forget subject", idle.then_some(Msg::Forget)),
-            ]
-            .spacing(8),
         );
-        body = body.push(match state.view {
-            View::Papers => card(t.name.as_str(), facts),
-            // The map wants the room: the subject in one line.
-            View::Map | View::Gaps => row![
-                strong(t.name.as_str(), 18.0, theme::TEXT),
-                label(
-                    t.last.as_ref().map(|r| format!("{} papers · {}", t.members, stop_words(&r.stop))).unwrap_or_default(),
-                    12.5,
-                    theme::TEXT_DIM
-                ),
-            ]
-            .spacing(12)
-            .align_y(Alignment::Center)
-            .into(),
-        });
+        if let Some(h) = t.last.as_ref().and_then(|r| r.halt_reason.as_ref()) {
+            body = body.push(row![label("Why it stopped", 12.5, theme::TEXT_DIM), label(h.as_str(), 12.5, theme::CAUTION)].spacing(10));
+        }
+        if state.view == View::Papers {
+            body = body.push(facts(t));
+        }
+    } else {
+        body = body.push(tabs);
     }
-    body = body.push(ui::tabs(&[View::Papers, View::Map, View::Gaps], state.view, |v: View| match v {
-        View::Papers => "Papers".to_string(),
-        View::Map => "Map of connections".to_string(),
-        View::Gaps => "Gaps".to_string(),
-    }, Msg::ShowView));
     body = match state.view {
         View::Papers => body.push(papers(state, phase)),
         View::Map => body.push(map(state, phase)),
@@ -245,9 +265,44 @@ fn main(state: &State, phase: f32) -> El<'_> {
     body.push(agents(state)).into()
 }
 
-/// How models and agents reach the same archive.
+/// A subject's facts in two columns: what defines it, and what its last run found. A long value is cut on the page
+/// and whole on hover.
+fn facts(t: &alelyon_research::store::TopicRow) -> El<'_> {
+    let fact = |name: &'static str, value: String, colour: iced::Color| -> El<'static> {
+        let short = ui::cut(&value, 120);
+        let line: El<'static> = label(short.clone(), 12.5, colour).into();
+        row![
+            container(label(name, 12.0, theme::TEXT_FAINT)).width(92),
+            if short == value { line } else { ui::tip(line, value) },
+        ]
+        .spacing(8)
+        .into()
+    };
+    let mut items = vec![
+        fact("Searches", t.queries.join(" · "), theme::TEXT),
+        fact("Concepts", t.phrases.iter().map(|p| p.replace('|', " / ")).collect::<Vec<_>>().join(" · "), theme::TEXT),
+    ];
+    if let Some(r) = &t.last {
+        let kind = if r.kind == "update" { "Update" } else { "Full gathering" };
+        items.push(fact("Last run", format!("{kind}: {} ({})", stop_words(&r.stop), r.finished_at), theme::TEXT));
+        items.push(fact("Papers", format!("{} accepted of {} read, {} requests", r.accepted, r.archived, r.calls), theme::TEXT));
+        items.push(fact("Found by", format!("search {}, citations {}, both {}", r.by_search, r.by_citation, r.by_both), theme::TEXT));
+        items.push(match &t.last_full {
+            Some(full) => fact(
+                "Still missing",
+                full.missing.clone(),
+                if full.missing.starts_with("UNMEASURED") { theme::TEXT_DIM } else { theme::TEXT },
+            ),
+            None => fact("Still missing", "UNMEASURED: no full gathering saved".to_string(), theme::TEXT_DIM),
+        });
+    }
+    container(ui::grid(items, 2, 6.0)).padding([10.0, 12.0]).width(Length::Fill).style(theme::panel).into()
+}
+
+/// How models and agents reach the same archive: closed to one line until opened.
 fn agents(state: &State) -> El<'_> {
     let body = Column::new()
+        .spacing(10)
         .push(label(
             "Models and agents can research with the same subjects, papers and maps through an MCP server that this program \
              runs (`centcom --research-mcp`): ask a question and get what agents already worked out (facts from papers, \
@@ -277,38 +332,48 @@ fn agents(state: &State) -> El<'_> {
             .spacing(10)
             .align_y(Alignment::Center),
         );
-    card("For AI models and agents", body)
+    let summary = label("Lattice, Claude Code or any MCP client can ask this archive", 12.5, theme::TEXT_DIM);
+    ui::disclosure("For AI models and agents", summary, state.open.contains(AGENTS), Msg::Disclose(AGENTS), body)
 }
 
 fn map(state: &State, phase: f32) -> El<'_> {
-    let mut body = Column::new().spacing(10);
+    // The tab above names the view: the map takes the page's width with no card around it.
+    let mut body = Column::new().spacing(8);
     let drawn = match &state.drawn {
-        None => return card("Map of connections", body.push(ui::working(phase, "Building the map…"))),
-        Some(Err(why)) => return card("Map of connections", body.push(ui::notice(why.as_str(), theme::CAUTION))),
+        None => return body.push(ui::working(phase, "Building the map…")).into(),
+        Some(Err(why)) => return body.push(ui::notice(why.as_str(), theme::CAUTION)).into(),
         Some(Ok(d)) if d.graph.nodes.is_empty() => {
-            return card("Map of connections", body.push(label("No papers to map yet.", 13.0, theme::TEXT_DIM)));
+            return body.push(label("No papers to map yet.", 13.0, theme::TEXT_DIM)).into();
         }
         Some(Ok(d)) => d,
     };
     let g = &drawn.graph;
     let roles = |r: &str| g.nodes.iter().filter(|n| n.role.name() == r).count();
-    body = body.push(note(format!(
-        "{} papers in {} threads. Each dot is a paper, coloured by its thread and sized by its influence (PageRank over the \
-         subject's citations); ringed dots are foundations ({}). Bridges between threads: {}. Frontier (newest, not yet \
-         cited here): {}. Click a paper to see what it cites (gold) and what cites it (blue).",
-        g.nodes.len(),
-        g.communities.len(),
-        roles("foundation"),
-        roles("bridge"),
-        roles("frontier")
-    )));
+    body = body.push(
+        row![
+            note(format!(
+                "{} papers in {} threads · {} foundations · {} bridges · {} at the frontier",
+                g.nodes.len(),
+                g.communities.len(),
+                roles("foundation"),
+                roles("bridge"),
+                roles("frontier")
+            )),
+            ui::help(
+                "Each dot is a paper, coloured by its thread and sized by its influence (PageRank over the subject's \
+                 citations); ringed dots are foundations. Bridges join threads; the frontier is the newest papers, not yet \
+                 cited here. Click a paper to see what it cites (gold) and what cites it (blue)."
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
     let canvas: El<'_> = match state.map() {
         Some(c) => c.width(Length::Fill).height(Length::Fixed(620.0)).into(),
         None => space().into(),
     };
     let drawing = container(canvas).padding(4).width(Length::Fill).style(theme::panel);
-    body = body.push(row![drawing, side(state, drawn)].spacing(14));
-    card("Map of connections", body)
+    body.push(row![drawing, side(state, drawn)].spacing(14)).into()
 }
 
 /// Beside the map: the chosen paper's connections, or the threads.
@@ -365,7 +430,7 @@ fn side<'a>(state: &'a State, drawn: &'a super::map::Drawn) -> El<'a> {
             }
         }
     }
-    col = col.push(strong("Threads", 13.0, theme::TEXT)).push(label("Click one to light it on the map.", 11.5, theme::TEXT_FAINT));
+    col = col.push(row![strong("Threads", 13.0, theme::TEXT), ui::help("Click one to light it on the map.")].spacing(8).align_y(Alignment::Center));
     for c in &drawn.graph.communities {
         let on = state.thread == Some(c.id);
         let years = c.years.map(|y| format!(", {}–{}", y.0, y.1)).unwrap_or_default();
@@ -394,10 +459,10 @@ fn side<'a>(state: &'a State, drawn: &'a super::map::Drawn) -> El<'a> {
 fn form(state: &State) -> El<'_> {
     let f = &state.form;
     let field = |title: &'static str, hint: &'static str, value: &str, on: fn(String) -> Msg, help: &'static str| -> El<'static> {
+        // What a field takes is on the "?" beside its name; the hint in the field shows an example.
         column![
-            strong(title, 13.0, theme::TEXT),
+            row![strong(title, 13.0, theme::TEXT), ui::help(help)].spacing(8).align_y(Alignment::Center),
             text_input(hint, value).on_input(on).padding([7.0, 10.0]).size(13.0).style(ui::input_style).width(Length::Fill),
-            label(help, 11.5, theme::TEXT_FAINT),
         ]
         .spacing(4)
         .into()
@@ -426,9 +491,16 @@ fn form(state: &State) -> El<'_> {
     card("New subject", fields)
 }
 
+/// The papers: no card around them (the tab above names them), the filters on one line, the search with the count
+/// beside it on the next, and the list (or what a search found) scrolling inside itself under them.
 fn papers(state: &State, phase: f32) -> El<'_> {
-    let mut body = Column::new().spacing(10);
+    let mut body = Column::new().spacing(8);
     body = body.push(ui::tabs(&Filter::ALL, state.filter, |f: Filter| f.title().to_string(), Msg::Show));
+    let count = match (&state.hits, &state.members) {
+        (Some(Ok(hits)), _) => format!("{} found", hits.len()),
+        (None, Some(Ok(_))) => format!("{} papers, oldest first", state.visible().len()),
+        _ => String::new(),
+    };
     body = body.push(
         row![
             text_input("Find papers in this subject by words in their title or abstract", &state.find)
@@ -439,6 +511,7 @@ fn papers(state: &State, phase: f32) -> El<'_> {
                 .style(ui::input_style)
                 .width(Length::Fill),
             ui::secondary("Find", Some(Msg::FindGo)),
+            label(count, 12.0, theme::TEXT_FAINT),
         ]
         .spacing(8)
         .align_y(Alignment::Center),
@@ -446,31 +519,34 @@ fn papers(state: &State, phase: f32) -> El<'_> {
     if state.loading {
         body = body.push(ui::working(phase, "Reading the archive…"));
     }
+    let scroller = |list: Column<'static, Msg>| -> El<'static> {
+        container(scrollable(list).style(theme::scrollbars).height(Length::Fixed(PAPERS_H))).padding(4).style(theme::panel).into()
+    };
     if let Some(hits) = &state.hits {
         match hits {
             Err(why) => body = body.push(ui::notice(why.as_str(), theme::CAUTION)),
             Ok(hits) => {
-                body = body.push(label(format!("{} found", hits.len()), 12.0, theme::TEXT_FAINT));
+                let mut list = Column::new().spacing(4);
                 for h in hits {
-                    body = body.push(
+                    list = list.push(
                         row![
                             label(h.year.map_or("····".into(), |y| y.to_string()), 12.0, theme::TEXT_FAINT).width(44),
-                            label(h.title.as_str(), 13.0, theme::TEXT).width(Length::Fill),
+                            label(h.title.clone(), 13.0, theme::TEXT).width(Length::Fill),
                         ]
-                        .spacing(8),
+                        .spacing(8)
+                        .padding([4.0, 8.0]),
                     );
                 }
-                return card("Search", body);
+                return body.push(scroller(list)).into();
             }
         }
     }
-    let Some(members) = &state.members else { return card("Papers", body) };
+    let Some(members) = &state.members else { return body.into() };
     let members = match members {
-        Err(why) => return card("Papers", body.push(ui::notice(why.as_str(), theme::CAUTION))),
+        Err(why) => return body.push(ui::notice(why.as_str(), theme::CAUTION)).into(),
         Ok(m) => m,
     };
     let visible = state.visible();
-    body = body.push(label(format!("{} papers, oldest first", visible.len()), 12.0, theme::TEXT_FAINT));
     let mut list = Column::new().spacing(4);
     for &i in visible.iter().take(state.shown) {
         let m = &members[i];
@@ -520,11 +596,11 @@ fn papers(state: &State, phase: f32) -> El<'_> {
             button(entry).width(Length::Fill).padding([6.0, 8.0]).on_press(Msg::Detail(if open { None } else { Some(i) })).style(theme::list_row(open)),
         );
     }
-    body = body.push(container(scrollable(list).style(theme::scrollbars).height(Length::Fixed(560.0))).padding(4).style(theme::panel));
+    body = body.push(container(scrollable(list).style(theme::scrollbars).height(Length::Fixed(PAPERS_H))).padding(4).style(theme::panel));
     if visible.len() > state.shown {
         body = body.push(ui::secondary("Show more", Some(Msg::ShowMore)));
     }
-    card("Papers", body)
+    body.into()
 }
 
 /// A saved reason ("text:2", "cites:3:1", "cited_by:4") in words.

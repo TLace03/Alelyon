@@ -64,7 +64,7 @@ pub struct Entry {
 const SECTION_KEYS: [&str; 9] = ["Ctrl+1", "Ctrl+2", "Ctrl+3", "Ctrl+4", "Ctrl+5", "Ctrl+6", "Ctrl+7", "Ctrl+8", "Ctrl+9"];
 
 /// The IDE's own commands, as its keys name them.
-const EDITOR: [(&str, &str, Key); 14] = [
+const EDITOR: [(&str, &str, Key); 15] = [
     ("Go to file", "Ctrl+P", Key::QuickOpen),
     ("Search the folder", "Ctrl+Shift+F", Key::Search),
     ("Find in the file", "Ctrl+F", Key::Find),
@@ -77,6 +77,7 @@ const EDITOR: [(&str, &str, Key); 14] = [
     ("Reopen the closed tab", "Ctrl+Shift+T", Key::Reopen),
     ("Show or hide the side bar", "Ctrl+B", Key::ToggleSide),
     ("Show or hide the bottom panel", "Ctrl+J", Key::TogglePanel),
+    ("Show or hide the editor beside the chat", "Ctrl+E", Key::ToggleEditor),
     ("Ask the agent to edit the selection", "Ctrl+K", Key::Inline),
     ("Go to the chat's message box", "Ctrl+L", Key::FocusChat),
 ];
@@ -171,6 +172,49 @@ pub fn entries(app: &App) -> Vec<Entry> {
     });
     if app.social.active() && app.can(Capability::Friends) {
         all.push(Entry { id: "window:friends".into(), group: "Window", title: "Friends".into(), keys: "", run: vec![Message::Social(crate::social::Msg::Panel(true))] });
+    }
+    // Each page to a window of its own, or back to the main window from one (`windows`); the main window keeps a page.
+    for section in Section::ALL {
+        use crate::windows::Msg;
+        let (title, run) = match app.windows.of(section) {
+            Some(p) => (format!("{}: back to the main window", section.title()), vec![Message::Windows(Msg::Back(p.id))]),
+            None if app.section != section || app.windows.instead_of(section).is_some() => {
+                (format!("{} in a window of its own", section.title()), vec![Message::Windows(Msg::PopOut(section))])
+            }
+            None => continue,
+        };
+        all.push(Entry { id: format!("window:own:{}", section.short().to_lowercase()), group: "Window", title, keys: "", run });
+    }
+    // ... and each of Transcription's tabs
+    for tab in Tab::ALL {
+        use crate::windows::{Msg, Part};
+        let part = Part::Words(tab);
+        let (title, run) = match app.windows.of_part(part) {
+            Some(p) => (format!("Transcription's {}: back to its page", tab.title()), vec![Message::Windows(Msg::Back(p.id))]),
+            None => (format!("Transcription's {} in a window of its own", tab.title()), vec![Message::Windows(Msg::PopOutPart(part))]),
+        };
+        all.push(Entry { id: format!("window:own:words:{tab:?}").to_lowercase(), group: "Window", title, keys: "", run });
+    }
+    // ... and each of Compute's tabs
+    for tab in app.compute.tabs() {
+        use crate::windows::{Msg, Part};
+        let part = Part::Compute(tab);
+        let name = app.compute.title(tab);
+        let (title, run) = match app.windows.of_part(part) {
+            Some(p) => (format!("Compute's {name}: back to its page"), vec![Message::Windows(Msg::Back(p.id))]),
+            None => (format!("Compute's {name} in a window of its own"), vec![Message::Windows(Msg::PopOutPart(part))]),
+        };
+        all.push(Entry { id: format!("window:own:compute:{tab:?}").to_lowercase(), group: "Window", title, keys: "", run });
+    }
+    // ... and each of Lattice's tabs
+    for tab in lattice::Tab::ALL {
+        use crate::windows::{Msg, Part};
+        let part = Part::Lattice(tab);
+        let (title, run) = match app.windows.of_part(part) {
+            Some(p) => (format!("Lattice's {}: back to its page", tab.title()), vec![Message::Windows(Msg::Back(p.id))]),
+            None => (format!("Lattice's {} in a window of its own", tab.title()), vec![Message::Windows(Msg::PopOutPart(part))]),
+        };
+        all.push(Entry { id: format!("window:own:lattice:{tab:?}").to_lowercase(), group: "Window", title, keys: "", run });
     }
     for pane in crate::signin::settings::Pane::ALL {
         all.push(Entry {

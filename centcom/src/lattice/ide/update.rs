@@ -31,12 +31,19 @@ pub enum IdeMsg {
     Tools(super::tools::ToolsMsg),
     /// The projects' messages.
     Projects(super::projects::ProjectsMsg),
+    Groups(super::groups::GroupsMsg),
     Notes(super::notes::NotesMsg),
     Jump(super::jump::JumpMsg),
     Grid(super::grid::GridMsg),
     /// The composer's commands list.
     Slash(super::slash::SlashMsg),
     TogglePanel,
+    /// Show or hide the editor beside the chat (Ctrl+E).
+    ToggleEditor,
+    /// Put a numbered editor on show (Alt+1 to Alt+9): the reader's own, or an agent's.
+    ShowEditor(String),
+    /// Close an agent's editor (its tabs without unsaved edits close with it).
+    CloseEditor(String),
     Panel(PanelTab),
     DragStart(Splitter),
     Pointer(iced::Point),
@@ -147,10 +154,30 @@ pub enum IdeMsg {
     StepsNotify(String, bool),
     /// The reader's Done on a checklist.
     StepsDone(String),
+    /// Fold one of the tray's checklists to its head, or open it again (its key: `chat:<id>` or `outside:<id>`).
+    FoldSteps(String),
+    /// Fold every checklist of the tray (true), or open them all (false).
+    FoldAllSteps(bool),
+    /// The Work side on show with one of its lists open on it (the composer's Tools chip shows the tools so).
+    ShowWork(super::WorkList),
+    /// Fold a turn's work (its turn id) to its line, or open it to its latest steps or to all.
+    Work(String, super::Fold),
+    /// Fold an older topic of the stream (its id) to its line, or open it again.
+    FoldTopic(String),
+    /// Fold a part of the Chats side or of the tools to its head, or show a group's or a project's topics (the keys
+    /// as [`super::Ide::side_folds`] holds them); the same again undoes it.
+    SideFold(String),
     /// Set the plan aside for more planning.
     PlanKeep(String),
     TaskDismiss(String),
     TaskPrompt(String),
+    /// The reader picked an option of a stack decision (call, option id).
+    Choose(String, String),
+    /// The open folder's stack, as the advisor's catalog reads its manifests.
+    StackRead(String, Box<super::StackReview>),
+    StackDismiss,
+    /// Ask the agent in the main chat to apply suggestion n.
+    StackAsk(usize),
     /// An artifact: open a version of it in a tab (the tab already showing it, when there is one), read it, step its
     /// version, show its Markdown as source or formatted, copy its text, or preview a page or a picture.
     ArtifactOpen(String, u32),
@@ -229,6 +256,10 @@ pub enum Key {
     Save,
     ToggleSide,
     TogglePanel,
+    /// Ctrl+E: the editor beside the chat, shown or hidden.
+    ToggleEditor,
+    /// Alt+1 to Alt+9: the numbered editor beside the chat.
+    Editor(usize),
     CloseTab,
     FocusChat,
     Find,
@@ -271,6 +302,11 @@ pub fn keys(event: iced::Event, status: iced::event::Status, _window: iced::wind
             _ => {}
         }
     }
+    if modifiers.alt() && !modifiers.command() && !modifiers.shift()
+        && let Some(n) = key.to_latin(physical_key).and_then(|c| c.to_digit(10)).filter(|n| (1..=9).contains(n))
+    {
+        return Some(Msg::Ide(IdeMsg::Key(Key::Editor(n as usize))));
+    }
     let key = if modifiers.command() {
         match key.to_latin(physical_key) {
             Some('t') if modifiers.shift() => Key::Reopen,
@@ -279,6 +315,7 @@ pub fn keys(event: iced::Event, status: iced::event::Status, _window: iced::wind
             Some('s') if !captured => Key::Save,
             Some('b') => Key::ToggleSide,
             Some('j') | Some('`') => Key::TogglePanel,
+            Some('e') if !modifiers.shift() => Key::ToggleEditor,
             Some('w') => Key::CloseTab,
             Some('l') => Key::FocusChat,
             Some('f') if modifiers.shift() => Key::Search,
@@ -410,13 +447,15 @@ impl State {
                         self.ide.term_focus = false;
                         return operation::focus(search::input_id());
                     }
-                    if side == Side::Tools {
+                    // the Work side lists the tools, and the Tools view their servers: each reads them as it shows
+                    if side == Side::Tools || side == Side::Work {
                         return self.read_tools();
                     }
                 }
             }
             IdeMsg::Tools(msg) => return self.tools(msg),
             IdeMsg::Projects(msg) => return self.projects(msg),
+            IdeMsg::Groups(msg) => return self.groups(msg),
             IdeMsg::Notes(msg) => return self.notes(msg),
             IdeMsg::Jump(msg) => return self.jump(msg),
             IdeMsg::Grid(msg) => return self.grid(msg),
@@ -425,11 +464,27 @@ impl State {
             IdeMsg::Outside(msg) => return self.outside(msg),
             IdeMsg::MentionList(msg) => return self.mention(msg),
             IdeMsg::TogglePanel => return self.toggle_panel(),
+            IdeMsg::ToggleEditor => self.toggle_editor(),
+            IdeMsg::ShowEditor(key) => {
+                self.ide.show_editor(&key);
+                self.ide.reveal();
+                // the tab on show there: a change's diff is read again, a find bar follows it
+                if let Some(id) = self.ide.active {
+                    return self.ide_update(IdeMsg::Activate(id));
+                }
+            }
+            IdeMsg::CloseEditor(key) => {
+                self.ide.close_editor(&key);
+                if let Some(id) = self.ide.active {
+                    return self.ide_update(IdeMsg::Activate(id));
+                }
+            }
             IdeMsg::Panel(PanelTab::Terminal) => return self.show_terminals(),
             IdeMsg::Panel(tab) => {
                 self.ide.panel = tab;
                 self.ide.panel_open = true;
                 self.ide.term_focus = false;
+                self.ide.reveal();
             }
             IdeMsg::DragStart(which) => self.ide.drag = Some((which, None)),
             IdeMsg::Pointer(at) => {
@@ -498,11 +553,13 @@ impl State {
                             self.problem = Some(why);
                             return Task::none();
                         }
+                        // The folder's stack, as the catalog reads its manifests (read here, off the core).
+                        let review = self.read_stack();
                         // A project's first topic works in the folder that just opened.
                         if std::mem::take(&mut self.attach_when_open) && self.open.is_none() {
-                            return Task::batch([self.read_listing(), self.attach_open_folder()]);
+                            return Task::batch([self.read_listing(), self.attach_open_folder(), review]);
                         }
-                        return self.read_listing();
+                        return Task::batch([self.read_listing(), review]);
                     }
                     Err(why) => {
                         self.restore_failed();
@@ -816,6 +873,38 @@ impl State {
                     self.ide.expanded_calls.insert(call);
                 }
             }
+            IdeMsg::FoldSteps(key) => {
+                if !self.ide.folded_steps.remove(&key) {
+                    self.ide.folded_steps.insert(key);
+                }
+            }
+            IdeMsg::FoldAllSteps(fold) => {
+                self.ide.folded_steps.clear();
+                if fold {
+                    let keys = super::agent::steps_keys(self);
+                    self.ide.folded_steps.extend(keys);
+                }
+            }
+            IdeMsg::ShowWork(list) => {
+                self.ide.show_work(list);
+                // The tools are read again as they show, so their switches and counts are the core's own.
+                if list == super::WorkList::Tools {
+                    return self.read_tools();
+                }
+            }
+            IdeMsg::Work(turn, fold) => {
+                self.ide.work_folds.insert(turn, fold);
+            }
+            IdeMsg::FoldTopic(id) => {
+                if !self.ide.folded_topics.remove(&id) {
+                    self.ide.folded_topics.insert(id);
+                }
+            }
+            IdeMsg::SideFold(key) => {
+                if !self.ide.side_folds.remove(&key) {
+                    self.ide.side_folds.insert(key);
+                }
+            }
             IdeMsg::Suggest(text) => {
                 self.composer = text_editor::Content::with_text(&text);
                 self.composer.perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
@@ -886,6 +975,28 @@ impl State {
                     );
                 }
             }
+            IdeMsg::Choose(call, option) => {
+                self.answers.insert(call.clone(), option);
+                return self.update(Msg::Answer(call));
+            }
+            IdeMsg::StackRead(path, review) => {
+                if self.ide.folder_path.trim() == path {
+                    self.ide.stack = Some(*review);
+                }
+            }
+            IdeMsg::StackDismiss => {
+                if let Some(stack) = &mut self.ide.stack {
+                    stack.dismissed = true;
+                }
+            }
+            IdeMsg::StackAsk(n) => {
+                let Some(s) = self.ide.stack.as_ref().and_then(|stack| stack.suggestions.get(n)) else { return Task::none() };
+                let text = format!("Apply this improvement to the project's stack: {} ({}). Why: {} Check it first; the suggestion comes from the manifests only.", s.suggest, s.name, s.why);
+                if let Some(stack) = &mut self.ide.stack {
+                    stack.asked.insert(n);
+                }
+                return self.send_text(text, self.mode, None, true);
+            }
             IdeMsg::TaskPrompt(task) => {
                 if !self.ide.task_prompts.remove(&task) {
                     self.ide.task_prompts.insert(task);
@@ -901,6 +1012,8 @@ impl State {
                 // beside the chat, which stays); the composer's draft stays.
                 self.ide.inline_sending = true;
                 self.ide.task_starting = true;
+                // An idea for a group: said where it went once it is sent.
+                self.ide.groups.sending_idea = c.task_group(&task).map(|g| super::groups::idea_target(&self.ide.groups, g));
                 let id = c.id().to_string();
                 let (chat, choice, shown, mode) =
                     (services.chat.clone(), self.choice.clone(), self.shown_for(&self.choice), self.mode);
@@ -1100,6 +1213,7 @@ impl State {
                 self.ide.command_lines = None;
                 self.ide.panel = PanelTab::Commands;
                 self.ide.panel_open = true;
+                self.ide.reveal();
                 return self.read_command(call, 1);
             }
             IdeMsg::CommandRead(call, result) => {
@@ -1122,8 +1236,14 @@ impl State {
                 self.ide.term_starting = false;
                 let taken = result
                     .and_then(|started| started.take().ok_or_else(|| "The terminal was handed over twice.".to_string()));
+                // A terminal the agent asked for runs its command, and the agent hears whether it took it.
+                let run = self.ide.term_runs.iter().position(|(run, ..)| *run == id).map(|at| self.ide.term_runs.remove(at));
                 match taken {
-                    Ok(term) => {
+                    Ok(mut term) => {
+                        if let Some((_, command, answer)) = run {
+                            term.label = format!("Agent: {}", term.label);
+                            let _ = answer.send(term.input(format!("{command}\r").as_bytes()).map(|()| id));
+                        }
                         self.ide.terms.push(term);
                         self.ide.term_active = Some(id);
                         self.ide.term_problem = None;
@@ -1131,7 +1251,12 @@ impl State {
                             return self.focus_terminal();
                         }
                     }
-                    Err(why) => self.ide.term_problem = Some(why),
+                    Err(why) => {
+                        if let Some((_, _, answer)) = run {
+                            let _ = answer.send(Err(why.clone()));
+                        }
+                        self.ide.term_problem = Some(why);
+                    }
                 }
             }
             IdeMsg::TermEvent(id, event) => {
@@ -1272,6 +1397,7 @@ impl State {
             IdeMsg::SearchOpen(path, line, start, end) => {
                 if let Some(id) = self.ide.file_tab(&path) {
                     self.ide.active = Some(id);
+                    self.ide.reveal();
                     return self.reveal_in(id, line, start, end);
                 }
                 self.ide.reveal = Some((path.clone(), line, start, end));
@@ -1761,12 +1887,27 @@ impl State {
     }
 
     /// Show or hide the bottom panel; shown on the terminals, the terminal on show takes the keyboard.
+    /// Show or hide the editor beside the chat ([`super::Ide::toggle_editor`]).
+    fn toggle_editor(&mut self) {
+        let working = self.agents_working();
+        self.ide.toggle_editor(working);
+    }
+
+    /// An agent is at work: the open chat's turn, or a task's in the grid.
+    pub(in crate::lattice) fn agents_working(&self) -> bool {
+        self.open.as_ref().is_some_and(|c| c.running)
+            || self.ide.grid.tiles.iter().any(|t| t.conversation.as_ref().is_some_and(|c| c.running))
+    }
+
     fn toggle_panel(&mut self) -> Task<Msg> {
         if self.ide.panel_open {
             self.ide.panel_open = false;
             self.ide.term_focus = false;
-            Task::none()
-        } else if self.ide.panel == PanelTab::Terminal {
+            return Task::none();
+        }
+        // The bottom panel lies under the editor beside the chat: showing it shows the editor.
+        self.ide.reveal();
+        if self.ide.panel == PanelTab::Terminal {
             self.show_terminals()
         } else {
             self.ide.panel_open = true;
@@ -1778,6 +1919,7 @@ impl State {
     pub(in crate::lattice) fn show_terminals(&mut self) -> Task<Msg> {
         self.ide.panel = PanelTab::Terminal;
         self.ide.panel_open = true;
+        self.ide.reveal();
         if self.ide.terms.is_empty() {
             if self.ide.term_starting || self.ide.term_problem.is_some() {
                 return Task::none();
@@ -1821,6 +1963,67 @@ impl State {
         Task::perform(off_thread(move || term::Term::start(id, &cwd, cols, rows).map(term::Started::new)), move |r| {
             Msg::Ide(IdeMsg::TermStarted(id, r.unwrap_or_else(|| Err("The terminal's start was cut short.".to_string()))))
         })
+    }
+
+    /// What the core asks of the terminals (`lattice_core::convo::terminal`): a read or a run comes only after the
+    /// reader's yes in the core's dialog. A run opens a new terminal (never one the person opened) and types the command
+    /// into it once its shell starts.
+    pub(in crate::lattice) fn term_ask(&mut self, ask: crate::lattice::core::TermAsk) -> Task<Msg> {
+        use crate::lattice::core::TermAsk;
+        match ask {
+            TermAsk::List(answer) => {
+                let active = self.ide.term_active;
+                let tabs = self
+                    .ide
+                    .terms
+                    .iter()
+                    .map(|t| lattice_core::ports::TerminalTab {
+                        id: t.id,
+                        label: t.label.clone(),
+                        folder: t.cwd.display().to_string(),
+                        running: t.running(),
+                        active: active == Some(t.id),
+                    })
+                    .collect();
+                let _ = answer.send(tabs);
+                Task::none()
+            }
+            TermAsk::Read { id, lines, answer } => {
+                let text = self
+                    .ide
+                    .terms
+                    .iter()
+                    .find(|t| t.id == id)
+                    .map(|t| {
+                        let mut rows: Vec<String> =
+                            t.screen.lines(0, lines).into_iter().map(|row| term::vt::row_text(row)).collect();
+                        while rows.last().is_some_and(|l| l.is_empty()) {
+                            rows.pop();
+                        }
+                        rows.join("\n")
+                    })
+                    .ok_or_else(|| format!("Terminal {id} has been closed."));
+                let _ = answer.send(text);
+                Task::none()
+            }
+            TermAsk::Run { folder, command, answer } => {
+                let id = self.ide.next_term_id();
+                let task = self.start_terminal(Some(folder));
+                if self.ide.next_term_id() == id {
+                    let why = self
+                        .ide
+                        .term_problem
+                        .clone()
+                        .unwrap_or_else(|| "A terminal is starting: try again in a moment.".to_string());
+                    let _ = answer.send(Err(why));
+                    return task;
+                }
+                self.ide.term_runs.push((id, command, answer));
+                self.ide.panel_open = true;
+                self.ide.panel = PanelTab::Terminal;
+                task
+            }
+        }
     }
 
     /// What a terminal's grid read.
@@ -2022,18 +2225,30 @@ impl State {
 
     /// Show `path` in the editor: its tab when it has one, else a new tab read off the window's thread.
     pub(in crate::lattice) fn open_file(&mut self, path: String) -> Task<Msg> {
-        if let Some(id) = self.ide.file_tab(&path) {
-            self.ide.active = Some(id);
+        let key = self.ide.shown.clone();
+        self.open_file_in(&key, path)
+    }
+
+    /// Open `path` (a file of the folder on show) in numbered editor `key`, or show its tab there. Opened in an
+    /// editor not on show, it waits there as that editor's tab on show; the Explorer opens to it only for the reader.
+    pub(in crate::lattice) fn open_file_in(&mut self, key: &str, path: String) -> Task<Msg> {
+        if let Some(id) = self.ide.file_tab_in(key, &path) {
+            self.ide.activate_in(key, id);
+            if key == self.ide.shown {
+                self.ide.reveal();
+            }
             return Task::none();
         }
         let Some(folder) = self.ide.folder.clone() else {
             self.problem = Some("Open a folder first: the editor shows the folder the chat works in.".to_string());
             return Task::none();
         };
-        for parent in tree::folders_of(&path) {
-            self.ide.expanded.insert(parent);
+        if key == self.ide.shown {
+            for parent in tree::folders_of(&path) {
+                self.ide.expanded.insert(parent);
+            }
         }
-        let id = self.ide.push(TabKind::File { path: path.clone(), lang: Lang::of(&path), body: Body::Loading, note: None });
+        let id = self.ide.push_in(key, TabKind::File { path: path.clone(), lang: Lang::of(&path), body: Body::Loading, note: None });
         Task::perform(off_thread(move || folder.open(&path)), move |r| {
             Msg::Ide(IdeMsg::Opened(id, Box::new(r.unwrap_or_else(|| Err(STOPPED.to_string())))))
         })
@@ -2301,8 +2516,8 @@ impl State {
     }
 
     fn key(&mut self, key: Key) -> Task<Msg> {
-        // While a terminal has the keyboard its keys are its program's (Ctrl+S, Ctrl+W, Ctrl+L, Esc and the arrows
-        // too): only the IDE's Ctrl+P, Ctrl+B and Ctrl+J or Ctrl+` act.
+        // While a terminal has the keyboard its keys are its program's (Ctrl+S, Ctrl+W, Ctrl+L, Ctrl+E, Esc and the
+        // arrows too): only the IDE's Ctrl+P, Ctrl+B and Ctrl+J or Ctrl+` act.
         if self.ide.terminal_focused()
             && !matches!(key, Key::QuickOpen | Key::ToggleSide | Key::TogglePanel | Key::NextTab | Key::PreviousTab)
         {
@@ -2316,6 +2531,13 @@ impl State {
             Key::Save => return self.ide_update(IdeMsg::Save),
             Key::ToggleSide => self.ide.side_open = !self.ide.side_open,
             Key::TogglePanel => return self.toggle_panel(),
+            Key::ToggleEditor => self.toggle_editor(),
+            Key::Editor(n) => {
+                if let Some(slot) = self.ide.editors.get(n.saturating_sub(1)) {
+                    let key = slot.key.clone();
+                    return self.ide_update(IdeMsg::ShowEditor(key));
+                }
+            }
             Key::CloseTab => {
                 if let Some(id) = self.ide.active {
                     return self.ide_update(IdeMsg::Close(id));
@@ -2338,6 +2560,7 @@ impl State {
             }
             Key::Reopen => {
                 if let Some(path) = self.ide.closed.pop() {
+                    self.ide.reveal();
                     return self.open_file(path);
                 }
             }
@@ -2771,6 +2994,43 @@ mod tests {
     }
 
     #[test]
+    fn the_cores_terminal_asks_list_read_and_run_in_a_new_terminal() {
+        use crate::lattice::core::TermAsk;
+        use futures::channel::oneshot;
+        let (mut state, _) = with_terminal();
+        state.ide.terms[0].output(b"PS C:\\w> echo hi\r\nhi\r\n");
+        let (tx, mut rx) = oneshot::channel();
+        let _ = state.term_ask(TermAsk::List(tx));
+        let tabs = rx.try_recv().unwrap().unwrap();
+        assert_eq!(tabs.iter().map(|t| (t.id, t.active)).collect::<Vec<_>>(), vec![(7, true)]);
+        let (tx, mut rx) = oneshot::channel();
+        let _ = state.term_ask(TermAsk::Read { id: 7, lines: 50, answer: tx });
+        let text = rx.try_recv().unwrap().unwrap().unwrap();
+        assert!(text.ends_with("PS C:\\w> echo hi\nhi"), "{text:?}");
+        let (tx, mut rx) = oneshot::channel();
+        let _ = state.term_ask(TermAsk::Read { id: 99, lines: 50, answer: tx });
+        assert_eq!(rx.try_recv().unwrap().unwrap(), Err("Terminal 99 has been closed.".to_string()));
+        // While another terminal starts, a run is refused, not lost.
+        state.ide.term_starting = true;
+        let (tx, mut rx) = oneshot::channel();
+        let _ = state.term_ask(TermAsk::Run { folder: std::env::temp_dir(), command: "npm run dev".into(), answer: tx });
+        assert!(rx.try_recv().unwrap().unwrap().unwrap_err().contains("starting"));
+        // A run opens a new terminal, named as the agent's, and the agent hears what came of typing its command.
+        state.ide.term_starting = false;
+        let id = state.ide.next_term_id();
+        let (tx, mut rx) = oneshot::channel();
+        let _ = state.term_ask(TermAsk::Run { folder: std::env::temp_dir(), command: "npm run dev".into(), answer: tx });
+        assert!(state.ide.term_starting && state.ide.panel_open);
+        let started = term::Started::new(term::Term::unstarted(id, &std::env::temp_dir()));
+        let _ = state.ide_update(IdeMsg::TermStarted(id, Ok(started)));
+        let shown = state.ide.terms.iter().find(|t| t.id == id).unwrap();
+        assert_eq!(shown.label, "Agent: PowerShell 7");
+        // A terminal with no shell behind it does not take the keys: the agent is told.
+        assert_eq!(rx.try_recv().unwrap().unwrap(), Err("The terminal has ended.".to_string()));
+        assert!(state.ide.term_runs.is_empty());
+    }
+
+    #[test]
     fn closing_an_idle_terminal_does_not_ask_and_the_one_beside_it_is_shown() {
         let (mut state, _) = with_terminal();
         state.ide.terms.push(term::Term::unstarted(8, &std::env::temp_dir()));
@@ -3071,5 +3331,200 @@ mod tests {
         let _ = state.ide_update(IdeMsg::Key(Key::Find));
         let _ = state.ide_update(IdeMsg::Key(Key::Inline));
         assert!(state.ide.find.is_none() && state.ide.inline.is_none(), "Ctrl+F and Ctrl+K are the shell's then");
+    }
+
+    #[test]
+    fn following_two_agents_opens_each_ones_files_in_its_own_editor_without_moving_the_reader() {
+        use lattice_protocol::Locality;
+        use lattice_protocol::conversation::{
+            ConversationEvent, ConversationEventKind as Ev, ConversationSummary, Mode, Origin, Snapshot, TurnKind, WorkspaceBadge,
+        };
+        let s = files::tests::Scratch::new("two-agents");
+        std::fs::create_dir_all(s.work().join("src")).unwrap();
+        for name in ["a.rs", "b.rs"] {
+            std::fs::write(s.work().join("src").join(name), b"x").unwrap();
+        }
+        let folder = Arc::new(s.folder());
+        let badge = WorkspaceBadge { id: folder.id().to_string(), name: "work".into(), path: String::new(), trusted: true };
+        let mut state = State::new();
+        state.ide.folder = Some(folder);
+        let chat = |id: &str, title: &str| {
+            let summary = ConversationSummary {
+                id: id.into(),
+                title: title.into(),
+                created: 1.0,
+                updated: 1.0,
+                turns: 1,
+                pinned_provider: String::new(),
+                workspace: Some(badge.clone()),
+                mode: Mode::Agent,
+                origin: Origin::Native,
+                running: false,
+                needs_you: false,
+            };
+            let snapshot = Snapshot { conversation: summary, turns: vec![], events: vec![], last_seq: 0, queued: vec![], answering_elsewhere: false };
+            crate::lattice::chat::Conversation::from_snapshot(snapshot)
+        };
+        state.open = Some(chat("c1", "Main"));
+        state.ide.grid.tiles.push(crate::lattice::ide::grid::Tile {
+            id: "t1".into(),
+            conversation: Some(chat("t1", "Fix the tests")),
+            generation: 0,
+            draft: String::new(),
+            sending: false,
+            problem: None,
+            changes: None,
+            recording: false,
+            mode: None,
+            choice: None,
+        });
+        let ev = |seq: u64, kind: Ev| ConversationEvent { seq, at: seq as f64, kind };
+        let started = |seq: u64| {
+            ev(seq, Ev::TurnStarted { turn: format!("t{seq}"), kind: TurnKind::Agent, mode: Mode::Agent, label: "Local".into(), locality: Locality::Local })
+        };
+        let read = |seq: u64, path: &str| {
+            ev(seq, Ev::ToolCall { call_id: format!("k{seq}"), tool: "read_file".into(), summary: "read_file".into(), target: Some(path.into()) })
+        };
+        let _ = state.update(Msg::Batch("c1".into(), vec![started(1), read(2, "src/a.rs")]));
+        assert_eq!(state.ide.shown, "c1", "the editor came on show for this chat's work: its editor is on show");
+        assert_eq!(state.ide.active_tab().and_then(|t| t.path()), Some("src/a.rs"));
+        let _ = state.update(Msg::Batch("t1".into(), vec![started(3), read(4, "src/b.rs")]));
+        assert_eq!(state.ide.shown, "c1", "another agent's work does not move the reader");
+        assert_eq!(state.ide.active_tab().and_then(|t| t.path()), Some("src/a.rs"));
+        assert!(state.ide.file_tab_in("t1", "src/b.rs").is_some(), "its file waits in its own editor");
+        let names: Vec<&str> = state.ide.editors.iter().map(|e| e.who.as_str()).collect();
+        assert_eq!(names, ["Yours", "This chat", "Fix the tests"], "numbered: the reader's, then each agent's as it began");
+        let _ = state.ide_update(IdeMsg::Key(Key::Editor(3)));
+        assert_eq!(state.ide.shown, "t1", "Alt+3 shows the task's editor");
+        assert_eq!(state.ide.active_tab().and_then(|t| t.path()), Some("src/b.rs"), "on the file it read");
+    }
+
+    #[test]
+    fn following_shows_the_editor_on_what_the_agent_reads_and_hidden_by_hand_it_stays_hidden_that_turn() {
+        use lattice_protocol::Locality;
+        use lattice_protocol::conversation::{
+            ConversationEvent, ConversationEventKind as Ev, ConversationSummary, Mode, Origin, Snapshot, TurnKind,
+        };
+        let s = files::tests::Scratch::new("follow-agents");
+        std::fs::create_dir_all(s.work().join("src")).unwrap();
+        std::fs::write(s.work().join("src").join("a.rs"), b"fn a() {}").unwrap();
+        let mut state = State::new();
+        state.ide.folder = Some(Arc::new(s.folder()));
+        let summary = ConversationSummary {
+            id: "c1".into(),
+            title: "Fix it".into(),
+            created: 1.0,
+            updated: 1.0,
+            turns: 1,
+            pinned_provider: String::new(),
+            workspace: None,
+            mode: Mode::Agent,
+            origin: Origin::Native,
+            running: false,
+            needs_you: false,
+        };
+        let snapshot = Snapshot { conversation: summary, turns: vec![], events: vec![], last_seq: 0, queued: vec![], answering_elsewhere: false };
+        state.open = Some(crate::lattice::chat::Conversation::from_snapshot(snapshot));
+        let ev = |seq: u64, kind: Ev| ConversationEvent { seq, at: seq as f64, kind };
+        let started = |seq: u64| {
+            ev(seq, Ev::TurnStarted { turn: format!("t{seq}"), kind: TurnKind::Agent, mode: Mode::Agent, label: "Local".into(), locality: Locality::Local })
+        };
+        let read = |seq: u64, path: &str| {
+            ev(seq, Ev::ToolCall { call_id: format!("k{seq}"), tool: "read_file".into(), summary: "read_file".into(), target: Some(path.into()) })
+        };
+        assert!(!state.ide.editor_open, "the chat comes first");
+        let _ = state.update(Msg::Batch("c1".into(), vec![started(1), read(2, "src/a.rs")]));
+        assert!(state.ide.editor_open, "following shows the editor on what the agent reads");
+        assert_eq!(state.ide.active_tab().and_then(|t| t.path()), Some("src/a.rs"), "the file it read is on show");
+        let named = state.ide.working_on.first().map(|w| (w.path.as_str(), w.who.as_str(), w.here));
+        assert_eq!(named, Some(("src/a.rs", "This chat", true)));
+        // Hidden by hand while the agent works: it stays hidden for the rest of that turn.
+        let _ = state.ide_update(IdeMsg::ToggleEditor);
+        assert!(!state.ide.editor_open && state.ide.editor_dismissed);
+        let _ = state.update(Msg::Batch("c1".into(), vec![read(3, "src/a.rs")]));
+        assert!(!state.ide.editor_open, "not shown again during the turn it was hidden in");
+        // The next turn may show it again.
+        let _ = state.update(Msg::Batch("c1".into(), vec![started(4), read(5, "src/a.rs")]));
+        assert!(state.ide.editor_open, "a new turn's work shows it again");
+        // Not following: the agent's files are named, and the editor is left as it is.
+        let _ = state.ide_update(IdeMsg::ToggleEditor);
+        state.ide.editor_dismissed = false;
+        let _ = state.ide_update(IdeMsg::Follow(false));
+        let _ = state.update(Msg::Batch("c1".into(), vec![read(6, "src/a.rs")]));
+        assert!(!state.ide.editor_open, "not following: the editor stays hidden");
+        assert_eq!(state.ide.working_on.first().map(|w| w.path.as_str()), Some("src/a.rs"));
+    }
+    #[test]
+    fn a_checklist_the_agent_gives_opens_the_checklists_on_the_work_side_again() {
+        use crate::lattice::ide::WorkList;
+        use lattice_protocol::conversation::{ConversationEvent, ConversationEventKind as Ev, ConversationSummary, Mode, Origin, Snapshot};
+        let mut state = State::new();
+        let summary = ConversationSummary {
+            id: "c1".into(),
+            title: "Set it up".into(),
+            created: 1.0,
+            updated: 1.0,
+            turns: 1,
+            pinned_provider: String::new(),
+            workspace: None,
+            mode: Mode::Agent,
+            origin: Origin::Native,
+            running: false,
+            needs_you: false,
+        };
+        let snapshot = Snapshot { conversation: summary, turns: vec![], events: vec![], last_seq: 0, queued: vec![], answering_elsewhere: false };
+        state.open = Some(crate::lattice::chat::Conversation::from_snapshot(snapshot));
+        let given = |seq: u64, list: &str| ConversationEvent {
+            seq,
+            at: seq as f64,
+            kind: Ev::StepsGiven { list: list.into(), title: "Connect a model".into(), steps: vec!["Open the Models page.".into()], notify: true },
+        };
+        let _ = state.ide_update(IdeMsg::SideFold(WorkList::Checklists.key().into()));
+        assert!(state.ide.work_folded(WorkList::Checklists), "the reader folded the checklists");
+        let _ = state.update(Msg::Batch("c1".into(), vec![given(1, "l1")]));
+        assert!(!state.ide.work_folded(WorkList::Checklists), "a checklist given opens them again");
+        let _ = state.ide_update(IdeMsg::SideFold(WorkList::Checklists.key().into()));
+        assert!(state.ide.work_folded(WorkList::Checklists), "their head folds them again");
+    }
+    #[test]
+    fn older_topics_and_the_chats_sides_parts_fold_and_open_again() {
+        let mut state = State::new();
+        let _ = state.ide_update(IdeMsg::FoldTopic("t1".into()));
+        assert!(state.ide.folded_topics.contains("t1"), "an older topic folds to its line");
+        let _ = state.ide_update(IdeMsg::FoldTopic("t1".into()));
+        assert!(!state.ide.folded_topics.contains("t1"), "the same again opens it");
+        for key in ["groups", "topics", "group:g1"] {
+            let _ = state.ide_update(IdeMsg::SideFold(key.into()));
+            assert!(state.ide.side_folds.contains(key), "{key}: folded, or a group's topics shown");
+            let _ = state.ide_update(IdeMsg::SideFold(key.into()));
+            assert!(!state.ide.side_folds.contains(key), "{key}: the same again undoes it");
+        }
+    }
+    #[test]
+    fn the_composers_tools_chip_shows_the_tools_on_the_work_side() {
+        use crate::lattice::ide::WorkList;
+        let mut state = State::new();
+        state.ide.side = Side::Search;
+        let _ = state.ide_update(IdeMsg::SideFold(WorkList::Tools.key().into()));
+        let _ = state.ide_update(IdeMsg::ShowWork(WorkList::Tools));
+        assert_eq!(state.ide.side, Side::Work, "the Work side comes on show");
+        assert!(state.ide.side_open && !state.ide.work_folded(WorkList::Tools), "with the tools open on it");
+    }
+    #[test]
+    fn the_first_message_sent_puts_the_empty_chats_starts_away() {
+        let mut state = State::new();
+        assert!(!state.ide.sent, "a new session shows the starts");
+        let _ = state.update(Msg::Send);
+        assert!(!state.ide.sent, "an empty box sends nothing, so the starts stay");
+        state.composer = text_editor::Content::with_text("Explain this folder");
+        let _ = state.update(Msg::Send);
+        assert!(state.ide.sent, "the first message puts them away");
+    }
+    #[test]
+    fn the_ide_opens_on_the_work_side_and_the_folders_files_are_off_the_bar() {
+        let state = State::new();
+        assert_eq!(state.ide.side, Side::Work, "the Work side is the side bar's first view");
+        assert_eq!(Side::ALL[0], Side::Work);
+        assert!(!Side::ALL.contains(&Side::Explorer), "the folder's files are no longer on the activity bar");
     }
 }

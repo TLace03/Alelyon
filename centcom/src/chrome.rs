@@ -8,7 +8,7 @@
 
 use std::time::{Duration, Instant};
 
-use iced::widget::{Space, button, column, container, mouse_area, row, stack, text};
+use iced::widget::{Row, Space, button, column, container, mouse_area, row, stack, text};
 use iced::window::Direction;
 use iced::{Alignment, Background, Border, Color, Element, Length, mouse};
 use crate::theme::{self, fonts};
@@ -29,6 +29,9 @@ pub enum Act {
     ToggleMaximise,
     Close,
     Resize(Direction),
+    /// The page on show to a window of its own; in a page's own window, Back to the main window (`windows`).
+    PopOut,
+    Back,
 }
 
 /// What a press on the bar means, given when the last one was.
@@ -78,8 +81,9 @@ pub fn bar<'a, M: Clone + 'a>(solid: bool, maximised: bool, act: impl Fn(Act) ->
         .into()
 }
 
-/// The three buttons, small: minimise, maximise (restore when maximised) and close.
-pub fn compact<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+/// The three buttons, small: minimise, maximise (restore when maximised) and close; after `lead` (the pop-out button,
+/// or a page's window's Back), set a little apart.
+pub fn compact<'a, M: Clone + 'a>(lead: Option<Act>, maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
     let small = |s: &'a str, msg: M, danger: bool| -> Element<'a, M> {
         button(container(text(s).size(11).font(fonts().ui).color(theme::TEXT_DIM)).center_x(24).center_y(22))
             .padding(0)
@@ -96,19 +100,26 @@ pub fn compact<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) 
             })
             .into()
     };
-    row![
-        small("\u{2500}", act(Act::Minimise), false),
-        small(if maximised { "\u{2750}" } else { "\u{2610}" }, act(Act::ToggleMaximise), false),
-        small("\u{2715}", act(Act::Close), true),
-    ]
-    .spacing(2)
-    .into()
+    let mut buttons = Row::new().spacing(2).align_y(Alignment::Center);
+    if let Some(lead) = lead {
+        let (glyph, words) = match lead {
+            // a plain arrow: Windows draws U+21A9 as a coloured emoji
+            Act::Back => ("\u{2190}", "Back to the main window"),
+            _ => ("\u{29C9}", "Open this page in a window of its own\n(or drag its place off the rail)"),
+        };
+        buttons = buttons.push(crate::ui::tip(small(glyph, act(lead), false), words)).push(Space::new().width(8));
+    }
+    buttons
+        .push(small("\u{2500}", act(Act::Minimise), false))
+        .push(small(if maximised { "\u{2750}" } else { "\u{2610}" }, act(Act::ToggleMaximise), false))
+        .push(small("\u{2715}", act(Act::Close), true))
+        .into()
 }
 
 /// The [`compact`] buttons in the window's top right corner, for a layer over the page: the rest of the layer is
 /// empty, so it takes no press but the buttons'.
-pub fn corner<'a, M: Clone + 'a>(maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
-    container(compact(maximised, act)).align_right(Length::Fill).padding(iced::padding::top(5).right(14)).into()
+pub fn corner<'a, M: Clone + 'a>(lead: Option<Act>, maximised: bool, act: impl Fn(Act) -> M + 'a) -> Element<'a, M> {
+    container(compact(lead, maximised, act)).align_right(Length::Fill).padding(iced::padding::top(5).right(14)).into()
 }
 
 /// A strip as tall as the bar along the window's top, that drags it, for a layer under the page: a press the page

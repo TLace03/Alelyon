@@ -26,16 +26,19 @@
 
 pub mod activity;
 pub mod agent;
+pub mod board;
 pub mod attach;
 pub mod buffer;
 pub mod complete;
 pub mod editing;
+pub mod file_icons;
 // Replaces and places files through Win32 (ReplaceFileW, MoveFileExW), so it may use unsafe code, as the job object
 // does.
 #[allow(unsafe_code)]
 pub mod files;
 pub mod find;
 pub mod grid;
+pub mod groups;
 pub mod highlight;
 pub mod jump;
 pub mod mention;
@@ -44,6 +47,7 @@ pub mod notes;
 // Windows' folder picker (IFileOpenDialog, through COM), so it may use unsafe code, as the job object does.
 #[allow(unsafe_code)]
 pub mod picker;
+pub mod plan;
 pub mod projects;
 pub mod search;
 pub mod slash;
@@ -71,6 +75,13 @@ pub const PANEL_HEIGHT: f32 = 210.0;
 pub const SIDE_RANGE: (f32, f32) = (170.0, 520.0);
 pub const AGENT_RANGE: (f32, f32) = (320.0, 820.0);
 pub const PANEL_RANGE: (f32, f32) = (96.0, 640.0);
+/// The editor beside the chat (chat first): its width when it first opens, and its bounds.
+pub const EDITOR_WIDTH: f32 = 680.0;
+pub const EDITOR_RANGE: (f32, f32) = (360.0, 1400.0);
+/// The chat's reading column: never wider than this, centred in the room it has.
+pub const CHAT_MAX: f32 = 920.0;
+/// The most files the editor's head names as being worked on.
+pub const WORKING_KEPT: usize = 8;
 /// The editor's font size and the height of one of its lines (fixed, so the line numbers beside it stay level).
 pub const CODE_SIZE: f32 = 13.0;
 pub const LINE_HEIGHT: f32 = 19.0;
@@ -85,6 +96,36 @@ pub const PAGE_LINES: u32 = 400;
 /// How long a confirmation ignores input after it appears (as the core's dialogs do).
 pub const CONFIRM_QUIET: Duration = Duration::from_millis(500);
 
+/// The files a batch of a chat's events touches, in order: the paths its file tools name (reading, editing, writing;
+/// not deleting) and the files its changes and commands staged, each with the staged change's id when it has one.
+pub fn worked_files(events: &[lattice_protocol::conversation::ConversationEvent]) -> Vec<(String, Option<String>)> {
+    use lattice_protocol::conversation::ConversationEventKind as Ev;
+    let mut out = Vec::new();
+    for e in events {
+        match &e.kind {
+            Ev::ToolCall { tool, target: Some(path), .. } if names_a_file(tool) && tool != "delete_file" && !path.trim().is_empty() => {
+                out.push((path.trim().to_string(), None));
+            }
+            Ev::Staged { change, path, .. } => out.push((path.clone(), Some(change.to_string()))),
+            Ev::CommandEffect { files, .. } => out.extend(files.iter().map(|f| (f.path.clone(), None))),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// A file a running agent works on, as the editor's head names it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct WorkedFile {
+    /// The file, as the agent named it (relative to its folder).
+    pub path: String,
+    /// The chat or task working on it (its id), and how the head names it.
+    pub by: String,
+    pub who: String,
+    /// It works in the folder the editor shows, so the file can open there.
+    pub here: bool,
+}
+
 /// The newest change a batch of a chat's events staged, which follow mode opens.
 pub fn followed_change(events: &[lattice_protocol::conversation::ConversationEvent]) -> Option<String> {
     use lattice_protocol::conversation::ConversationEventKind as Ev;
@@ -97,6 +138,10 @@ pub fn followed_change(events: &[lattice_protocol::conversation::ConversationEve
 /// What the side bar shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Side {
+    /// What the agents work on and what waits for the reader, a list each ([`WorkList`]): the side bar's first view.
+    Work,
+    /// The open folder's files: no longer on the activity bar (the agents' files are followed in the editor and named
+    /// on the Work side), but the jump menu's folder and New file still show it.
     Explorer,
     Search,
     Chats,
@@ -106,13 +151,15 @@ pub enum Side {
 }
 
 impl Side {
-    pub const ALL: [Side; 5] = [Side::Explorer, Side::Search, Side::Chats, Side::Changes, Side::Tools];
+    /// The activity bar's views, in its order.
+    pub const ALL: [Side; 5] = [Side::Work, Side::Search, Side::Chats, Side::Changes, Side::Tools];
 
     pub fn title(self) -> &'static str {
         match self {
+            Side::Work => "Work: what the agents work on, your checklists, changes and tools",
             Side::Explorer => "Explorer",
             Side::Search => "Search (Ctrl+Shift+F)",
-            Side::Chats if crate::lattice::ONE_SURFACE => "Activity and topics",
+            Side::Chats if crate::lattice::ONE_SURFACE => "Groups and topics",
             Side::Chats => "Chats",
             Side::Changes => "Changes",
             Side::Tools => "Tools and MCP servers",
@@ -122,6 +169,8 @@ impl Side {
     /// The activity bar's glyph.
     pub fn glyph(self) -> &'static str {
         match self {
+            // IDENTICAL TO: the lists in hand.
+            Side::Work => "\u{2261}",
             Side::Explorer => "\u{2750}",
             Side::Search => "\u{2315}",
             Side::Chats => "\u{25C8}",
@@ -130,6 +179,68 @@ impl Side {
             Side::Tools => "\u{2394}",
         }
     }
+}
+
+/// The open folder's stack as the advisor's catalog (lattice-core `advice`) reads its manifests: what it uses,
+/// and the improvements the catalog suggests for that.
+#[derive(Clone, Debug, Default)]
+pub struct StackReview {
+    /// (area title, option name), in the catalog's order.
+    pub detected: Vec<(String, String)>,
+    pub suggestions: Vec<lattice_core::advice::Suggestion>,
+    pub dismissed: bool,
+    /// The suggestions already sent to the agent.
+    pub asked: HashSet<usize>,
+}
+
+impl StackReview {
+    pub fn of(root: &std::path::Path) -> StackReview {
+        let project = lattice_core::advice::scan(root);
+        StackReview {
+            detected: lattice_core::advice::detected(&project).into_iter().map(|(a, c)| (a.title.clone(), c.name.clone())).collect(),
+            suggestions: lattice_core::advice::review(&project),
+            ..StackReview::default()
+        }
+    }
+}
+
+/// A list of the Work side, each folding to its head: the files the agents work on now, the agent's to-do list, the
+/// changes waiting for review, the stack's suggestions, the checklists the agents gave the reader, and the tools.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WorkList {
+    Working,
+    Todos,
+    Changes,
+    Stack,
+    Checklists,
+    Tools,
+}
+
+impl WorkList {
+    /// The lists in the order the Work side shows them: the short ones first, so that long checklists never push the
+    /// changes waiting out of sight, and the tools last.
+    pub const ORDER: [WorkList; 6] =
+        [WorkList::Working, WorkList::Todos, WorkList::Changes, WorkList::Stack, WorkList::Checklists, WorkList::Tools];
+
+    /// Its key among the reader's folds ([`Ide::side_folds`]).
+    pub fn key(self) -> &'static str {
+        match self {
+            WorkList::Working => "work:working",
+            WorkList::Todos => "work:todos",
+            WorkList::Checklists => "work:checklists",
+            WorkList::Changes => "work:changes",
+            WorkList::Stack => "work:stack",
+            WorkList::Tools => "work:tools",
+        }
+    }
+}
+
+/// How much of a turn's work the chat shows: folded to its one line, opened to its latest steps, or opened to all.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fold {
+    Folded,
+    Open,
+    All,
 }
 
 /// What the bottom panel shows.
@@ -145,7 +256,8 @@ pub enum PanelTab {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Splitter {
     Side,
-    Agent,
+    /// The right column's border: the editor beside the chat, or what sits beside the board or the tasks grid.
+    Right,
     Panel,
 }
 
@@ -264,6 +376,22 @@ pub enum TabKind {
 pub struct EditorTab {
     pub id: u64,
     pub kind: TabKind,
+    /// The editor it belongs to: [`YOURS`], or the chat or task whose agent's work it shows.
+    pub editor: String,
+}
+
+/// The reader's own editor, numbered 1: what they open themselves.
+pub const YOURS: &str = "you";
+
+/// One of the numbered editors beside the chat: the reader's own, or an agent's, holding the files that agent works
+/// on (its chat's or task's id is its key).
+#[derive(Clone, Debug, PartialEq)]
+pub struct EditorSlot {
+    pub key: String,
+    /// How its tab names it: "Yours", "This chat" or a task's title.
+    pub who: String,
+    /// The tab on show in it while another editor is on show.
+    pub active: Option<u64>,
 }
 
 impl EditorTab {
@@ -392,8 +520,12 @@ pub struct Ide {
     pub panel_open: bool,
     pub panel: PanelTab,
     pub tabs: Vec<EditorTab>,
+    /// The tab on show, in the editor on show.
     pub active: Option<u64>,
     next_id: u64,
+    /// The numbered editors, the reader's first, then each agent's in the order it began work; and the one on show.
+    pub editors: Vec<EditorSlot>,
+    pub shown: String,
     pub quick: Option<Quick>,
     pub confirm: Option<(Confirm, Instant)>,
     pub side_width: f32,
@@ -402,8 +534,17 @@ pub struct Ide {
     /// A border being dragged, and the pointer's last position along it.
     pub drag: Option<(Splitter, Option<f32>)>,
     pub chat_filter: ChatFilter,
-    /// Follow the agent: each change it stages opens in the editor as its diff, as it is made.
+    /// Follow the agents: the editor opens beside the chat on the files they work on, and each change the open chat
+    /// stages opens there as its diff, as it is made.
     pub follow: bool,
+    /// The editor is on show beside the chat (Ctrl+E): the chat is the page, the editor a panel on its right.
+    pub editor_open: bool,
+    /// The editor panel's width.
+    pub editor_width: f32,
+    /// The reader hid the editor while agents worked: following leaves it hidden until a turn starts.
+    pub editor_dismissed: bool,
+    /// The files the running agents work on, newest first.
+    pub working_on: Vec<WorkedFile>,
     /// What the Chats list is searched for (titles), the folders whose every chat is shown, and whether the
     /// projects are listed under Projects.
     pub chat_search: String,
@@ -439,6 +580,8 @@ pub struct Ide {
     pub term_focus: bool,
     next_term: u64,
     pub term_starting: bool,
+    /// Commands the agent runs in a new terminal, waiting for it to start: its id, the command, and who to tell.
+    pub term_runs: Vec<(u64, String, futures::channel::oneshot::Sender<Result<u64, String>>)>,
     pub term_problem: Option<String>,
     /// The terminal pane's size in cells, as last measured (a new terminal starts at it).
     pub term_cells: (u16, u16),
@@ -459,6 +602,8 @@ pub struct Ide {
     pub task_starting: bool,
     /// The suggested tasks whose prompts are shown on their chips.
     pub task_prompts: HashSet<String>,
+    /// The open folder's stack and the catalog's suggestions for it (read when the folder opens).
+    pub stack: Option<StackReview>,
     /// The images attached to the composer's message (at most 4), sent with it.
     pub attached: Vec<attach::Attached>,
     /// The Tools page's and view's state.
@@ -467,6 +612,8 @@ pub struct Ide {
     pub project: Option<String>,
     /// The projects, and a project's page being edited.
     pub projects: projects::ProjectsState,
+    /// The work's groups (`groups`).
+    pub groups: groups::GroupsState,
     /// The notes beside the open files' lines.
     pub line_notes: notes::NotesState,
     /// The composer's commands list (`/name`).
@@ -477,6 +624,19 @@ pub struct Ide {
     pub completion: complete::Completion,
     /// The checklists agents outside the chats gave the reader, not yet done (`outside_steps`).
     pub outside_steps: Vec<lattice_core::user_steps::ExternalList>,
+    /// The tray's checklists folded to their heads, by key (`chat:<id>` for the chat's own,
+    /// `outside:<id>` for other agents'); the rest show their steps.
+    pub folded_steps: HashSet<String>,
+    /// The turns whose work the reader folded or opened, by turn id; any other is open while it runs and folded after.
+    pub work_folds: std::collections::HashMap<String, Fold>,
+    /// The older topics of the stream folded to their line, by topic id; the rest show their conversation.
+    pub folded_topics: HashSet<String>,
+    /// The parts folded or opened by the reader: on the Chats side `groups`, `projects` and `topics` (a section
+    /// folded to its head), `group:<id>` and `project:<id>` (topics shown beneath one); on the Work side each list
+    /// ([`WorkList::key`]); in the tools `tools:modes` and `tools:use` (a section folded to its head).
+    pub side_folds: HashSet<String>,
+    /// A message was sent since the app started: the empty chat's starts stay away after the first.
+    pub sent: bool,
     /// Files whose tabs closed (by hand or past [`MAX_TABS`]), the latest last: Ctrl+Shift+T opens them again.
     pub closed: Vec<String>,
 }
@@ -492,13 +652,15 @@ impl Default for Ide {
             listing_busy: false,
             expanded: HashSet::new(),
             filter: String::new(),
-            side: Side::Explorer,
+            side: Side::Work,
             side_open: true,
             panel_open: false,
             panel: PanelTab::Commands,
             tabs: Vec::new(),
             active: None,
             next_id: 1,
+            editors: vec![EditorSlot { key: YOURS.into(), who: "Yours".into(), active: None }],
+            shown: YOURS.into(),
             quick: None,
             confirm: None,
             side_width: SIDE_WIDTH,
@@ -506,7 +668,11 @@ impl Default for Ide {
             panel_height: PANEL_HEIGHT,
             drag: None,
             chat_filter: ChatFilter::All,
-            follow: false,
+            follow: true,
+            editor_open: false,
+            editor_width: EDITOR_WIDTH,
+            editor_dismissed: false,
+            working_on: Vec::new(),
             chat_search: String::new(),
             chat_more: HashSet::new(),
             projects_open: false,
@@ -529,6 +695,7 @@ impl Default for Ide {
             term_focus: false,
             next_term: 1,
             term_starting: false,
+            term_runs: Vec::new(),
             term_problem: None,
             term_cells: (120, 8),
             find: None,
@@ -540,20 +707,39 @@ impl Default for Ide {
             task_starting: false,
             attached: Vec::new(),
             task_prompts: HashSet::new(),
+            stack: None,
             tools: tools::Tools::default(),
             project: None,
             projects: projects::ProjectsState::default(),
+            groups: groups::GroupsState::default(),
             line_notes: notes::NotesState::default(),
             slash: slash::Slash::default(),
             mention: mention::Mentioning::default(),
             completion: complete::Completion::default(),
             outside_steps: Vec::new(),
+            folded_steps: HashSet::new(),
+            work_folds: std::collections::HashMap::new(),
+            folded_topics: HashSet::new(),
+            side_folds: HashSet::new(),
+            sent: false,
             closed: Vec::new(),
         }
     }
 }
 
 impl Ide {
+    /// Whether the reader folded `list` of the Work side to its head.
+    pub fn work_folded(&self, list: WorkList) -> bool {
+        self.side_folds.contains(list.key())
+    }
+
+    /// The Work side on show with `list` open on it.
+    pub fn show_work(&mut self, list: WorkList) {
+        self.side = Side::Work;
+        self.side_open = true;
+        self.side_folds.remove(list.key());
+    }
+
     /// The Tools view or the Tools page is shown: only then does a server's change read the servers again.
     pub fn tools_shown(&self) -> bool {
         (self.side_open && self.side == Side::Tools)
@@ -594,19 +780,41 @@ impl Ide {
         self.active.and_then(|id| self.tab(id))
     }
 
-    /// The tab showing `path` as a file.
-    pub fn file_tab(&self, path: &str) -> Option<u64> {
-        self.tabs.iter().find(|t| matches!(&t.kind, TabKind::File { path: p, .. } if p == path)).map(|t| t.id)
+    /// The tabs of the editor on show, in order.
+    pub fn shown_tabs(&self) -> impl Iterator<Item = &EditorTab> {
+        self.tabs.iter().filter(|t| t.editor == self.shown)
     }
 
-    /// Add a tab and show it; past [`MAX_TABS`], the oldest tab without unsaved edits (not the new one) closes.
+    /// The tab showing `path` as a file, in the editor on show.
+    pub fn file_tab(&self, path: &str) -> Option<u64> {
+        self.file_tab_in(&self.shown, path)
+    }
+
+    /// The tab showing `path` as a file, in editor `key`.
+    pub fn file_tab_in(&self, key: &str, path: &str) -> Option<u64> {
+        self.tabs.iter().find(|t| t.editor == key && matches!(&t.kind, TabKind::File { path: p, .. } if p == path)).map(|t| t.id)
+    }
+
+    /// Add a tab to the editor on show and show it, the editor with it.
     pub fn push(&mut self, kind: TabKind) -> u64 {
+        let key = self.shown.clone();
+        self.push_in(&key, kind)
+    }
+
+    /// Add a tab to editor `key`: shown at once when that editor is on show, else the tab it shows when it is. Past
+    /// [`MAX_TABS`] in that editor, its oldest tab without unsaved edits (not the new one) closes.
+    pub fn push_in(&mut self, key: &str, kind: TabKind) -> u64 {
         let id = self.next_id;
         self.next_id += 1;
-        self.tabs.push(EditorTab { id, kind });
-        self.active = Some(id);
-        while self.tabs.len() > MAX_TABS {
-            match self.tabs.iter().position(|t| t.id != id && !t.dirty()) {
+        self.tabs.push(EditorTab { id, kind, editor: key.to_string() });
+        if key == self.shown {
+            self.active = Some(id);
+            self.reveal();
+        } else if let Some(slot) = self.editors.iter_mut().find(|e| e.key == key) {
+            slot.active = Some(id);
+        }
+        while self.tabs.iter().filter(|t| t.editor == key).count() > MAX_TABS {
+            match self.tabs.iter().position(|t| t.editor == key && t.id != id && !t.dirty()) {
                 Some(at) => {
                     let gone = self.tabs.remove(at);
                     self.remember_closed(&gone);
@@ -617,14 +825,71 @@ impl Ide {
         id
     }
 
-    /// Close a tab (the caller has asked about unsaved edits); the tab beside it is shown.
+    /// Show tab `id` in editor `key` (the tab on show there, whether that editor is on show or not).
+    pub fn activate_in(&mut self, key: &str, id: u64) {
+        if key == self.shown {
+            self.active = Some(id);
+        } else if let Some(slot) = self.editors.iter_mut().find(|e| e.key == key) {
+            slot.active = Some(id);
+        }
+    }
+
+    /// Close a tab (the caller has asked about unsaved edits); the tab beside it in its editor is shown.
     pub fn close(&mut self, id: u64) {
-        if let Some(at) = self.tabs.iter().position(|t| t.id == id) {
-            let gone = self.tabs.remove(at);
-            self.remember_closed(&gone);
-            if self.active == Some(id) {
-                self.active = self.tabs.get(at).or_else(|| self.tabs.get(at.saturating_sub(1))).map(|t| t.id);
+        let Some(at) = self.tabs.iter().position(|t| t.id == id) else { return };
+        let gone = self.tabs.remove(at);
+        self.remember_closed(&gone);
+        let same: Vec<u64> = self.tabs.iter().filter(|t| t.editor == gone.editor).map(|t| t.id).collect();
+        let before = self.tabs[..at].iter().filter(|t| t.editor == gone.editor).count();
+        let beside = same.get(before).or_else(|| same.get(before.saturating_sub(1))).copied();
+        if self.active == Some(id) {
+            self.active = beside;
+        }
+        if let Some(slot) = self.editors.iter_mut().find(|e| e.key == gone.editor && e.active == Some(id)) {
+            slot.active = beside;
+        }
+    }
+
+    /// The numbered editor `key` exists (an agent's begins when it first works on a file); `who` names it.
+    pub fn ensure_editor(&mut self, key: &str, who: &str) {
+        match self.editors.iter_mut().find(|e| e.key == key) {
+            Some(slot) => slot.who = who.to_string(),
+            None => self.editors.push(EditorSlot { key: key.to_string(), who: who.to_string(), active: None }),
+        }
+    }
+
+    /// Put editor `key` on show, its own tab with it.
+    pub fn show_editor(&mut self, key: &str) {
+        if key == self.shown || !self.editors.iter().any(|e| e.key == key) {
+            return;
+        }
+        let leaving = std::mem::replace(&mut self.shown, key.to_string());
+        let kept = self.active;
+        if let Some(slot) = self.editors.iter_mut().find(|e| e.key == leaving) {
+            slot.active = kept;
+        }
+        self.active = self.editors.iter().find(|e| e.key == key).and_then(|e| e.active).filter(|id| self.tab(*id).is_some());
+        if self.active.is_none() {
+            let first = self.shown_tabs().next().map(|t| t.id);
+            self.active = first;
+        }
+    }
+
+    /// Close an agent's editor: its tabs without unsaved edits close, and once none is left the editor goes (the
+    /// reader's own stays). The reader's editor comes on show if it was.
+    pub fn close_editor(&mut self, key: &str) {
+        if key == YOURS {
+            return;
+        }
+        let clean: Vec<u64> = self.tabs.iter().filter(|t| t.editor == key && !t.dirty()).map(|t| t.id).collect();
+        for id in clean {
+            self.close(id);
+        }
+        if !self.tabs.iter().any(|t| t.editor == key) {
+            if self.shown == key {
+                self.show_editor(YOURS);
             }
+            self.editors.retain(|e| e.key != key);
         }
     }
 
@@ -642,17 +907,18 @@ impl Ide {
     /// The tab after (or before) the one on show, wrapping round: Ctrl+Tab and Ctrl+Shift+Tab, Ctrl+PageDown and
     /// Ctrl+PageUp.
     pub fn cycle(&mut self, forward: bool) {
-        let n = self.tabs.len();
+        let ids: Vec<u64> = self.shown_tabs().map(|t| t.id).collect();
+        let n = ids.len();
         if n == 0 {
             return;
         }
-        let at = self.active.and_then(|id| self.tabs.iter().position(|t| t.id == id));
+        let at = self.active.and_then(|id| ids.iter().position(|t| *t == id));
         let next = match at {
             Some(i) if forward => (i + 1) % n,
             Some(i) => (i + n - 1) % n,
             None => 0,
         };
-        self.active = Some(self.tabs[next].id);
+        self.active = Some(ids[next]);
     }
 
     /// The confirmation on show, once its quiet time has passed.
@@ -708,6 +974,11 @@ impl Ide {
     }
 
     /// A number for the next terminal.
+    /// The id the next terminal will have.
+    pub fn next_term_id(&self) -> u64 {
+        self.next_term
+    }
+
     pub fn take_term_id(&mut self) -> u64 {
         let id = self.next_term;
         self.next_term += 1;
@@ -732,9 +1003,65 @@ impl Ide {
     pub fn resize(&mut self, which: Splitter, delta: f32) {
         match which {
             Splitter::Side => self.side_width = (self.side_width + delta).clamp(SIDE_RANGE.0, SIDE_RANGE.1),
-            Splitter::Agent => self.agent_width = (self.agent_width - delta).clamp(AGENT_RANGE.0, AGENT_RANGE.1),
+            Splitter::Right if self.tasks_shown() => self.agent_width = (self.agent_width - delta).clamp(AGENT_RANGE.0, AGENT_RANGE.1),
+            Splitter::Right => self.editor_width = (self.editor_width - delta).clamp(EDITOR_RANGE.0, EDITOR_RANGE.1),
             Splitter::Panel => self.panel_height = (self.panel_height - delta).clamp(PANEL_RANGE.0, PANEL_RANGE.1),
         }
+    }
+
+    /// The board or the tasks grid is the page: the right column then holds the chat or the editor.
+    pub fn tasks_shown(&self) -> bool {
+        self.grid.shown || self.groups.board_shown
+    }
+
+    /// Show or hide the editor beside the chat. Hidden while agents work, following leaves it hidden until a turn
+    /// starts; shown again by hand, it is the reader's to keep.
+    pub fn toggle_editor(&mut self, agents_working: bool) {
+        self.editor_open = !self.editor_open;
+        self.editor_dismissed = !self.editor_open && agents_working;
+        if !self.editor_open {
+            self.term_focus = false;
+        }
+    }
+
+    /// A tab came on show by the reader's or an agent's doing: the editor shows beside the chat.
+    pub fn reveal(&mut self) {
+        if !self.tasks_shown() {
+            self.editor_open = true;
+        }
+    }
+
+    /// Note what a batch of chat `by`'s events shows it working on (`who` names it, `here` says it works in the
+    /// folder the editor shows) and return the files it touched, in order. A turn that starts lets following show
+    /// the editor again; one that ends takes that chat's files off the list.
+    pub fn note_work(
+        &mut self,
+        by: &str,
+        who: &str,
+        here: bool,
+        events: &[lattice_protocol::conversation::ConversationEvent],
+    ) -> Vec<(String, Option<String>)> {
+        use lattice_protocol::conversation::ConversationEventKind as Ev;
+        if events.iter().any(|e| matches!(e.kind, Ev::TurnStarted { .. })) {
+            self.editor_dismissed = false;
+        }
+        let touched = worked_files(events);
+        if !touched.is_empty() {
+            self.ensure_editor(by, who);
+        }
+        for (path, _) in &touched {
+            self.working_on.retain(|w| !(w.by == by && &w.path == path));
+            self.working_on.insert(0, WorkedFile { path: path.clone(), by: by.to_string(), who: who.to_string(), here });
+        }
+        self.working_on.truncate(WORKING_KEPT);
+        if events.iter().any(|e| matches!(e.kind, Ev::TurnEnded { .. })) {
+            self.working_on.retain(|w| w.by != by);
+            // an agent's editor with nothing open goes with its turn (one on show stays until another is shown)
+            if !self.tabs.iter().any(|t| t.editor == by) && self.shown != by {
+                self.editors.retain(|e| e.key != by);
+            }
+        }
+        touched
     }
 }
 
@@ -836,6 +1163,28 @@ mod tests {
     }
 
     #[test]
+    fn a_folder_s_stack_is_read_from_its_manifests_with_the_catalog_s_suggestions() {
+        let root = std::env::temp_dir().join(format!("centcom-stack-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"dependencies": {"express": "^4", "pg": "^8"}}"#).unwrap();
+        let review = StackReview::of(&root);
+        let used: Vec<&str> = review.detected.iter().map(|(_, name)| name.as_str()).collect();
+        assert!(used.contains(&"PostgreSQL") && used.contains(&"TypeScript (Node.js)"), "{used:?}");
+        let checks: Vec<&str> = review.suggestions.iter().map(|s| s.check.as_str()).collect();
+        assert!(checks.contains(&"pg-pool") && checks.contains(&"express-helmet"), "{checks:?}");
+        // Shown for the folder open now; dismissed, it stays dismissed.
+        let mut state = crate::lattice::State::new();
+        state.ide.folder_path = root.to_string_lossy().into_owned();
+        let _ = state.update(crate::lattice::Msg::Ide(IdeMsg::StackRead(state.ide.folder_path.clone(), Box::new(review))));
+        assert!(state.ide.stack.as_ref().is_some_and(|s| !s.dismissed));
+        let _ = state.update(crate::lattice::Msg::Ide(IdeMsg::StackDismiss));
+        assert!(state.ide.stack.as_ref().is_some_and(|s| s.dismissed));
+        let _ = state.update(crate::lattice::Msg::Ide(IdeMsg::StackRead("D:/elsewhere".into(), Box::default())));
+        assert!(state.ide.stack.as_ref().is_some_and(|s| s.dismissed), "another folder's review is not taken");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn following_opens_the_newest_change_a_batch_staged_and_nothing_without_one() {
         use lattice_protocol::conversation::{ConversationEvent, ConversationEventKind as Ev};
         let staged = |seq, change: &str| ConversationEvent {
@@ -884,8 +1233,11 @@ mod tests {
         let mut ide = Ide::default();
         ide.resize(Splitter::Side, 10_000.0);
         assert_eq!(ide.side_width, SIDE_RANGE.1);
-        ide.resize(Splitter::Agent, 50.0);
-        assert_eq!(ide.agent_width, AGENT_WIDTH - 50.0);
+        ide.resize(Splitter::Right, 50.0);
+        assert_eq!(ide.editor_width, EDITOR_WIDTH - 50.0, "beside the chat, the editor's border");
+        ide.grid.shown = true;
+        ide.resize(Splitter::Right, 50.0);
+        assert_eq!(ide.agent_width, AGENT_WIDTH - 50.0, "beside the tasks, the right column's");
         ide.resize(Splitter::Panel, -10_000.0);
         assert_eq!(ide.panel_height, PANEL_RANGE.1);
     }
@@ -905,5 +1257,136 @@ mod tests {
         assert!(names_a_file("edit_file") && !names_a_file("run_command") && !names_a_file("read_skill_file"));
         assert_eq!((span(4.4), span(125.0), span(3_840.0)), ("4 s".into(), "2 min 5 s".into(), "1 h 4 min".into()));
         assert_eq!((ago(10.0), ago(300.0), ago(7_200.0), ago(200_000.0)), ("now".into(), "5m".into(), "2h".into(), "2d".into()));
+    }
+
+    fn ev(seq: u64, kind: lattice_protocol::conversation::ConversationEventKind) -> lattice_protocol::conversation::ConversationEvent {
+        lattice_protocol::conversation::ConversationEvent { seq, at: seq as f64, kind }
+    }
+
+    fn tool(seq: u64, tool: &str, target: &str) -> lattice_protocol::conversation::ConversationEvent {
+        use lattice_protocol::conversation::ConversationEventKind as Ev;
+        ev(seq, Ev::ToolCall { call_id: format!("k{seq}"), tool: tool.into(), summary: tool.into(), target: Some(target.into()) })
+    }
+
+    #[test]
+    fn the_files_an_agent_works_on_are_the_ones_its_file_tools_and_changes_name() {
+        use lattice_protocol::conversation::{ChangedPath, ConversationEventKind as Ev, PathChange};
+        let events = [
+            tool(1, "read_file", "src/a.rs"),
+            tool(2, "list_dir", "src"),
+            tool(3, "grep", "fn main"),
+            tool(4, "delete_file", "old.rs"),
+            tool(5, "edit_file", " src/b.rs "),
+            ev(6, Ev::Staged { change: "ch_1".into(), path: "src/b.rs".into(), added: 2, removed: 1, authority: false }),
+            ev(7, Ev::CommandEffect {
+                call_id: "c".into(),
+                before: 1,
+                after: 2,
+                files: vec![ChangedPath { path: "Cargo.lock".into(), change: PathChange::Modified }],
+            }),
+        ];
+        assert_eq!(
+            worked_files(&events),
+            vec![
+                ("src/a.rs".to_string(), None),
+                ("src/b.rs".to_string(), None),
+                ("src/b.rs".to_string(), Some("ch_1".to_string())),
+                ("Cargo.lock".to_string(), None),
+            ],
+            "reads, edits, staged changes and a command's files; not listings, searches or deletions"
+        );
+    }
+
+    #[test]
+    fn the_editor_names_what_running_agents_work_on_and_a_turn_s_end_takes_it_off() {
+        use lattice_protocol::Locality;
+        use lattice_protocol::conversation::{ConversationEventKind as Ev, Mode, TurnKind, TurnStatus};
+        let mut ide = Ide::default();
+        let started = ev(1, Ev::TurnStarted {
+            turn: "t".into(),
+            kind: TurnKind::Agent,
+            mode: Mode::Agent,
+            label: "Local".into(),
+            locality: Locality::Local,
+        });
+        ide.editor_dismissed = true;
+        let touched = ide.note_work("chat-1", "This chat", true, &[started, tool(2, "read_file", "a.rs"), tool(3, "edit_file", "b.rs")]);
+        assert_eq!(touched.len(), 2);
+        assert!(!ide.editor_dismissed, "a turn that starts lets following show the editor again");
+        assert_eq!(ide.working_on.iter().map(|w| w.path.as_str()).collect::<Vec<_>>(), ["b.rs", "a.rs"], "newest first");
+        ide.note_work("task-2", "Fix the tests", false, &[tool(4, "read_file", "a.rs")]);
+        assert_eq!(ide.working_on.len(), 3, "the same file worked on by two agents is named for each");
+        assert!(!ide.working_on[0].here && ide.working_on[0].who == "Fix the tests");
+        ide.note_work("chat-1", "This chat", true, &[tool(5, "read_file", "a.rs")]);
+        assert_eq!(ide.working_on.iter().filter(|w| w.by == "chat-1").count(), 2, "a file read again moves up, not twice");
+        ide.note_work("chat-1", "This chat", true, &[ev(6, Ev::TurnEnded { turn: "t".into(), status: TurnStatus::Completed })]);
+        assert_eq!(ide.working_on.len(), 1, "a turn that ends takes its chat's files off");
+        for n in 0..20 {
+            ide.note_work("task-2", "Fix the tests", false, &[tool(10 + n, "read_file", &format!("f{n}.rs"))]);
+        }
+        assert_eq!(ide.working_on.len(), WORKING_KEPT);
+    }
+
+    #[test]
+    fn the_editor_hidden_while_agents_work_stays_hidden_until_the_next_turn() {
+        let mut ide = Ide::default();
+        ide.toggle_editor(true);
+        assert!(ide.editor_open && !ide.editor_dismissed, "shown by hand");
+        ide.toggle_editor(true);
+        assert!(!ide.editor_open && ide.editor_dismissed, "hidden while an agent works: following leaves it hidden");
+        ide.toggle_editor(false);
+        ide.toggle_editor(false);
+        assert!(!ide.editor_open && !ide.editor_dismissed, "hidden with nothing at work: the next work may show it");
+    }
+
+    #[test]
+    fn each_agents_files_open_in_its_own_numbered_editor_and_the_readers_view_stays() {
+        let mut ide = Ide::default();
+        let mine = ide.push(file("a.rs"));
+        ide.ensure_editor("c1", "This chat");
+        let theirs = ide.push_in("c1", file("b.rs"));
+        assert_eq!(ide.active, Some(mine), "an agent's file opens in its editor, not in the one on show");
+        assert_eq!(ide.shown_tabs().count(), 1);
+        assert_eq!(ide.file_tab("b.rs"), None, "the editor on show does not hold it");
+        assert_eq!(ide.file_tab_in("c1", "b.rs"), Some(theirs));
+        assert_eq!(ide.editors.iter().map(|e| e.who.as_str()).collect::<Vec<_>>(), ["Yours", "This chat"], "numbered in order");
+        ide.show_editor("c1");
+        assert_eq!((ide.shown.as_str(), ide.active), ("c1", Some(theirs)));
+        ide.show_editor(YOURS);
+        assert_eq!(ide.active, Some(mine), "coming back, the reader's tab is on show again");
+        ide.cycle(true);
+        assert_eq!(ide.active, Some(mine), "Ctrl+Tab goes round the editor on show only");
+        ide.show_editor("c1");
+        ide.close_editor("c1");
+        assert!(ide.editors.iter().all(|e| e.key != "c1") && ide.tab(theirs).is_none(), "closing an agent's editor closes its tabs");
+        assert_eq!((ide.shown.as_str(), ide.active), (YOURS, Some(mine)), "and the reader's editor comes back on show");
+        ide.close_editor(YOURS);
+        assert_eq!(ide.editors.len(), 1, "the reader's own stays");
+    }
+
+    #[test]
+    fn an_agents_editor_with_nothing_open_goes_with_its_turn() {
+        use lattice_protocol::conversation::{ConversationEventKind as Ev, TurnStatus};
+        let mut ide = Ide::default();
+        ide.note_work("t1", "Fix the tests", false, &[tool(1, "read_file", "elsewhere.rs")]);
+        assert_eq!(ide.editors.len(), 2, "an agent that works on a file gets its editor");
+        ide.note_work("t1", "Fix the tests", false, &[ev(2, Ev::TurnEnded { turn: "t".into(), status: TurnStatus::Completed })]);
+        assert_eq!(ide.editors.len(), 1, "with nothing open in it, it goes when the turn ends");
+        ide.note_work("t2", "Refactor", true, &[tool(3, "read_file", "a.rs")]);
+        ide.push_in("t2", file("a.rs"));
+        ide.note_work("t2", "Refactor", true, &[ev(4, Ev::TurnEnded { turn: "t".into(), status: TurnStatus::Completed })]);
+        assert_eq!(ide.editors.len(), 2, "with a file open, it stays for the reader to read");
+    }
+
+    #[test]
+    fn a_tab_shows_the_editor_beside_the_chat_but_not_in_place_of_the_tasks() {
+        let mut ide = Ide::default();
+        assert!(!ide.editor_open, "the chat comes first");
+        ide.push(file("a.rs"));
+        assert!(ide.editor_open, "a tab that comes on show brings the editor");
+        ide.editor_open = false;
+        ide.grid.shown = true;
+        ide.push(file("b.rs"));
+        assert!(!ide.editor_open, "with the tasks on show, the right column is theirs");
     }
 }

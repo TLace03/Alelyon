@@ -151,6 +151,8 @@ pub struct Tools {
     pub summaries: Option<Option<String>>,
     /// How many started tasks run at once; `None` before it is read.
     pub task_limit: Option<lattice_core::convo::task_runs::Limit>,
+    /// The agent's schedules, soonest first; `None` before they are read.
+    pub schedules: Option<Vec<lattice_core::convo::schedules::Schedule>>,
     /// The reader's hooks, each with its allowance, and what could not be used; `None` before they are read.
     pub hooks: Option<(Vec<HookRow>, Vec<String>)>,
 }
@@ -254,6 +256,9 @@ pub enum ToolsMsg {
     LimitRead(lattice_core::convo::task_runs::Limit),
     LimitPick(lattice_core::convo::task_runs::Limit),
     LimitSet(Result<lattice_core::convo::task_runs::Limit, String>),
+    // The agent's schedules.
+    SchedulesRead(Vec<lattice_core::convo::schedules::Schedule>),
+    ScheduleCancel(String),
     // The reader's hooks.
     HooksRead(Vec<HookRow>, Vec<String>),
     /// Take back a hook's allowance (by its digest).
@@ -591,6 +596,18 @@ impl State {
                 );
             }
             ToolsMsg::LimitSet(Ok(limit)) => self.ide.tools.task_limit = Some(limit),
+            ToolsMsg::SchedulesRead(all) => self.ide.tools.schedules = Some(all),
+            ToolsMsg::ScheduleCancel(id) => {
+                let Some(services) = self.services.clone() else { return Task::none() };
+                let chat = services.chat.clone();
+                return Task::perform(
+                    on(&services, async move {
+                        let _ = chat.cancel_schedule(&id);
+                        chat.schedules()
+                    }),
+                    |read| go(ToolsMsg::SchedulesRead(read.unwrap_or_default())),
+                );
+            }
             ToolsMsg::LimitSet(Err(why)) => self.problem = Some(why),
             ToolsMsg::HooksRead(rows, problems) => self.ide.tools.hooks = Some((rows, problems)),
             ToolsMsg::AllowHook(digest) => {
@@ -902,7 +919,11 @@ impl State {
         let limit = Task::perform(on(&services, async move { chat.task_limit() }), |read| {
             go(ToolsMsg::LimitRead(read.unwrap_or_default()))
         });
-        Task::batch([browser, auto, agents, models, memory, summaries, limit, hooks])
+        let chat = services.chat.clone();
+        let schedules = Task::perform(on(&services, async move { chat.schedules() }), |read| {
+            go(ToolsMsg::SchedulesRead(read.unwrap_or_default()))
+        });
+        Task::batch([browser, auto, agents, models, memory, summaries, limit, schedules, hooks])
     }
 
     /// Run one action on the plugins, the section busy until it ends.
@@ -1194,6 +1215,7 @@ pub fn page<'a>(state: &'a State, phase: f32) -> El<'a> {
     col = col.push(memory_card(t));
     col = col.push(summaries_card(state));
     col = col.push(tasks_card(t));
+    col = col.push(schedules_card(t));
     col = col.push(hooks_card(state));
     col = col.push(browser_card(t));
     col = col.push(auto_card(t));
@@ -1374,7 +1396,7 @@ fn tasks_card<'a>(t: &'a Tools) -> El<'a> {
         .spacing(8)
         .push(strong("Tasks at once", 14.0, theme::TEXT))
         .push(label(
-            "A task you start from a chip runs beside the chat as a topic of its own. Each one runs its own model turns, so more at once uses more of this PC, or more of a hosted model's charges. A Start past the limit waits on its chip.",
+            "A task you start from a chip runs beside the chat as a topic of its own. Each one runs its own model turns, so more at once uses more of this PC, or more of a hosted model's charges. A Start past the limit waits its turn and starts when one ends, the highest-priority group's first.",
             12.0,
             theme::TEXT_DIM,
         ));
@@ -1398,6 +1420,52 @@ fn tasks_card<'a>(t: &'a Tools) -> El<'a> {
     );
     if current == Limit::None {
         col = col.push(label("With no limit, every task you start runs at once.", 11.5, theme::CAUTION));
+    }
+    container(col).padding(14).width(Length::Fill).style(theme::card).into()
+}
+
+/// When a schedule runs next, from `now`: "in 12 min", "in 3 h", "in 2 days".
+pub fn next_words(next: f64, now: f64) -> String {
+    let minutes = ((next - now) / 60.0).max(0.0).round() as u64;
+    match minutes {
+        0 => "now".to_owned(),
+        1..120 => format!("in {minutes} min"),
+        120..2880 => format!("in {} h", minutes / 60),
+        _ => format!("in {} days", minutes / 1440),
+    }
+}
+
+/// The agent's schedules: each one's title, when it runs next and how often, where, and Cancel.
+fn schedules_card<'a>(t: &'a Tools) -> El<'a> {
+    let mut col = Column::new()
+        .spacing(8)
+        .push(strong("Schedules", 14.0, theme::TEXT))
+        .push(label(
+            "Prompts the agent scheduled, with your yes: each runs at its time as a new topic or in its own conversation, only while Alelyon is open. One due while it was closed is reported in its conversation, not run late.",
+            12.0,
+            theme::TEXT_DIM,
+        ));
+    let Some(all) = &t.schedules else {
+        return container(col.push(note("Not read yet."))).padding(14).width(Length::Fill).style(theme::card).into();
+    };
+    if all.is_empty() {
+        col = col.push(note("None."));
+    }
+    let now = crate::utc::now();
+    for s in all {
+        let every = s.every_minutes.map(|e| format!(", every {}", lattice_core::convo::schedules::when_words(e, None).trim_start_matches("once, in "))).unwrap_or_default();
+        let place = if s.same_topic { "in its conversation" } else { "as a new topic" };
+        col = col.push(
+            row![
+                column![
+                    label(s.title.as_str(), 12.5, theme::TEXT),
+                    label(format!("{}{every}, {place}", next_words(s.next, now)), 11.0, theme::TEXT_FAINT),
+                ]
+                .width(Length::Fill),
+                small("Cancel", Some(go(ToolsMsg::ScheduleCancel(s.id.clone())))),
+            ]
+            .align_y(Alignment::Center),
+        );
     }
     container(col).padding(14).width(Length::Fill).style(theme::card).into()
 }
@@ -2020,5 +2088,19 @@ mod tests {
             copied_words(&copied),
             "Copied to your MCP settings and enabled: evidence. Copied, not enabled: search. Your settings already hold git, left as you have them."
         );
+    }
+}
+
+#[cfg(test)]
+mod schedule_words {
+    use super::next_words;
+
+    #[test]
+    fn when_a_schedule_runs_next_reads_in_minutes_hours_or_days() {
+        let now = 1_000_000.0;
+        assert_eq!(next_words(now - 5.0, now), "now");
+        assert_eq!(next_words(now + 12.0 * 60.0, now), "in 12 min");
+        assert_eq!(next_words(now + 3.0 * 3600.0, now), "in 3 h");
+        assert_eq!(next_words(now + 2.0 * 86_400.0, now), "in 2 days");
     }
 }

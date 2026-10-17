@@ -60,6 +60,10 @@ serde_json = "1.0.151"
 # The native Lattice's chat core and runs service, and their protocol, for the Lattice page (the chat core's window is
 # CENTCOM's Lattice section). They are what lattice-app already links, so the lockfile gains no package; the page's own tokio runtime uses the version and features lattice_native already builds.
 lattice-core = { path = "../lattice/crates/lattice-core" }
+# The agent bridge (src/bridge.rs): its handoff file is created readable by this Windows user only, and its token is
+# two random UUIDs. Both already in this lock through lattice-core.
+lattice-sys = { path = "../lattice/crates/lattice-sys" }
+uuid = { version = "1.26.1", features = ["v4"] }
 lattice-protocol = { path = "../lattice/crates/lattice-protocol" }
 # The model boundary lattice-core's clients speak (a request, its streamed answer): Sinai's page talks to a model of the
 # person's own through lattice-core's client (src/models/byo.rs). Already in this lock through lattice-core: the lockfile

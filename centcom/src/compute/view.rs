@@ -18,20 +18,22 @@ const PURPOSE: &str = "Sinai's simulator, watched as it runs on this PC's proces
 
 pub fn view(state: &State, phase: f32) -> El<'_> {
     let mut page = Column::new().spacing(18).push(ui::heading("Compute and simulation", PURPOSE));
-    page = page.push(ui::tabs(&state.tabs(), state.tab, |t| state.title(t), Msg::Tab));
-    page = page.push(match state.tab {
+    page = page.push(ui::tabs_out(&state.tabs(), state.tab, &state.out, |t| state.title(t), Msg::Tab, Msg::Window));
+    page = page.push(view_tab(state, state.tab, phase));
+    // what is coming to this section is on the Roadmap (Settings), not under the working tabs
+    page.into()
+}
+
+/// One tab of the page, on the page or in a window of its own (`windows`).
+pub fn view_tab(state: &State, tab: Tab, phase: f32) -> El<'_> {
+    match tab {
         Tab::Simulator => simulator(state, phase),
         Tab::Plugin(i) => match state.plugins.get(i) {
             Some(p) => p.page.view(phase).map(move |m| Msg::Plugin(i, m)),
             None => ui::notice("This build has no such tab.", theme::CAUTION),
         },
         Tab::Training => train_tab(state),
-    });
-    page = page.push(ui::subheading("The section's features"));
-    for feature in crate::catalogue::Section::Compute.features_with(&state.features) {
-        page = page.push(ui::feature_row(feature));
     }
-    page.into()
 }
 
 // ------------------------------------------------------------------- the simulator
@@ -121,11 +123,19 @@ fn simulator(state: &State, phase: f32) -> El<'_> {
         }
         body = body.push(card("What this scene asks for that the simulator does not do", list));
     }
-    body.push(note(
-        "Physics: sim-physics, the CPU reference of the simulator's physics core (a port of MuJoCo 3.14.0), in f32, paced to \
-         real time. Frames: sim-raycast, the host reference ray caster that checks the GPU renderer (shadows on, its scene test's \
-         light). The scenes are the simulator's own test fixtures, read from this checkout.",
-    ))
+    // where the picture and the numbers come from, on a "?" (UX-PRINCIPLES B2)
+    body.push(
+        row![
+            label("What draws this", 12.0, theme::TEXT_FAINT),
+            ui::help(
+                "Physics: sim-physics, the CPU reference of the simulator's physics core (a port of MuJoCo 3.14.0), in f32, \
+                 paced to real time. Frames: sim-raycast, the host reference ray caster that checks the GPU renderer \
+                 (shadows on, its scene test's light). The scenes are the simulator's own test fixtures, read from this checkout.",
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    )
     .into()
 }
 
@@ -222,11 +232,18 @@ fn train_tab(state: &State) -> El<'_> {
         body = body.push(label("Each expert's share of the last step's tokens.", 12.0, theme::TEXT_FAINT));
     }
     page = page.push(card(s.path.to_string_lossy().into_owned(), body));
-    page.push(note(
-        "Read by the Training Studio's rules, every two seconds while this tab is on show. The numbers are what the file \
-         says; whether the trainer still runs is not known, and checkpoints, GPU memory and held-out evaluation are not in \
-         the stream.",
-    ))
+    page.push(
+        row![
+            label("What these numbers are", 12.0, theme::TEXT_FAINT),
+            ui::help(
+                "Read by the Training Studio's rules, every two seconds while this tab is on show. The numbers are what the \
+                 file says; whether the trainer still runs is not known, and checkpoints, GPU memory and held-out evaluation \
+                 are not in the stream.",
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    )
     .into()
 }
 

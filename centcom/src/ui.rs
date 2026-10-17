@@ -28,14 +28,14 @@ pub fn chip<'a, M: 'a>(words: impl text::IntoFragment<'a>, color: Color) -> Elem
     container(label(words, 11.5, color)).padding([2.0, 8.0]).style(theme::chip(color)).into()
 }
 
-/// A page's title in the display face over a short gold rule, and what the page is for.
+/// A page's title in the display face with what the page is for beside it, over a short gold rule: one line where
+/// it fits, so the page's own content starts near the top (UX-PRINCIPLES B1, overview first).
 pub fn heading<'a, M: 'a>(title: &'a str, purpose: &'a str) -> Element<'a, M> {
     column![
-        title_text(title),
+        row![title_text(title), label(purpose, 13.5, theme::TEXT_DIM).width(Length::Fill)].spacing(18).align_y(Alignment::Center),
         container(space()).width(Length::Fixed(RULE_W)).height(Length::Fixed(2.0)).style(theme::rule),
-        label(purpose, 14.0, theme::TEXT_DIM),
     ]
-    .spacing(9)
+    .spacing(6)
     .into()
 }
 
@@ -44,7 +44,7 @@ pub const RULE_W: f32 = 220.0;
 
 /// A page's title, in the display face.
 pub fn title_text<'a>(title: impl text::IntoFragment<'a>) -> Text<'a> {
-    text(title).size(30.0).color(theme::TEXT).font(fonts().display)
+    text(title).size(26.0).color(theme::TEXT).font(fonts().display)
 }
 
 /// A part of a page, or a card's title: small spaced capitals in gold, as the sign-in screen's labels are.
@@ -109,6 +109,93 @@ pub fn secondary_why<'a, M: Clone + 'a>(words: &'a str, message: Option<M>, why:
     if disabled { tip(b, why) } else { b }
 }
 
+/// A small "?" that says `words` on hover: an explanation read once, kept off the page so the page shows what is
+/// there rather than how it works (UX-PRINCIPLES B2).
+pub fn help<'a, M: 'a>(words: impl text::IntoFragment<'a>) -> Element<'a, M> {
+    tip(container(label("?", 11.0, theme::TEXT_DIM)).padding([0.0, 6.0]).style(theme::chip(theme::TEXT_FAINT)), words)
+}
+
+/// A part of a page that opens and closes: its title and a one-line summary always on show, its body only while
+/// open. The page keeps which are open (`toggle` flips one), so a person's choice outlives a page change (A6).
+pub fn disclosure<'a, M: Clone + 'a>(
+    title: impl text::IntoFragment<'a>,
+    summary: impl Into<Element<'a, M>>,
+    open: bool,
+    toggle: M,
+    body: impl Into<Element<'a, M>>,
+) -> Element<'a, M> {
+    let head = button(
+        row![
+            label(if open { "\u{25be}" } else { "\u{25b8}" }, 12.0, theme::GOLD),
+            subheading(title),
+            container(summary.into()).width(Length::Fill),
+        ]
+        .spacing(10)
+        .align_y(Alignment::Center),
+    )
+    .padding([8.0, 12.0])
+    .width(Length::Fill)
+    .on_press(toggle)
+    .style(theme::list_row(open));
+    let mut part = Column::new().spacing(8).push(head);
+    if open {
+        part = part.push(container(body.into()).padding(iced::padding::left(22)));
+    }
+    part.into()
+}
+
+/// How many columns a page lays its cards in, for the window's width (the rail included): one on a narrow window,
+/// two from a laptop's width, three on a wide screen, so a wide window is used rather than left dark (B1).
+pub fn columns_for(window_width: f32) -> usize {
+    if window_width >= 1700.0 {
+        3
+    } else if window_width >= 1150.0 {
+        2
+    } else {
+        1
+    }
+}
+
+/// `items` in rows of `columns`, each the same width; a short last row keeps its items the same width.
+pub fn grid<'a, M: 'a>(items: Vec<Element<'a, M>>, columns: usize, gap: f32) -> Element<'a, M> {
+    let columns = columns.max(1);
+    let mut grid = Column::new().spacing(gap);
+    let mut items = items.into_iter().peekable();
+    while items.peek().is_some() {
+        let mut line = Row::new().spacing(gap);
+        let mut n = 0;
+        for item in items.by_ref().take(columns) {
+            line = line.push(container(item).width(Length::FillPortion(1)));
+            n += 1;
+        }
+        for _ in n..columns {
+            line = line.push(space().width(Length::FillPortion(1)));
+        }
+        grid = grid.push(line);
+    }
+    grid.into()
+}
+
+/// A planned feature on one line: its name, how far it has moved in, and the rest (what it is, today, the plan) on
+/// hover. The Roadmap lists every feature this way, in place of a card each on the working pages.
+pub fn feature_line<'a, M: 'a>(feature: &'a crate::catalogue::Feature) -> Element<'a, M> {
+    use crate::catalogue::Here;
+    let status = match feature.here() {
+        Here::Now => chip("Here now", theme::POSITIVE),
+        Here::InPart => chip("Here in part", theme::GOLD),
+        Here::Later if feature.step == "Later" => chip("Later", theme::TEXT_FAINT),
+        Here::Later => chip(format!("Step {}", feature.step), theme::GOLD_DIM),
+    };
+    let mut line = row![label(feature.name, 13.0, theme::TEXT).width(Length::Fill)].spacing(8).align_y(Alignment::Center);
+    if feature.no_screen && feature.here() == Here::Later {
+        line = line.push(chip("No screen today", theme::CAUTION));
+    }
+    tip(
+        container(line.push(status)).padding([6.0, 10.0]).width(Length::Fill).style(theme::panel),
+        format!("{}\n\nToday: {}.\nPlan: {}.", feature.what, feature.today, feature.plan),
+    )
+}
+
 /// A row of tabs: each a segment, the chosen one gold.
 pub fn tabs<'a, M: Clone + 'a, T: Copy + PartialEq>(
     all: &[T],
@@ -125,6 +212,51 @@ pub fn tabs<'a, M: Clone + 'a, T: Copy + PartialEq>(
                 .on_press(pick(tab))
                 .style(theme::segment_button(on)),
         );
+    }
+    tabs.wrap().into()
+}
+
+/// What a tab's place on a page's bar asks of the windows (`windows`): the pointer came onto (true) or left it, a
+/// middle press (the tab to a window of its own), or a press on a tab already in one (that window forward).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabAct<T> {
+    Hover(T, bool),
+    PopOut(T),
+    Raise(T),
+}
+
+/// [`tabs`] for a page's own tabs, which can have windows of their own (`windows`): a tab in one is marked and a
+/// press on it brings that window forward; the pointer over a tab is followed, so a press on it can be dragged off
+/// the bar, and a middle press opens it in a window of its own.
+pub fn tabs_out<'a, M: Clone + 'a, T: Copy + PartialEq>(
+    all: &[T],
+    chosen: T,
+    out: &[T],
+    title: impl Fn(T) -> String,
+    pick: impl Fn(T) -> M,
+    window: impl Fn(TabAct<T>) -> M,
+) -> Element<'a, M> {
+    let mut tabs = Row::new().spacing(8);
+    for &tab in all {
+        let is_out = out.contains(&tab);
+        let on = tab == chosen && !is_out;
+        let color = if on {
+            theme::GOLD
+        } else if is_out {
+            theme::TEXT_FAINT
+        } else {
+            theme::TEXT_DIM
+        };
+        let mut words = Row::new().spacing(5).align_y(Alignment::Center).push(label(title(tab), 13.0, color));
+        if is_out {
+            words = words.push(label(crate::windows::OUT_MARK, 11.0, theme::GOLD));
+        }
+        let face = iced::widget::mouse_area(container(words).padding([7.0, 14.0]))
+            .on_enter(window(TabAct::Hover(tab, true)))
+            .on_exit(window(TabAct::Hover(tab, false)))
+            .on_middle_press(window(TabAct::PopOut(tab)));
+        let press = if is_out { window(TabAct::Raise(tab)) } else { pick(tab) };
+        tabs = tabs.push(button(face).padding(0).on_press(press).style(theme::segment_button(on)));
     }
     tabs.wrap().into()
 }
@@ -161,33 +293,6 @@ pub fn absent<'a, M: 'a>(a: crate::capability::Absent) -> Element<'a, M> {
         .spacing(6),
     )
     .padding([14.0, 16.0])
-    .width(Length::Fill)
-    .style(theme::panel)
-    .into()
-}
-
-/// A feature of the plan with how far it has moved in, as `view.rs` draws one on the catalogue pages.
-pub fn feature_row<'a, M: 'a>(feature: &'a crate::catalogue::Feature) -> Element<'a, M> {
-    use crate::catalogue::Here;
-    let mut chips = Row::new().spacing(6);
-    chips = chips.push(match feature.here() {
-        Here::Now => chip("Here now", theme::POSITIVE),
-        Here::InPart => chip("Here in part", theme::GOLD),
-        Here::Later if feature.step == "Later" => chip("Later", theme::TEXT_FAINT),
-        Here::Later => chip(format!("Step {}", feature.step), theme::GOLD_DIM),
-    });
-    if feature.no_screen && feature.here() == Here::Later {
-        chips = chips.push(chip("No screen today", theme::CAUTION));
-    }
-    container(
-        column![
-            row![strong(feature.name, 14.5, theme::TEXT), space().width(Length::Fill), chips].align_y(Alignment::Center),
-            label(feature.what, 13.0, theme::TEXT_DIM),
-            label(format!("Today: {}. Plan: {}.", feature.today, feature.plan), 12.0, theme::TEXT_FAINT),
-        ]
-        .spacing(5),
-    )
-    .padding([12.0, 16.0])
     .width(Length::Fill)
     .style(theme::panel)
     .into()

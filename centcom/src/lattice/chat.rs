@@ -38,11 +38,23 @@ pub enum Item {
     Tool(Tool),
     /// A call waiting for the reader (a command, an MCP tool), and how it was decided.
     Approval { call: String, detail: ApprovalDetail, allow_always: bool, decided: Option<(bool, DecidedBy)> },
+    /// A stack decision (the advisor's catalog): the area, the options with how each fits, the recommended one,
+    /// why, the to-do step, and what was chosen (and whether the agent chose it on its own).
+    Choice {
+        call: String,
+        area: String,
+        options: Vec<lattice_protocol::conversation::ChoiceFit>,
+        recommended: String,
+        why: String,
+        step: Option<u32>,
+        chosen: Option<(String, bool)>,
+    },
     /// The agent's question, and whether it was answered.
     Question { call: String, text: String, options: Vec<String>, answered: bool },
     /// A task the agent suggested (a chip): nothing runs until the reader starts it, as a new chat; and what became
     /// of it.
-    Task { task: String, title: String, summary: String, prompt: String, outcome: Option<TaskOutcome> },
+    /// `group`: an idea from the brainstorm chat, for this group's session (a group's id, or `new`).
+    Task { task: String, title: String, summary: String, prompt: String, group: Option<String>, outcome: Option<TaskOutcome> },
     /// A plan the agent proposed in Ask mode: nothing changes until the reader approves it, and the chat goes on in
     /// Agent mode; and what became of it.
     Plan { plan: String, title: String, text: String, outcome: Option<PlanOutcome> },
@@ -68,6 +80,8 @@ pub struct Activity {
     pub status: Option<TurnStatus>,
     /// When the turn started (seconds since the epoch, the event's own time), for how long it has been working.
     pub started: Option<f64>,
+    /// When it ended (the event's own time), for how long it worked.
+    pub ended: Option<f64>,
 }
 
 pub struct Conversation {
@@ -151,6 +165,14 @@ impl Conversation {
         &self.summary.id
     }
 
+    /// The group an idea `task` here is for (the brainstorm chat's `offer_to_group`).
+    pub fn task_group(&self, task: &str) -> Option<&str> {
+        self.activity.iter().flat_map(|a| a.items.iter()).find_map(|item| match item {
+            Item::Task { task: id, group, .. } if id == task => group.as_deref(),
+            _ => None,
+        })
+    }
+
     /// The title of the task `task` the agent suggested here, as its chip shows it.
     pub fn task_title(&self, task: &str) -> Option<&str> {
         self.activity.iter().flat_map(|a| a.items.iter()).find_map(|item| match item {
@@ -194,6 +216,7 @@ impl Conversation {
                 stage: None,
                 status: None,
                 started: None,
+                ended: None,
             });
         }
         self.activity.last_mut().expect("just made")
@@ -218,6 +241,7 @@ impl Conversation {
                     stage: None,
                     status: None,
                     started: Some(at),
+                    ended: None,
                 });
                 self.running = true;
                 self.live = None;
@@ -287,17 +311,38 @@ impl Conversation {
                     }
                 }
             }
+            Ev::ChoiceOffered { choice, area, options, recommended, why, step } => self.current().items.push(Item::Choice {
+                call: choice.clone(),
+                area: area.clone(),
+                options: options.clone(),
+                recommended: recommended.clone(),
+                why: why.clone(),
+                step: *step,
+                chosen: None,
+            }),
+            Ev::ChoiceMade { choice, option, by_agent } => {
+                for a in self.activity.iter_mut() {
+                    for item in a.items.iter_mut() {
+                        if let Item::Choice { call, chosen, .. } = item
+                            && call == choice
+                        {
+                            *chosen = Some((option.clone(), *by_agent));
+                        }
+                    }
+                }
+            }
             Ev::Question { call_id, text, options } => self.current().items.push(Item::Question {
                 call: call_id.clone(),
                 text: text.clone(),
                 options: options.clone(),
                 answered: false,
             }),
-            Ev::TaskSuggested { task, title, summary, prompt } => self.current().items.push(Item::Task {
+            Ev::TaskSuggested { task, title, summary, prompt, group } => self.current().items.push(Item::Task {
                 task: task.clone(),
                 title: title.clone(),
                 summary: summary.clone(),
                 prompt: prompt.clone(),
+                group: group.clone(),
                 outcome: None,
             }),
             Ev::ArtifactSaved { name, title, kind, version, bytes } => self.current().items.push(Item::Artifact {
@@ -444,6 +489,7 @@ impl Conversation {
                 let current = self.current();
                 current.status = Some(*status);
                 current.stage = None;
+                current.ended = Some(at);
                 self.running = false;
                 self.live = None;
                 self.live_text.clear();
@@ -467,7 +513,10 @@ impl Conversation {
             .iter()
             .flat_map(|a| a.items.iter())
             .filter(|item| {
-                matches!(item, Item::Approval { decided: None, .. } | Item::Question { answered: false, .. })
+                matches!(
+                    item,
+                    Item::Approval { decided: None, .. } | Item::Question { answered: false, .. } | Item::Choice { chosen: None, .. }
+                )
             })
             .count()
     }
@@ -599,6 +648,7 @@ mod tests {
                         remote: None,
                         staged_waiting: 0,
                         background: false,
+                        cost: None,
                     },
                     allow_always_offer: true,
                 },
@@ -637,6 +687,7 @@ mod tests {
                 title: "Fix the stale README badge".into(),
                 summary: "The badge names the old workflow.".into(),
                 prompt: "Point the badge in README.md at build.yml.".into(),
+                group: None,
             },
         )]);
         let chip = |c: &Conversation| match &c.activity[0].items[0] {
@@ -687,9 +738,32 @@ mod tests {
     }
 
     #[test]
+    fn a_stack_decision_waits_for_the_reader_until_it_is_made() {
+        use lattice_protocol::conversation::ChoiceFit;
+        let mut c = Conversation::from_snapshot(snapshot(vec![started(1)]));
+        let fit = |option: &str| ChoiceFit { option: option.into(), fit: String::new(), used: false };
+        c.apply(&[ev(2, Ev::ChoiceOffered {
+            choice: "r1".into(),
+            area: "database".into(),
+            options: vec![fit("postgres"), fit("sqlite")],
+            recommended: "postgres".into(),
+            why: "Orders join customers.".into(),
+            step: Some(1),
+        })]);
+        assert_eq!(c.waiting(), 1, "an open decision waits for the reader");
+        c.apply(&[ev(3, Ev::ChoiceMade { choice: "r1".into(), option: "sqlite".into(), by_agent: false })]);
+        assert_eq!(c.waiting(), 0);
+        let chosen = c.activity.iter().flat_map(|a| a.items.iter()).find_map(|i| match i {
+            Item::Choice { chosen, .. } => chosen.clone(),
+            _ => None,
+        });
+        assert_eq!(chosen, Some(("sqlite".to_string(), false)));
+    }
+
+    #[test]
     fn the_latest_todo_list_replaces_the_one_before_and_an_empty_one_clears_it() {
         use lattice_protocol::conversation::TodoStatus;
-        let step = |content: &str, status| TodoItem { content: content.into(), status };
+        let step = |content: &str, status| TodoItem { content: content.into(), status, decision: None, chosen: None };
         let mut c = Conversation::from_snapshot(snapshot(vec![started(1)]));
         assert!(c.todos.is_empty());
         c.apply(&[ev(2, Ev::TodosUpdated { items: vec![step("Read", TodoStatus::InProgress), step("Fix", TodoStatus::Pending)] })]);

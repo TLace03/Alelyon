@@ -49,6 +49,8 @@ pub const EDITOR: Group = Group {
         ("Tab, Ctrl+Right", "Take a suggestion whole, or its next word"),
         ("Ctrl+B", "Show or hide the side bar"),
         ("Ctrl+J or Ctrl+`", "Show or hide the bottom panel"),
+        ("Ctrl+E", "Show or hide the editor beside the chat"),
+        ("Alt+1 \u{2026} Alt+9", "The numbered editor beside the chat: yours, then each agent's"),
     ],
 };
 
@@ -79,12 +81,15 @@ pub const CREATOR: Group = Group {
     keys: &[("Ctrl+Z", "Undo"), ("Ctrl+Y or Ctrl+Shift+Z", "Redo")],
 };
 
+pub const PAGES: Group = Group { title: "Pages", keys: crate::pages::KEYS };
+
 /// The groups for the page on show: the window's first.
 pub fn groups(app: &App) -> Vec<&'static Group> {
     let mut all = vec![&WINDOW];
     match app.section {
         Section::Lattice if app.lattice.tab == lattice::Tab::Chat => all.extend([&EDITOR, &CHAT, &TERMINAL]),
         Section::Sinai if app.creator.is_some() => all.push(&CREATOR),
+        Section::Pages => all.push(&PAGES),
         _ => {}
     }
     all
@@ -130,7 +135,7 @@ mod tests {
         let all: String = [&WINDOW, &EDITOR, &CHAT].iter().flat_map(|g| g.keys.iter().map(|(k, _)| *k)).collect::<Vec<_>>().join(" ");
         for key in [
             "Ctrl+P", "Ctrl+S", "Ctrl+W", "Ctrl+Tab", "Ctrl+Shift+T", "Ctrl+F", "Ctrl+H", "Ctrl+G", "Ctrl+Shift+F", "Ctrl+K",
-            "Ctrl+B", "Ctrl+J", "Ctrl+L", "Ctrl+N", "Ctrl+Shift+P", "F1", "F6", "Ctrl+Shift+/", "Ctrl+1",
+            "Ctrl+B", "Ctrl+J", "Ctrl+E", "Alt+1", "Ctrl+L", "Ctrl+N", "Ctrl+Shift+P", "F1", "F6", "Ctrl+Shift+/", "Ctrl+1",
         ] {
             assert!(all.contains(key), "{key} is not on the sheet");
         }

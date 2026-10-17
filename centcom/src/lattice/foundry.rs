@@ -23,6 +23,7 @@ use lattice_core::llama::{files, gguf};
 use model_anatomy::{Description, Fit, Foundry, FoundryModel, Pairing, Reading};
 
 use super::morphometry::grouped;
+use super::view::{panel, table_head, two};
 use crate::ui::{self, chip, label, mono, note, strong};
 
 type El<'a> = Element<'a, Msg>;
@@ -75,6 +76,8 @@ pub struct State {
     /// The record kept between runs was read once (foundry_store), and the last save's or read's problem, if any.
     kept_read: bool,
     pub kept_problem: Option<String>,
+    /// The parts of the tab a person opened (`ui::disclosure`): closed until opened.
+    pub open_parts: std::collections::BTreeSet<&'static str>,
 }
 
 /// One benchmark, as kept: the server's own rates (economics.throughput_from_llamacpp, the C++ port), the CPU
@@ -153,6 +156,8 @@ pub enum Msg {
     RemoveHosted(usize),
     Kept(Arc<Result<super::foundry_store::Kept, String>>),
     Saved(Result<(), String>),
+    /// Open or close a part of the tab.
+    Disclose(&'static str),
 }
 
 impl Default for State {
@@ -167,6 +172,7 @@ impl Default for State {
             costs: Costs::default(),
             kept_read: false,
             kept_problem: None,
+            open_parts: Default::default(),
         }
     }
 }
@@ -297,6 +303,11 @@ impl State {
                 if index < self.costs.hosted.len() {
                     self.costs.hosted.remove(index);
                     return self.save();
+                }
+            }
+            Msg::Disclose(part) => {
+                if !self.open_parts.remove(part) {
+                    self.open_parts.insert(part);
                 }
             }
         }
@@ -504,9 +515,14 @@ const PURPOSE: &str = "What this machine can run, at a chosen context, and which
                        is arithmetic over each model's declared shape (its GGUF header) against this machine's \
                        memory budget; no model is loaded and no device is opened to find out.";
 
-pub fn view(state: &State, phase: f32) -> El<'_> {
-    let mut col = Column::new().spacing(12).width(Length::Fill);
-    col = col.push(note(PURPOSE));
+/// The tab's closed-by-default parts, by name (`State::open_parts`).
+const PAIRS_PART: &str = "lattice.foundry.pairs";
+const LIMITS_PART: &str = "lattice.foundry.limits";
+
+/// The tab, for a window `width` wide: at a glance the machine beside what it can run, then the benchmarks beside
+/// their costs, then what runs together and what the view does not establish, each closed until opened.
+pub fn view(state: &State, phase: f32, width: f32) -> El<'_> {
+    let mut col = Column::new().spacing(14).width(Length::Fill);
     col = col.push(controls(state));
     if state.measuring {
         col = col.push(ui::working(phase, "Reading this machine and the installed models' headers…"));
@@ -516,14 +532,12 @@ pub fn view(state: &State, phase: f32) -> El<'_> {
         None => {}
         Some(Err(why)) => col = col.push(ui::notice(why.as_str(), theme::CAUTION)),
         Some(Ok(m)) => {
-            col = col.push(machine(m));
-            col = col.push(models(m));
-            col = col.push(benchmarks(state, m, phase));
-            col = col.push(costs(state));
-            col = col.push(pairs(m));
+            col = col.push(two(width, vec![machine(m)], vec![models(m)]));
+            col = col.push(two(width, vec![benchmarks(state, m, phase)], vec![costs(state)]));
+            col = col.push(pairs(state, m));
         }
     }
-    col = col.push(footer());
+    col = col.push(footer(state));
     container(scrollable(col.padding(padding::right(12))).height(Length::Fill).style(theme::scrollbars)).height(Length::Fill).into()
 }
 
@@ -541,27 +555,24 @@ fn controls(state: &State) -> El<'_> {
         )
         .width(Length::Fixed(260.0)),
         ui::primary("Re-measure", (!state.measuring).then_some(Msg::Remeasure)),
+        ui::help(PURPOSE),
     ]
     .spacing(8)
     .align_y(Alignment::Center)
     .into()
 }
 
-fn section<'a>(title: impl iced::widget::text::IntoFragment<'a>) -> El<'a> {
-    strong(title, 14.0, theme::GOLD).into()
-}
-
 fn machine(m: &Measured) -> El<'_> {
-    let mut col = Column::new().spacing(5).push(section("This machine"));
+    let mut col = Column::new().spacing(4);
     match &m.description {
         Err(why) => col = col.push(ui::notice(format!("The machine could not be described: {why}"), theme::CAUTION)),
         Ok(d) => {
             for (name, value, provenance) in &d.rows {
                 col = col.push(
                     row![
-                        container(label(name.as_str(), 12.5, theme::TEXT_DIM)).width(230),
-                        container(mono(value.as_str(), 12.5, provenance_colour(provenance))).width(260),
-                        label(provenance.as_str(), 11.0, theme::TEXT_FAINT),
+                        container(label(name.as_str(), 12.5, theme::TEXT_DIM)).width(Length::FillPortion(4)),
+                        container(mono(value.as_str(), 12.5, provenance_colour(provenance))).width(Length::FillPortion(5)),
+                        container(label(provenance.as_str(), 11.0, theme::TEXT_FAINT)).width(Length::FillPortion(2)),
                     ]
                     .spacing(10)
                     .align_y(Alignment::Center),
@@ -587,8 +598,7 @@ fn machine(m: &Measured) -> El<'_> {
     if !r.platform.is_empty() {
         probe.push_str(&format!("; {}", r.platform));
     }
-    col = col.push(note(probe));
-    col.into()
+    panel("This machine", probe, None, col)
 }
 
 /// The one sentence that explains every verdict below it, and where the reserve came from.
@@ -609,6 +619,7 @@ fn budget(foundry: &Foundry) -> El<'_> {
                     label("Budget:", 12.5, theme::TEXT_DIM),
                     strong(format!("{} GiB", gib(bytes)), 12.5, theme::TEXT),
                     label(format!("— {}. [{}]", fit.budget_basis, fit.budget_provenance), 12.0, theme::TEXT_DIM),
+                    ui::help(reserve(foundry)),
                 ]
                 .spacing(6)
                 .align_y(Alignment::Center)
@@ -616,17 +627,28 @@ fn budget(foundry: &Foundry) -> El<'_> {
             )
         }
     }
-    col = col.push(note(format!(
-        "Reserve {} [{}]: {}.",
-        foundry.reserve.fraction, foundry.reserve.provenance, foundry.native.reserve_basis
-    )));
+    if first.and_then(|f| f.budget_bytes).is_none() {
+        col = col.push(note(reserve(foundry)));
+    }
     col.into()
 }
 
-fn models(m: &Measured) -> El<'_> {
-    let mut col = Column::new().spacing(6).push(section("What this machine can run"));
+/// Where the serving reserve came from.
+fn reserve(foundry: &Foundry) -> String {
+    format!("Reserve {} [{}]: {}.", foundry.reserve.fraction, foundry.reserve.provenance, foundry.native.reserve_basis)
+}
+
+/// What the verdicts mean, said once on hover beside the table's title.
+const VERDICTS_HELP: &str = "A verdict is arithmetic over each model's declared shape against the budget. EXCEEDS is a \
+                             statement about the accelerator, not about usability: a runtime can still serve a model \
+                             that does not fit by spilling onto the CPU. UNDECIDABLE is not a refusal — it means a term \
+                             of the footprint could not be established.";
+
+fn models<'a>(m: &'a Measured) -> El<'a> {
+    let mut col = Column::new().spacing(4);
+    let panel_of = |body: Column<'a, Msg>, aside: Option<El<'a>>| panel("What this machine can run", VERDICTS_HELP, aside, body);
     let foundry = match &m.foundry {
-        Err(why) => return col.push(ui::notice(format!("The Foundry could not be computed: {why}"), theme::CAUTION)).into(),
+        Err(why) => return panel_of(col.push(ui::notice(format!("The Foundry could not be computed: {why}"), theme::CAUTION)), None),
         Ok(f) => f,
     };
     if !foundry.native.refusal.is_empty() {
@@ -634,11 +656,11 @@ fn models(m: &Measured) -> El<'_> {
         for gap in &foundry.native.gaps {
             col = col.push(label(format!("• {gap}"), 11.5, theme::TEXT_DIM));
         }
-        return col.into();
+        return panel_of(col, None);
     }
     if foundry.catalog.is_empty() {
-        return col
-            .push(label(
+        return panel_of(
+            col.push(label(
                 format!(
                     "No GGUF model is installed in {} (ALELYON_MODELS_DIR, else ~/.alelyon/models). Nothing here \
                      downloads one — that stays an explicit act with a visible size.",
@@ -646,53 +668,68 @@ fn models(m: &Measured) -> El<'_> {
                 ),
                 12.5,
                 theme::TEXT_DIM,
-            ))
-            .into();
+            )),
+            None,
+        );
     }
     col = col.push(budget(foundry));
+    col = col.push(models_head());
     for runnable in &foundry.runnable {
         let fit: &Fit = &runnable.fit;
         let weights = &fit.footprint.weights;
-        col = col.push(container(space().height(1)).width(Length::Fill).style(theme::well));
+        // A model's notes (what its header says of it) wait on hover beside its name.
+        let mut name = row![strong(runnable.id.as_str(), 12.5, theme::TEXT).font(fonts().mono)].spacing(6).align_y(Alignment::Center);
+        if let Some(row) = foundry.catalog.get(runnable.index)
+            && !row.notes.is_empty()
+        {
+            let notes: Vec<String> = row.notes.iter().map(|n| format!("• {} [{}]", n.claim, n.provenance)).collect();
+            name = name.push(ui::help(notes.join("\n")));
+        }
         col = col.push(
             row![
-                container(strong(runnable.id.as_str(), 13.0, theme::TEXT).font(fonts().mono)).width(Length::FillPortion(3)),
+                container(name).width(Length::FillPortion(4)),
                 container(chip(fit.verdict.as_str(), verdict_colour(&fit.verdict))).width(Length::FillPortion(2)),
-                container(label(format!("{} weights [{}]", weights.rendered, weights.provenance), 12.0, theme::TEXT_DIM))
+                container(label(format!("{} [{}]", weights.rendered, weights.provenance), 12.0, theme::TEXT_DIM))
                     .width(Length::FillPortion(3)),
-                container(
-                    row![
-                        label("largest context that fits:", 12.0, theme::TEXT_DIM),
-                        strong(reach(fit.max_context), 12.0, theme::TEXT)
-                    ]
-                    .spacing(4)
-                )
-                .width(Length::FillPortion(4)),
+                container(strong(reach(fit.max_context), 12.0, theme::TEXT)).width(Length::FillPortion(3)),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
         );
-        if let Some(row) = foundry.catalog.get(runnable.index) {
-            for n in &row.notes {
-                col = col.push(label(format!("   • {} [{}]", n.claim, n.provenance), 11.5, theme::TEXT_DIM));
-            }
-        }
     }
-    col = col.push(note(
-        "EXCEEDS is a statement about the accelerator, not about usability: a runtime can still serve a model that \
-         does not fit by spilling onto the CPU. UNDECIDABLE is not a refusal — it means a term of the footprint could \
-         not be established.",
-    ));
-    col.into()
+    let runs = foundry.runnable.iter().filter(|r| r.fit.verdict == "RUNS").count();
+    let aside = label(format!("{runs} of {} run", foundry.runnable.len()), 12.0, theme::TEXT_DIM).into();
+    panel_of(col, Some(aside))
 }
 
-fn pairs(m: &Measured) -> El<'_> {
+/// The models table's header.
+fn models_head<'a>() -> El<'a> {
+    table_head(&[("Model", 4), ("Verdict", 2), ("Weights", 3), ("Largest context that fits", 3)])
+}
+
+/// What co-residency means, said once on hover beside the pairs' summary.
+const PAIRS_HELP: &str = "Co-residency, not sequential use — two models that cannot be held at once can still be run \
+                          one after the other, paying a load between them. Concurrency on one device is bounded by the \
+                          KV cache rather than by the number of models, which is why this answer moves with the context \
+                          above it.";
+
+fn pairs<'a>(state: &'a State, m: &'a Measured) -> El<'a> {
     let Ok(foundry) = &m.foundry else { return space().height(0).into() };
     if foundry.pairs.is_empty() {
         return space().height(0).into();
     }
-    let mut col =
-        Column::new().spacing(5).push(section(format!("What runs together, both resident at {} tokens", grouped(m.context))));
+    let together: Vec<&Pairing> = foundry.pairs.iter().filter(|p| p.fits_together == Some(true)).collect();
+    let mut summary = format!("{} of {} pairs together", together.len(), foundry.pairs.len());
+    if let Some(best) = together.first() {
+        summary.push_str(&format!(" · first: {} + {}", best.left_id, best.right_id));
+    }
+    let summary = row![
+        label(summary, 12.0, if together.is_empty() { theme::CAUTION } else { theme::TEXT_DIM }),
+        ui::help(PAIRS_HELP)
+    ]
+    .spacing(8)
+    .align_y(Alignment::Center);
+    let mut col = Column::new().spacing(4);
     for pair in foundry.pairs.iter().take(PAIRS_SHOWN) {
         let (verdict, detail) = pair_words(pair);
         let colour = match verdict {
@@ -716,12 +753,13 @@ fn pairs(m: &Measured) -> El<'_> {
     if let Some(words) = none_pair_note(foundry) {
         col = col.push(label(words, 12.0, theme::CAUTION));
     }
-    col = col.push(note(
-        "Co-residency, not sequential use — two models that cannot be held at once can still be run one after the \
-         other, paying a load between them. Concurrency on one device is bounded by the KV cache rather than by the \
-         number of models, which is why this answer moves with the context above it.",
-    ));
-    col.into()
+    ui::disclosure(
+        format!("What runs together at {} tokens", grouped(m.context)),
+        summary,
+        state.open_parts.contains(PAIRS_PART),
+        Msg::Disclose(PAIRS_PART),
+        col,
+    )
 }
 
 /// A number as typed, or nothing (never a default).
@@ -730,14 +768,9 @@ fn number(text: &str) -> Option<f64> {
 }
 
 fn benchmarks<'a>(state: &'a State, m: &'a Measured, phase: f32) -> El<'a> {
-    let mut col = Column::new().spacing(6).push(section("Benchmarks on this machine"));
-    col = col.push(note(
-        "One bounded generation (128 tokens of a domain-free prompt, 4K context) on a llama.cpp server started for it \
-         with --fit on, so what does not fit the card stays on the CPU; stopped as soon as it answers. Rates are the \
-         server's own counters, which exclude the load. It loads the model and takes the card for a minute or so, so it \
-         runs only when you press Benchmark. One sample, not a property of the model.",
-    ));
-    let Ok(foundry) = &m.foundry else { return col.into() };
+    let mut col = Column::new().spacing(6);
+    let panel_of = |body| panel("Benchmarks on this machine", BENCH_HELP, None, body);
+    let Ok(foundry) = &m.foundry else { return panel_of(col) };
     if let Some(name) = &state.benchmarking {
         col = col.push(ui::working(phase, format!("Benchmarking {name}: loading it and generating 128 tokens…")));
     }
@@ -789,8 +822,15 @@ fn benchmarks<'a>(state: &'a State, m: &'a Measured, phase: f32) -> El<'a> {
                 .align_y(Alignment::Center),
         );
     }
-    col.into()
+    panel_of(col)
 }
+
+/// How a benchmark is taken, said once on hover beside its title.
+const BENCH_HELP: &str = "One bounded generation (128 tokens of a domain-free prompt, 4K context) on a llama.cpp server \
+                          started for it with --fit on, so what does not fit the card stays on the CPU; stopped as soon \
+                          as it answers. Rates are the server's own counters, which exclude the load. It loads the model \
+                          and takes the card for a minute or so, so it runs only when you press Benchmark. One sample, \
+                          not a property of the model.";
 
 fn field<'a>(placeholder: &'a str, value: &'a str, which: Field, width: f32) -> El<'a> {
     container(
@@ -807,13 +847,8 @@ fn field<'a>(placeholder: &'a str, value: &'a str, which: Field, width: f32) -> 
 fn costs(state: &State) -> El<'_> {
     use model_anatomy::{EnergyDeclaration, MonthlyVolume, ProviderPrice};
     let c = &state.costs;
-    let mut col = Column::new().spacing(6).push(section("Running costs"));
-    col = col.push(note(
-        "A projection from four inputs, none of which has a default: a benchmark's measured rates, the electricity \
-         (the GPU's board power as you declare it, plus the CPU package's power as measured during the benchmark, \
-         at your tariff), a hosted model's published price, and the monthly volume you state. Missing any one refuses \
-         the comparison by name.",
-    ));
+    let mut col = Column::new().spacing(6);
+    let panel_of = |body| panel("Running costs", COSTS_HELP, None, body);
     col = col.push(
         row![
             field("GPU board power, W", &c.gpu_watts, Field::GpuWatts, 160.0),
@@ -869,8 +904,8 @@ fn costs(state: &State) -> El<'_> {
         .filter_map(|(n, b)| b.as_ref().as_ref().ok().filter(|b| !b.stale).map(|b| (n, b)))
         .collect();
     if measured.is_empty() {
-        col = col.push(note("Benchmark a model above: a cost needs its measured rates."));
-        return col.into();
+        col = col.push(note("Benchmark a model: a cost needs its measured rates."));
+        return panel_of(col);
     }
     let volume = MonthlyVolume {
         input_tokens: c.input_tokens.trim().parse().ok(),
@@ -935,12 +970,17 @@ fn costs(state: &State) -> El<'_> {
             }
         }
     }
-    col.into()
+    panel_of(col)
 }
 
-fn footer() -> El<'static> {
-    column![
-        section("What this view does not establish"),
+/// What a cost is made from, said once on hover beside its title.
+const COSTS_HELP: &str = "A projection from four inputs, none of which has a default: a benchmark's measured rates, the \
+                          electricity (the GPU's board power as you declare it, plus the CPU package's power as measured \
+                          during the benchmark, at your tariff), a hosted model's published price, and the monthly \
+                          volume you state. Missing any one refuses the comparison by name.";
+
+fn footer(state: &State) -> El<'_> {
+    let limits = column![
         note("• That a model will load. Fitting is arithmetic over declared shapes; the only proof of loading is loading."),
         note("• Anything about answer quality. Nothing here runs an evaluation, and a fit verdict is a memory statement."),
         note(
@@ -952,8 +992,14 @@ fn footer() -> El<'static> {
              numbers written from memory would be a fabrication wearing a provenance label."
         ),
     ]
-    .spacing(4)
-    .into()
+    .spacing(4);
+    ui::disclosure(
+        "What this view does not establish",
+        label("loading, quality, a realised saving, models not held here", 12.0, theme::TEXT_DIM),
+        state.open_parts.contains(LIMITS_PART),
+        Msg::Disclose(LIMITS_PART),
+        limits,
+    )
 }
 
 #[cfg(test)]

@@ -47,7 +47,7 @@ use lattice_protocol::conversation::{
 };
 use lattice_protocol::{AgentInfo, ModelChoice, RunDetail, RunSummary, StartRun};
 
-pub use view::view;
+pub use view::{view, view_tab};
 
 use self::core::{Ask, Services};
 
@@ -235,6 +235,16 @@ const RUNS_POLL: Duration = Duration::from_secs(2);
 #[derive(Clone)]
 pub struct AskCell(Arc<Mutex<Option<Ask>>>);
 
+/// What the core asks of the IDE's terminals, carried in a message (taken once).
+#[derive(Clone)]
+pub struct TermAskCell(Arc<Mutex<Option<core::TermAsk>>>);
+
+impl std::fmt::Debug for TermAskCell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("TermAskCell")
+    }
+}
+
 impl std::fmt::Debug for AskCell {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("AskCell")
@@ -282,6 +292,11 @@ pub struct Folder {
 
 pub struct State {
     pub tab: Tab,
+    /// The tabs in windows of their own (`windows`): drawn there, and read and followed as the tab on show is.
+    pub out: Vec<Tab>,
+    /// A tab in a window of its own was asked for here (the jump menu, the palette): the window brings that window
+    /// forward rather than showing the tab twice.
+    pub raise_out: Option<Tab>,
     shown: bool,
     services: Option<Arc<Services>>,
     pub starting: bool,
@@ -333,6 +348,8 @@ pub struct State {
     pub problem: Option<String>,
     /// Conversations that asked for the reader while not open.
     pub calling: HashSet<String>,
+    /// The signed-in reader's name, as the account gives it, for the chat's greeting; `None` signed out or nameless.
+    pub reader: Option<String>,
     /// Each started task's topic, with the topic it came from (Activity draws it beneath that topic).
     pub task_origins: std::collections::HashMap<String, lattice_core::convo::task_runs::Origin>,
     /// The newest move to another project already followed (seconds since the epoch): older ones are not followed.
@@ -357,11 +374,23 @@ pub struct State {
     pub training: Training,
     pub morphometry: morphometry::State,
     pub foundry: foundry::State,
+    /// The parts of the Models, Training and System tabs a person opened (`ui::disclosure`): closed until opened,
+    /// kept while the window runs, as the window's own pages keep theirs.
+    pub open_parts: std::collections::BTreeSet<&'static str>,
 }
 
 /// One chat surface: one stream of topics instead of a list of chats. The chat list, New chat, its key and the
 /// grid of chats are not offered while it is on; they stay in the code behind this switch for now.
 pub const ONE_SURFACE: bool = true;
+
+/// What a tab's place on the page's bar asks of the windows (`windows` handles it): the pointer came onto (true) or
+/// left it, a middle press (the tab to a window of its own), or a press on a tab already in one (that window forward).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TabWindow {
+    Hover(Tab, bool),
+    PopOut(Tab),
+    Raise(Tab),
+}
 
 #[derive(Clone, Debug)]
 pub enum Msg {
@@ -372,9 +401,11 @@ pub enum Msg {
     WorkIn(Option<String>),
     /// Work in this folder of the project worked in.
     WorkFolder(String),
-    /// Where the core sent the composer's message (one chat surface): its text, its mode, and the topic.
-    Routed(String, Mode, lattice_core::convo::recall::Route),
+    /// Where the core sent the composer's message (one chat surface): its text, its mode, the topic, and the group.
+    Routed(String, Mode, lattice_core::convo::recall::Route, lattice_core::convo::groups::Placement),
     Tab(Tab),
+    /// A tab's place on the bar, for the windows (`TabWindow`).
+    Window(TabWindow),
     Started(Result<Arc<Services>, String>),
     /// Lattice's browser opened (or did not open) a web page the account panel sent it.
     WebOpened(String, Result<(), String>),
@@ -412,6 +443,8 @@ pub enum Msg {
     Trusted(Result<TrustState, String>),
     Changes(Result<ChangeSet, String>),
     ShowDiff(String),
+    /// A change's diff in a numbered editor (its key): an agent's, as following opens it.
+    ShowDiffIn(String, String),
     Diff(Result<FileDiff, String>),
     Review(ReviewOp),
     Reviewed(Result<ReviewOutcome, String>),
@@ -419,6 +452,7 @@ pub enum Msg {
     /// A call that only needs the list read again afterwards, and its refusal if any.
     Done(Result<(), String>),
     Asked(AskCell),
+    TermAsked(TermAskCell),
     DialogTick,
     DialogAnswer(bool),
     /// A link in an answer was clicked: links are shown, never opened.
@@ -476,12 +510,16 @@ pub enum Msg {
     Morpho(morphometry::Msg),
     // The Foundry tab.
     Foundry(foundry::Msg),
+    /// Open or close a part of a tab (`ui::disclosure`).
+    Disclose(&'static str),
 }
 
 impl State {
     pub fn new() -> State {
         State {
             tab: Tab::Chat,
+            out: Vec::new(),
+            raise_out: None,
             shown: false,
             services: None,
             starting: false,
@@ -519,6 +557,7 @@ impl State {
             route_to: None,
             routed: None,
             task_origins: std::collections::HashMap::new(),
+            reader: None,
             switch_seen: crate::utc::now(),
             fixture: false,
             dialog: None,
@@ -534,6 +573,7 @@ impl State {
             training: Training::default(),
             morphometry: morphometry::State::default(),
             foundry: foundry::State::default(),
+            open_parts: Default::default(),
         }
     }
 
@@ -623,6 +663,23 @@ impl State {
     }
 
     /// The services have started (a folder can be opened, a message sent).
+    /// The reader's plan's limits on the harness (`lattice_core::convo::plan_limits`); `false` until the services run.
+    pub fn set_plan_limits(&mut self, limits: Option<lattice_core::convo::plan_limits::PlanLimits>) -> bool {
+        match &self.services {
+            Some(services) => {
+                services.chat.set_plan_limits(limits);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Whether the reader's plan includes the project manager (the board, plans and milestones): yes until a plan
+    /// that lacks it is set (`lattice_core::convo::plan_limits`).
+    pub fn project_manager_allowed(&self) -> bool {
+        self.services.as_ref().and_then(|s| s.chat.plan_limits()).is_none_or(|plan| plan.project_manager)
+    }
+
     pub fn services_ready(&self) -> bool {
         self.services.is_some()
     }
@@ -631,13 +688,31 @@ impl State {
         self.list.as_ref().map(|l| l.shared_writes).or(self.status.as_ref().map(|s| s.shared_writes))
     }
 
+    /// What every tab on show reads: the page's, and each in a window of its own.
     fn refresh(&mut self) -> Task<Msg> {
+        let mut tabs: Vec<Tab> = std::iter::once(self.tab).chain(self.out.iter().copied()).collect();
+        tabs.dedup();
+        // the Models tab reads what the Chat reads, and its endpoints
+        if tabs.contains(&Tab::Models) {
+            tabs.retain(|t| *t != Tab::Chat);
+        }
+        let tasks: Vec<Task<Msg>> = tabs.into_iter().map(|tab| self.refresh_tab(tab)).collect();
+        Task::batch(tasks)
+    }
+
+    /// Whether `tab` is on show: the page's own, or in a window of its own (`windows`).
+    pub fn tab_shown(&self, tab: Tab) -> bool {
+        self.tab == tab || self.out.contains(&tab)
+    }
+
+    /// What `tab` reads when it comes on show, on the page or in a window of its own.
+    pub(crate) fn refresh_tab(&mut self, tab: Tab) -> Task<Msg> {
         let Some(services) = self.services.clone() else { return Task::none() };
-        let task = match self.tab {
+        let task = match tab {
             Tab::Chat | Tab::Models => {
                 self.listing = true;
                 // The projects, which the Chats view groups chats by.
-                let projects = self.read_projects();
+                let projects = Task::batch([self.read_projects(), self.read_groups()]);
                 let agent = services.agent();
                 let (a, b, c) = (agent.clone(), agent.clone(), agent);
                 Task::batch([
@@ -668,7 +743,7 @@ impl State {
             Tab::Morphometry => self.morphometry.open(Some(services.state.clone())).map(Msg::Morpho),
             Tab::Foundry => self.foundry.open().map(Msg::Foundry),
         };
-        if self.tab == Tab::Models {
+        if tab == Tab::Models {
             return Task::batch([task, self.read_endpoints()]);
         }
         task
@@ -743,10 +818,13 @@ impl State {
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
+            // a tab in a window of its own is not shown twice: its window comes forward
+            Msg::Tab(tab) if self.out.contains(&tab) => self.raise_out = Some(tab),
             Msg::Tab(tab) => {
                 self.tab = tab;
-                return self.refresh();
+                return self.refresh_tab(tab);
             }
+            Msg::Window(_) => {}
             Msg::Started(Ok(services)) => {
                 self.starting = false;
                 self.services = Some(services);
@@ -759,6 +837,10 @@ impl State {
                 }
                 // The agent's browser: on or off, for the composer and the Tools view.
                 let mut tasks = vec![self.refresh(), self.read_browser(), self.read_completion(), ide::outside_steps::read_outside()];
+                // The Work side, the side bar's first view, lists the tools: they are read as it first shows.
+                if self.ide.side == ide::Side::Work {
+                    tasks.push(self.read_tools());
+                }
                 // The folder left open last time is handed on as one named on the command line (which wins).
                 self.restore_folder();
                 // A folder named on the command line opens once the services run.
@@ -773,6 +855,7 @@ impl State {
                 if std::env::var_os("CENTCOM_LATTICE_TERMINAL").is_some() {
                     self.ide.panel = ide::PanelTab::Terminal;
                     self.ide.panel_open = true;
+                    self.ide.reveal();
                     let cwd = self.ide.startup.as_ref().map(|(folder, _)| std::path::PathBuf::from(folder));
                     tasks.push(self.start_terminal(cwd));
                 }
@@ -798,6 +881,24 @@ impl State {
                 if let Ok(text) = std::env::var("CENTCOM_LATTICE_COMPOSER") {
                     self.composer = text_editor::Content::with_text(&text);
                     tasks.push(self.slash_edited());
+                }
+                // A debug build's photograph of the Work side's tools (`CENTCOM_LATTICE_OPEN=tools`), its checklists
+                // or stack beside them, or the Chats side (`chats`); a release build never reads this.
+                #[cfg(debug_assertions)]
+                if let Ok(open) = std::env::var("CENTCOM_LATTICE_OPEN") {
+                    for part in open.split(',').map(str::trim) {
+                        match part {
+                            "tools" => self.ide.show_work(ide::WorkList::Tools),
+                            "chats" => {
+                                self.ide.side = ide::Side::Chats;
+                                self.ide.side_open = true;
+                            }
+                            // the Work side's other lists, open beside the tools
+                            "checklists" => self.ide.show_work(ide::WorkList::Checklists),
+                            "stack" => self.ide.show_work(ide::WorkList::Stack),
+                            _ => {}
+                        }
+                    }
                 }
                 // Web pages the account panel sent before the services ran.
                 for url in std::mem::take(&mut self.web_waiting) {
@@ -844,9 +945,7 @@ impl State {
                         }
                         // The chat left open last time, when it is still listed; else, on one surface, the current topic.
                         let restore = self.restore_chat();
-                        if ONE_SURFACE && self.open.is_none() && self.opening.is_none()
-                            && let Some(id) = self.current_topic()
-                        {
+                        if let Some(id) = self.topic_to_open() {
                             return Task::batch([restore, self.update(Msg::Open(id))]);
                         }
                         return restore;
@@ -937,9 +1036,23 @@ impl State {
                     Err(why) => self.problem = Some(why),
                 }
             }
-            Msg::Routed(text, mode, route) => {
+            Msg::Routed(text, mode, route, placement) => {
+                use lattice_core::convo::groups::Placement;
                 use lattice_core::convo::recall::Route;
                 self.sending = false;
+                // With no group open, the message went to the group already doing that work, or starts one.
+                let placed = match (&placement, self.ide.groups.open.is_none()) {
+                    (Placement::Group(id), true) => Some(format!(
+                        "Sent to \u{201c}{}\u{201d}, the group already doing this work.",
+                        self.ide.groups.name(id).unwrap_or("")
+                    )),
+                    (Placement::New, _) => Some("Started a new group: no group does this work yet.".to_string()),
+                    _ => None,
+                };
+                if let Placement::Group(id) = &placement {
+                    self.ide.groups.open = Some(id.clone());
+                }
+                self.ide.groups.placing = Some(placement);
                 let title = |id: &str| {
                     self.list.as_ref().and_then(|l| l.conversations.iter().find(|c| c.id == id)).map(|c| c.title.clone()).unwrap_or_default()
                 };
@@ -951,6 +1064,9 @@ impl State {
                     }
                     Route::New => (Some(None), Some("Started a new topic.".to_string())),
                 };
+                if placed.is_some() {
+                    self.routed = placed;
+                }
                 return self.send_text(text, mode, None, false);
             }
             Msg::WorkIn(project) => {
@@ -1014,6 +1130,17 @@ impl State {
                         self.ide.checkpoints = None;
                         self.ide.command = None;
                         self.ide.command_lines = None;
+                        // A topic of another group shows that group's session: the next message goes there. The
+                        // brainstorm chat is its own.
+                        let opened = snapshot.conversation.id.clone();
+                        self.ide.groups.fresh = false;
+                        if self.ide.groups.is_brainstorm(&opened) {
+                            self.ide.groups.brainstorming = true;
+                            self.ide.groups.open = None;
+                        } else if let Some(group) = self.ide.groups.find_of(&opened) {
+                            self.ide.groups.open = Some(group.id.clone());
+                            self.ide.groups.brainstorming = false;
+                        }
                         self.open = Some(chat::Conversation::from_snapshot(snapshot));
                         self.follow_generation += 1;
                         let mut next = vec![self.read_changes(), self.follow_folder()];
@@ -1046,17 +1173,37 @@ impl State {
             }
             Msg::Send => {
                 let text = self.composer.text().trim().to_string();
+                // Once the first message is sent, the empty chat's starts are put away.
+                if !text.is_empty() && !self.sending {
+                    self.ide.sent = true;
+                }
                 // A message being edited replaces that turn (and hides what came after it).
                 let edit_of = self.ide.editing_turn.clone();
+                // The brainstorm chat: its messages go to it, asking only; a first one begins it for the project.
+                if self.ide.groups.brainstorming && edit_of.is_none() {
+                    if self.open.is_none() && !text.is_empty() && !self.sending
+                        && let Some(services) = &self.services
+                    {
+                        services.chat.begin_brainstorm(&text, self.ide.project.as_deref());
+                    }
+                    return self.send_text(text, Mode::Ask, None, false);
+                }
                 // One chat surface: the core says which topic the message belongs to first.
                 if ONE_SURFACE && edit_of.is_none() && !text.is_empty() && !self.sending && !self.planning()
                     && let Some(services) = self.services.clone()
                 {
                     self.sending = true;
                     let (chat, asked, current, mode) = (services.chat.clone(), text.clone(), self.open.as_ref().map(|c| c.id().to_string()), self.mode);
+                    let (group, project) = (self.ide.groups.open.clone(), self.ide.project.clone());
                     return Task::perform(
-                        on(&services, async move { chat.route(&asked, current.as_deref()) }),
-                        move |route| Msg::Routed(text.clone(), mode, route.unwrap_or(lattice_core::convo::recall::Route::Continue)),
+                        on(&services, async move { chat.route_work(&asked, current.as_deref(), group.as_deref(), project.as_deref()) }),
+                        move |routed| {
+                            let (route, placement) = routed.unwrap_or((
+                                lattice_core::convo::recall::Route::Continue,
+                                lattice_core::convo::groups::Placement::New,
+                            ));
+                            Msg::Routed(text.clone(), mode, route, placement)
+                        },
                     );
                 }
                 return self.send_text(text, self.mode, edit_of, false);
@@ -1066,38 +1213,57 @@ impl State {
                 // An inline edit's message or a task's prompt was not the composer's: a draft there stays.
                 let from_composer = !std::mem::take(&mut self.ide.inline_sending);
                 let task_start = std::mem::take(&mut self.ide.task_starting);
+                let idea = self.ide.groups.sending_idea.take();
+                // An idea sent to a group's session: it works there, and the brainstorm chat stays.
+                if let Some(target) = idea.filter(|_| task_start) {
+                    match &result {
+                        Ok(Accepted::Started { .. }) => self.routed = Some(format!("Sent to {target}.")),
+                        Ok(Accepted::Queued { .. }) => self.routed = Some(format!("Sent to {target}; it waits its turn there.")),
+                        Err(why) => self.problem = Some(why.clone()),
+                    }
+                    return Task::batch([self.refresh(), self.read_groups()]);
+                }
                 match result {
                     Ok(Accepted::Started { conversation, user_turn, .. }) => {
+                        let placed = if task_start { Task::none() } else { self.place_sent(conversation.id.clone()) };
+                        // A brainstorm chat just begun is read back as one.
+                        let placed = if self.ide.groups.brainstorming { Task::batch([placed, self.read_groups()]) } else { placed };
                         if from_composer {
                             self.composer = text_editor::Content::new();
                             self.ide.attached.clear();
                         }
                         if self.ide.editing_turn.take().is_some() {
                             // The edited turn replaced the old one and what followed it: read the chat again.
-                            return Task::batch([self.update(Msg::Open(conversation.id.clone())), self.refresh()]);
+                            return Task::batch([placed, self.update(Msg::Open(conversation.id.clone())), self.refresh()]);
                         }
                         let same = self.open.as_ref().is_some_and(|c| c.id() == conversation.id);
                         if !same && ONE_SURFACE && task_start {
                             // A task runs beside the chat, which stays: it opens in the Tasks view.
-                            return Task::batch([self.refresh(), self.grid(ide::grid::GridMsg::Add(conversation.id.clone()))]);
+                            return Task::batch([placed, self.refresh(), self.grid(ide::grid::GridMsg::Add(conversation.id.clone()))]);
                         }
                         if !same {
                             // A new conversation: open it (its snapshot holds the question).
-                            return Task::batch([self.update(Msg::Open(conversation.id.clone())), self.refresh()]);
+                            return Task::batch([placed, self.update(Msg::Open(conversation.id.clone())), self.refresh()]);
                         }
                         if let Some(c) = &mut self.open {
                             c.summary = *conversation;
                             c.asked(*user_turn);
                         }
-                        return self.refresh();
+                        return Task::batch([placed, self.refresh()]);
                     }
-                    Ok(Accepted::Queued { position, .. }) => {
+                    Ok(Accepted::Queued { conversation, position, .. }) => {
                         if from_composer {
                             self.composer = text_editor::Content::new();
                         }
                         self.problem = Some(format!(
                             "A turn is running here, so your message waits its turn (number {position} in line)."
                         ));
+                        // Sent to a chat busy with a turn: it joins its group all the same, and the panel goes there.
+                        let placed = if task_start { Task::none() } else { self.place_sent(conversation.clone()) };
+                        if !task_start && self.open.as_ref().is_none_or(|c| c.id() != conversation) {
+                            return Task::batch([placed, self.update(Msg::Open(conversation)), self.refresh()]);
+                        }
+                        return placed;
                     }
                     Err(why) => self.problem = Some(why),
                 }
@@ -1105,11 +1271,53 @@ impl State {
             Msg::Batch(id, events) => {
                 // A chat in the grid takes the batch too (a chat open on the right as well is followed once).
                 let mut grid_task = if self.ide.grid.apply(&id, &events) { self.grid_changes(id.clone()) } else { Task::none() };
-                // Following the agent: the newest change staged in this batch opens as its diff. One of the open
-                // chat's opens at once; one of another chat in the grid opens that chat on the right first.
-                let followed = self.ide.follow.then(|| ide::followed_change(&events)).flatten();
                 let open_here = self.open.as_ref().is_some_and(|c| c.id() == id);
-                if let Some(change) = followed.clone()
+                // What the agents work on: named in the editor's head, and while following (and the reader has not
+                // hidden the editor during this turn) shown in the editor beside the chat. The keyboard stays put.
+                let (who, here) = {
+                    let chat = if open_here {
+                        self.open.as_ref()
+                    } else {
+                        self.ide.grid.tiles.iter().find(|t| t.id == id).and_then(|t| t.conversation.as_ref())
+                    };
+                    let who = if open_here {
+                        "This chat".to_string()
+                    } else {
+                        chat.map(|c| c.summary.title.clone()).filter(|t| !t.is_empty()).unwrap_or_else(|| "A task".to_string())
+                    };
+                    // its files open in the editor only when it works in the folder the editor shows
+                    let here = match (&self.ide.folder, chat.and_then(|c| c.summary.workspace.as_ref())) {
+                        (Some(folder), Some(w)) => w.id == folder.id(),
+                        (Some(_), None) => open_here,
+                        (None, _) => false,
+                    };
+                    (who, here)
+                };
+                let touched = self.ide.note_work(&id, &who, here, &events);
+                let following = self.ide.follow && !self.ide.editor_dismissed;
+                // A change the open chat staged in this batch opens as its diff (below).
+                let followed = following.then(|| ide::followed_change(&events)).flatten();
+                if following && !touched.is_empty() {
+                    // Each agent's files open in its own numbered editor. The editor coming on show for this work
+                    // shows this agent's; one already on show stays on the editor the reader is looking at.
+                    let was_shown = self.ide.editor_open;
+                    self.ide.reveal();
+                    if !was_shown && self.ide.editor_open {
+                        self.ide.show_editor(&id);
+                    }
+                    // Otherwise the newest file it read or edited opens; a tab on show with unsaved edits stays so.
+                    let newest = touched.iter().rev().find(|(_, change)| change.is_none()).map(|(path, _)| path.clone());
+                    if let Some(path) = newest.filter(|_| here && !(open_here && followed.is_some())) {
+                        let kept = self.ide.active_tab().filter(|t| t.dirty() && t.editor == id).map(|t| t.id);
+                        grid_task = Task::batch([grid_task, self.open_file_in(&id, path)]);
+                        if kept.is_some() {
+                            self.ide.active = kept;
+                        }
+                    }
+                }
+                // With chats side by side (not one surface), another chat's change opens that chat on the right first.
+                if !ONE_SURFACE
+                    && let Some(change) = followed.clone()
                     && !open_here
                     && self.ide.grid.holds(&id)
                 {
@@ -1136,7 +1344,15 @@ impl State {
                             _ => false,
                         })
                     });
+                    // A checklist the agent gives the reader opens the Work side's checklists again, had the reader
+                    // folded them.
+                    let given = events.iter().any(|e| {
+                        matches!(e.kind, lattice_protocol::conversation::ConversationEventKind::StepsGiven { .. })
+                    });
                     c.apply(&events);
+                    if given {
+                        self.ide.side_folds.remove(ide::WorkList::Checklists.key());
+                    }
                     let mut next = Vec::new();
                     if staged {
                         next.push(self.read_changes());
@@ -1149,7 +1365,7 @@ impl State {
                     }
                     next.push(grid_task);
                     if let Some(change) = followed.filter(|_| open_here) {
-                        next.push(self.update(Msg::ShowDiff(change)));
+                        next.push(self.update(Msg::ShowDiffIn(id.clone(), change)));
                     }
                     return Task::batch(next);
                 }
@@ -1276,20 +1492,29 @@ impl State {
                 Err(why) => self.problem = Some(why),
             },
             Msg::ShowDiff(change) => {
-                // The change is reviewed in an editor tab of its own.
+                let key = self.ide.shown.clone();
+                return self.update(Msg::ShowDiffIn(key, change));
+            }
+            Msg::ShowDiffIn(key, change) => {
+                // The change is reviewed in an editor tab of its own, in editor `key`. On show there, the editor is
+                // shown beside the chat and the diff read; in an editor not on show, it is read when that one is.
                 let path = self.changes.as_ref().and_then(|s| s.changes.iter().find(|c| c.id == change)).map(|c| c.path.clone());
                 let existing = self
                     .ide
                     .tabs
                     .iter()
-                    .find(|t| matches!(&t.kind, ide::TabKind::Diff { change: c, .. } if *c == change))
+                    .find(|t| t.editor == key && matches!(&t.kind, ide::TabKind::Diff { change: c, .. } if *c == change))
                     .map(|t| t.id);
                 match existing {
-                    Some(id) => self.ide.active = Some(id),
+                    Some(id) => self.ide.activate_in(&key, id),
                     None => {
-                        self.ide.push(ide::TabKind::Diff { change: change.clone(), path: path.unwrap_or_default() });
+                        self.ide.push_in(&key, ide::TabKind::Diff { change: change.clone(), path: path.unwrap_or_default() });
                     }
                 }
+                if key != self.ide.shown {
+                    return Task::none();
+                }
+                self.ide.reveal();
                 if let (Some(c), Some((services, agent))) = (&self.open, self.agent()) {
                     let id = c.id().to_string();
                     return Task::perform(on(&services, async move { agent.diff(&id, &change).await.map_err(|r| r.message) }), |r| {
@@ -1397,6 +1622,12 @@ impl State {
                     self.waiting_dialogs.push_back(ask);
                 }
                 self.next_dialog();
+            }
+            Msg::TermAsked(cell) => {
+                let ask = cell.0.lock().unwrap_or_else(|p| p.into_inner()).take();
+                if let Some(ask) = ask {
+                    return self.term_ask(ask);
+                }
             }
             Msg::DialogTick => {}
             Msg::DialogAnswer(yes) => {
@@ -1645,6 +1876,11 @@ impl State {
             }
             Msg::Morpho(msg) => return self.morphometry.update(msg).map(Msg::Morpho),
             Msg::Foundry(msg) => return self.foundry.update(msg).map(Msg::Foundry),
+            Msg::Disclose(part) => {
+                if !self.open_parts.remove(part) {
+                    self.open_parts.insert(part);
+                }
+            }
             Msg::StopRun(id) => {
                 if let Some(services) = &self.services
                     && let Err(refusal) = services.runs.stop(&id)
@@ -1660,6 +1896,8 @@ impl State {
     /// A debug build only: the conversation recorded in the file `CENTCOM_LATTICE_SNAPSHOT` names (`{"snapshot":
     /// Snapshot, "changes": ChangeSet, "diff": FileDiff, "artifact": ArtifactView}`, the protocol's own shapes) is shown as if opened, so the
     /// screenshot mode can photograph the agent's panel and a review without a model. A release build never reads it.
+    /// `"working": [{"path", "by", "who", "here"}]` names the files agents work on, newest first, as following notes
+    /// them from a live chat (`by` and `who` the open chat's unless given, `here` true unless given).
     #[cfg(debug_assertions)]
     fn load_fixture(&mut self) {
         let Some(path) = std::env::var_os("CENTCOM_LATTICE_SNAPSHOT") else { return };
@@ -1682,6 +1920,20 @@ impl State {
             Err(why) => self.problem = Some(format!("CENTCOM_LATTICE_SNAPSHOT: {why}")),
         }
         self.changes = serde_json::from_value(value["changes"].clone()).ok();
+        if let Some(files) = value["working"].as_array() {
+            let chat = self.open.as_ref().map(|c| c.id().to_string()).unwrap_or_default();
+            self.ide.working_on = files
+                .iter()
+                .filter_map(|f| {
+                    Some(ide::WorkedFile {
+                        path: f["path"].as_str()?.to_string(),
+                        by: f["by"].as_str().map_or_else(|| chat.clone(), str::to_string),
+                        who: f["who"].as_str().unwrap_or("This chat").to_string(),
+                        here: f["here"].as_bool().unwrap_or(true),
+                    })
+                })
+                .collect();
+        }
         if let Ok(diff) = serde_json::from_value::<FileDiff>(value["diff"].clone()) {
             self.ide.push(ide::TabKind::Diff { change: diff.change.clone(), path: diff.path.clone() });
             let _ = self.update(Msg::Diff(Ok(diff)));
@@ -1699,6 +1951,35 @@ impl State {
                 source: false,
             });
             let _ = self.update(Msg::Ide(ide::IdeMsg::ArtifactRead(id, Box::new(Ok(artifact)))));
+        }
+        // `CENTCOM_LATTICE_OPEN=work,changes`: every turn's work opened, and the Work side on show with the list named
+        // (`todos`, `checklists`, `stack`, `changes` or `tools`) open; `chats` shows the Chats side.
+        if let Ok(open) = std::env::var("CENTCOM_LATTICE_OPEN") {
+            for part in open.split(',').map(str::trim) {
+                let list = match part {
+                    "work" => {
+                        let turns: Vec<String> = self.open.iter().flat_map(|c| c.activity.iter().map(|a| a.turn.clone())).collect();
+                        for turn in turns {
+                            self.ide.work_folds.insert(turn, ide::Fold::Open);
+                        }
+                        None
+                    }
+                    "chats" => {
+                        self.ide.side = ide::Side::Chats;
+                        self.ide.side_open = true;
+                        None
+                    }
+                    "todos" => Some(ide::WorkList::Todos),
+                    "checklists" => Some(ide::WorkList::Checklists),
+                    "stack" => Some(ide::WorkList::Stack),
+                    "changes" => Some(ide::WorkList::Changes),
+                    "tools" => Some(ide::WorkList::Tools),
+                    _ => None,
+                };
+                if let Some(list) = list {
+                    self.ide.show_work(list);
+                }
+            }
         }
     }
 
@@ -1749,8 +2030,9 @@ impl State {
     }
 
     /// The page's own subscriptions, while it is shown: the open conversation's follow, the runs poll while a run
-    /// works, and the dialog's half-second quiet.
-    pub fn subscription(&self) -> Subscription<Msg> {
+    /// works, and the dialog's half-second quiet. `keys`: the keyboard is in the window the page is in, so its keys
+    /// listen (a page in a window of its own hears no key pressed in another).
+    pub fn subscription(&self, keys: bool) -> Subscription<Msg> {
         let mut subs = Vec::new();
         if let (Some(services), Some(c)) = (&self.services, self.open.as_ref().filter(|_| !self.fixture)) {
             subs.push(Subscription::run_with(
@@ -1774,13 +2056,13 @@ impl State {
                 }
             }
         }
-        if self.tab == Tab::Runs && self.runs.list.iter().any(|r| r.status.is_active()) {
+        if self.tab_shown(Tab::Runs) && self.runs.list.iter().any(|r| r.status.is_active()) {
             subs.push(iced::time::every(RUNS_POLL).map(|_| Msg::RunsPoll));
         }
         if self.dialog.as_ref().is_some_and(|d| !d.ready()) {
             subs.push(iced::time::every(Duration::from_millis(100)).map(|_| Msg::DialogTick));
         }
-        if self.tab == Tab::Chat {
+        if self.tab_shown(Tab::Chat) {
             // Agents outside the chats add checklists to the local store: watched while the chat shows.
             subs.push(
                 crate::live::Watch::new(
@@ -1790,7 +2072,9 @@ impl State {
                 .subscription()
                 .map(|_| Msg::Ide(ide::IdeMsg::Outside(ide::outside_steps::OutsideMsg::Changed))),
             );
-            subs.push(iced::event::listen_with(ide::update::keys));
+            if keys {
+                subs.push(iced::event::listen_with(ide::update::keys));
+            }
             if self.ide.drag.is_some() {
                 subs.push(iced::event::listen_with(ide::update::drags));
             }
@@ -1800,7 +2084,7 @@ impl State {
         }
         if let Some(services) = &self.services {
             subs.push(Subscription::run_with(Changed(services.clone()), changed_stream));
-            if self.tab == Tab::Chat && self.ide.tools_shown() {
+            if self.tab_shown(Tab::Chat) && self.ide.tools_shown() {
                 subs.push(Subscription::run_with(McpChanged(services.clone()), mcp_stream));
                 subs.push(Subscription::run_with(BrowserChanged(services.clone()), browser_stream));
             }
@@ -1810,6 +2094,20 @@ impl State {
 
     /// Send `text` to the open chat (a new one when none is open) in `mode`, in the chat's folder, as the composer
     /// sends; `edit_of` replaces that turn; `inline`: an inline edit's message, which leaves the composer's draft.
+    /// Read the open folder's stack (its manifests only), off the window's thread.
+    pub(in crate::lattice) fn read_stack(&mut self) -> Task<Msg> {
+        let path = self.ide.folder_path.trim().to_string();
+        if path.is_empty() {
+            return Task::none();
+        }
+        self.ide.stack = None;
+        let root = std::path::PathBuf::from(&path);
+        Task::perform(
+            async move { std::thread::spawn(move || ide::StackReview::of(&root)).join().unwrap_or_default() },
+            move |review| Msg::Ide(ide::IdeMsg::StackRead(path.clone(), Box::new(review))),
+        )
+    }
+
     pub(in crate::lattice) fn send_text(
         &mut self,
         text: String,
@@ -1862,8 +2160,22 @@ impl State {
             Some(folder) => c.workspace.as_ref().is_some_and(|w| ide::projects::same_folder(&w.path, folder)),
             None => true,
         };
+        // In an open group, its own topics (not its tasks'); never a brainstorm chat.
+        let group = self.ide.groups.shown();
+        let in_group = |id: &str| {
+            group.is_none_or(|g| g.topics.iter().any(|t| t == id) && !self.is_task(id)) && !self.ide.groups.is_brainstorm(id)
+        };
         // The list is newest first.
-        list.conversations.iter().find(|c| in_project(&c.id) && in_folder(c)).map(|c| c.id.clone())
+        list.conversations.iter().find(|c| in_project(&c.id) && in_folder(c) && in_group(&c.id)).map(|c| c.id.clone())
+    }
+
+    /// On one surface, the topic an empty panel opens by itself when the list is read: the current one, unless the panel
+    /// was left empty on purpose (`GroupsState::fresh`: No group picked, or a brainstorm chat not yet begun).
+    pub(in crate::lattice) fn topic_to_open(&self) -> Option<String> {
+        if !ONE_SURFACE || self.open.is_some() || self.opening.is_some() || self.ide.groups.fresh {
+            return None;
+        }
+        self.current_topic()
     }
 
     /// The folder the chat works in for the project worked in: the one picked among its folders, else its own.
@@ -1881,7 +2193,9 @@ impl State {
         let list = self.list.as_ref()?;
         let shown = |id: &str| self.open.as_ref().is_some_and(|c| c.id() == id) || self.earlier.iter().any(|c| c.id() == id);
         let oldest = self.earlier.first().or(self.open.as_ref()).map(|c| c.summary.updated)?;
-        list.conversations.iter().find(|c| !shown(&c.id) && c.updated <= oldest).map(|c| c.id.clone())
+        let group = self.ide.groups.shown();
+        let in_group = |id: &str| group.is_none_or(|g| g.topics.iter().any(|t| t == id) && !self.is_task(id));
+        list.conversations.iter().find(|c| !shown(&c.id) && c.updated <= oldest && in_group(&c.id)).map(|c| c.id.clone())
     }
 
     /// Work in `project`: its model and folder are taken, and the stream continues its newest topic, or starts one
@@ -1947,6 +2261,7 @@ impl State {
         let mut subs = Vec::new();
         if let Some(services) = &self.services {
             subs.push(Subscription::run_with(Asks(services.clone()), asks_stream));
+            subs.push(Subscription::run_with(TermAsks(services.clone()), term_asks_stream));
         }
         for t in &self.ide.terms {
             subs.push(Subscription::run_with(t.feed(), terminal_stream));
@@ -2227,6 +2542,20 @@ fn asks_stream(asks: &Asks) -> BoxStream<'static, Msg> {
     asks.0.asks().map(|ask| Msg::Asked(AskCell(Arc::new(Mutex::new(Some(ask)))))).boxed()
 }
 
+/// The services again, hashed apart from [`Asks`]: what the core asks of the terminals.
+#[derive(Clone)]
+struct TermAsks(Arc<Services>);
+
+impl Hash for TermAsks {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        "lattice-term-asks".hash(state);
+    }
+}
+
+fn term_asks_stream(asks: &TermAsks) -> BoxStream<'static, Msg> {
+    asks.0.term_asks().map(|ask| Msg::TermAsked(TermAskCell(Arc::new(Mutex::new(Some(ask)))))).boxed()
+}
+
 #[derive(Clone)]
 struct Changed(Arc<Services>);
 
@@ -2336,6 +2665,7 @@ mod tests {
                 created: 1.0,
                 updated: 1.0,
                 archived: false,
+                allow_all: false,
             }
         }
 
@@ -2397,17 +2727,95 @@ mod tests {
 
         #[test]
         fn a_routed_message_goes_to_its_topic_and_says_so_above_the_composer() {
+            use lattice_core::convo::groups::Placement;
             use lattice_core::convo::recall::Route;
             let mut state = State::new();
             state.list = Some(list(&[("c", 30.0), ("b", 20.0)]));
-            let _ = state.update(Msg::Routed("tax twice".into(), Mode::Agent, Route::Return("b".into())));
+            // In an open group, the message stays there: the topic is what is said.
+            state.ide.groups.open = Some("g".into());
+            let here = || Placement::Group("g".into());
+            let _ = state.update(Msg::Routed("tax twice".into(), Mode::Agent, Route::Return("b".into()), here()));
             assert_eq!(state.route_to, Some(Some("b".into())), "kept for the send (no core here to take it)");
             assert_eq!(state.routed.as_deref(), Some("Went back to the earlier topic \u{201c}topic b\u{201d}."));
-            let _ = state.update(Msg::Routed("helm chart".into(), Mode::Agent, Route::New));
+            let _ = state.update(Msg::Routed("helm chart".into(), Mode::Agent, Route::New, here()));
             assert_eq!(state.route_to, Some(None));
             assert_eq!(state.routed.as_deref(), Some("Started a new topic."));
-            let _ = state.update(Msg::Routed("more on that".into(), Mode::Agent, Route::Continue));
+            let _ = state.update(Msg::Routed("more on that".into(), Mode::Agent, Route::Continue, here()));
             assert_eq!((state.route_to.clone(), state.routed.clone()), (None, None), "continuing says nothing");
+            assert_eq!(state.ide.groups.placing, Some(here()), "kept for the sent topic to join");
+        }
+
+        #[test]
+        fn brainstorm_shows_its_own_chat_asks_only_and_is_never_the_streams_topic() {
+            use lattice_core::convo::groups::{Brainstorm, Group};
+            let mut state = State::new();
+            state.list = Some(list(&[("idea", 40.0), ("c", 30.0), ("b", 20.0)]));
+            let group = Group { id: "g".into(), name: "Payments".into(), project: None, topics: vec!["b".into()], created: 1.0, updated: 1.0, archived: false };
+            let brainstorms = vec![Brainstorm { project: None, conversation: "idea".into() }];
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(ide::groups::GroupsMsg::Read((vec![(group, "Payments".into())], false), brainstorms, Vec::new()))));
+            assert_eq!(state.current_topic().as_deref(), Some("c"), "the newest topic that is no brainstorm chat");
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(ide::groups::GroupsMsg::Brainstorm)));
+            assert!(state.ide.groups.brainstorming && state.ide.groups.open.is_none());
+            assert_eq!(state.mode, Mode::Ask);
+            assert_eq!(ide::groups::idea_target(&state.ide.groups, "g"), "\u{201c}Payments\u{201d}");
+            assert_eq!(ide::groups::idea_target(&state.ide.groups, "new"), "a new group");
+            // A group opened: the brainstorm chat is left.
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(ide::groups::GroupsMsg::Open(Some("g".into())))));
+            assert!(!state.ide.groups.brainstorming);
+            assert_eq!(state.ide.groups.open.as_deref(), Some("g"));
+        }
+
+        #[test]
+        fn with_no_group_open_a_message_is_put_with_the_group_it_matches_and_that_group_opens() {
+            use lattice_core::convo::groups::{Group, Placement};
+            use lattice_core::convo::recall::Route;
+            let mut state = State::new();
+            state.list = Some(list(&[("c", 30.0), ("b", 20.0)]));
+            let group = Group { id: "g".into(), name: String::new(), project: None, topics: vec!["b".into()], created: 1.0, updated: 1.0, archived: false };
+            state.ide.groups.list = vec![(group, "Payments".into())];
+            let _ = state.update(Msg::Routed("refunds".into(), Mode::Agent, Route::Return("b".into()), Placement::Group("g".into())));
+            assert_eq!(state.routed.as_deref(), Some("Sent to \u{201c}Payments\u{201d}, the group already doing this work."));
+            assert_eq!(state.ide.groups.open.as_deref(), Some("g"), "its session is shown");
+            assert_eq!(state.current_topic().as_deref(), Some("b"), "the stream is the group's own topics");
+            state.ide.groups.open = None;
+            let _ = state.update(Msg::Routed("a poem".into(), Mode::Agent, Route::New, Placement::New));
+            assert_eq!(state.routed.as_deref(), Some("Started a new group: no group does this work yet."));
+            assert_eq!((state.route_to.clone(), state.ide.groups.placing.clone()), (Some(None), Some(Placement::New)));
+            assert_eq!(state.ide.groups.open, None, "the new group opens once its topic is made");
+        }
+
+        #[test]
+        fn no_group_is_a_fresh_panel_the_list_leaves_empty_and_its_message_follows_the_work_even_when_queued() {
+            use lattice_core::convo::groups::{Group, Placement};
+            use lattice_core::convo::recall::Route;
+            let mut state = State::new();
+            state.list = Some(list(&[("c", 30.0), ("b", 20.0)]));
+            let group = Group { id: "g".into(), name: String::new(), project: None, topics: vec!["b".into()], created: 1.0, updated: 1.0, archived: false };
+            state.ide.groups.list = vec![(group, "Payments".into())];
+            let _ = state.update(Msg::Opened("b".into(), Ok(snapshot("b", 20.0))));
+            assert_eq!(state.ide.groups.open.as_deref(), Some("g"), "a topic shows its group's session");
+            assert_eq!(state.topic_to_open(), None, "a chat is shown: nothing opens by itself");
+
+            // No group: a fresh panel, the draft kept, and the list read again leaves it empty.
+            state.composer = text_editor::Content::with_text("Add refunds to checkout");
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(ide::groups::GroupsMsg::Open(None))));
+            assert!(state.open.is_none() && state.ide.groups.open.is_none() && state.ide.groups.fresh);
+            assert_eq!(state.composer.text().trim(), "Add refunds to checkout", "the draft stays");
+            assert_eq!(state.topic_to_open(), None, "the newest topic does not fill the fresh panel");
+            state.ide.groups.fresh = false;
+            assert_eq!(state.topic_to_open().as_deref(), Some("c"), "an empty panel not left so on purpose opens the newest");
+            state.ide.groups.fresh = true;
+
+            // Its message goes to the group already doing that work; that chat is busy, so it waits its turn there, still
+            // joining the group, and the panel goes to it.
+            let _ = state.update(Msg::Routed("Add refunds to checkout".into(), Mode::Agent, Route::Return("b".into()), Placement::Group("g".into())));
+            assert_eq!(state.routed.as_deref(), Some("Sent to \u{201c}Payments\u{201d}, the group already doing this work."));
+            assert_eq!(state.route_to, Some(Some("b".into())));
+            let queued = Accepted::Queued { conversation: "b".into(), queued_id: "q1".into(), position: 1 };
+            let _ = state.update(Msg::Sent(Ok(queued)));
+            assert_eq!(state.ide.groups.placing, None, "queued, it is put in its group all the same");
+            let _ = state.update(Msg::Opened("b".into(), Ok(snapshot("b", 20.0))));
+            assert!(!state.ide.groups.fresh, "a chat is shown: the panel is no longer fresh");
         }
 
         #[test]

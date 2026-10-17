@@ -16,7 +16,7 @@ use std::sync::Arc;
 use alelyon_plugin_api::{self as plugin, Registry, Slot, TrainingDefault};
 use iced::{Subscription, Task};
 
-pub use view::view;
+pub use view::{view, view_tab};
 
 /// A tab of the page: the simulator, a plug-in's tab (its place in the page's list), or Training.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +71,10 @@ pub fn draw_threads() -> usize {
 pub struct State {
     pub repo: Result<PathBuf, String>,
     pub tab: Tab,
+    /// The tabs in windows of their own (`windows`): drawn there, and run and read as the tab on show is.
+    pub out: Vec<Tab>,
+    /// A tab in a window of its own was asked for here: the window brings that window forward.
+    pub raise_out: Option<Tab>,
     /// The page is on show: nothing runs while it is not.
     shown: bool,
     pub scene: usize,
@@ -97,6 +101,8 @@ pub struct State {
 #[derive(Clone, Debug)]
 pub enum Msg {
     Tab(Tab),
+    /// A tab's place on the bar, for the windows (`windows`).
+    Window(crate::ui::TabAct<Tab>),
     Scene(usize),
     Play,
     Pause,
@@ -156,6 +162,8 @@ impl State {
         State {
             repo,
             tab: Tab::Simulator,
+            out: Vec::new(),
+            raise_out: None,
             shown: false,
             scene: 0,
             playing: true,
@@ -177,13 +185,49 @@ impl State {
     pub fn open(&mut self) -> Task<Msg> {
         self.shown = true;
         self.start_if_wanted();
-        self.read_for_tab()
+        self.read_tab(self.tab)
+    }
+
+    /// Whether `tab` is on show: the page's tab while the page is, or in a window of its own.
+    pub fn tab_shown(&self, tab: Tab) -> bool {
+        (self.shown && self.tab == tab) || self.out.contains(&tab)
+    }
+
+    /// Whether the simulator is running.
+    pub fn simulating(&self) -> bool {
+        self.runner.is_some()
+    }
+
+    /// `tab` into a window of its own: it runs and reads as the tab on show does (the page shows another first).
+    pub fn tab_out(&mut self, tab: Tab) -> Task<Msg> {
+        if !self.out.contains(&tab) {
+            self.out.push(tab);
+        }
+        self.start_if_wanted();
+        self.read_tab(tab)
+    }
+
+    /// `tab` out of its window: a plug-in's tab is told it left and the simulator stops, unless the page shows it.
+    pub fn tab_back(&mut self, tab: Tab) {
+        self.out.retain(|t| *t != tab);
+        if self.tab_shown(tab) {
+            return;
+        }
+        match tab {
+            Tab::Simulator => self.runner = None,
+            Tab::Plugin(i) => {
+                if let Some(p) = self.plugins.get_mut(i) {
+                    p.page.close();
+                }
+            }
+            Tab::Training => {}
+        }
     }
 
     /// What a tab reads when it comes on show: a plug-in's tab is told it opened; Training reads the streams on offer
     /// and the watched stream at once.
-    fn read_for_tab(&mut self) -> Task<Msg> {
-        match self.tab {
+    fn read_tab(&mut self, tab: Tab) -> Task<Msg> {
+        match tab {
             Tab::Plugin(i) => match self.plugins.get_mut(i) {
                 Some(p) => p.page.open().map(move |m| Msg::Plugin(i, m)),
                 None => Task::none(),
@@ -214,12 +258,17 @@ impl State {
     /// on show that it left.
     pub fn close(&mut self) {
         self.shown = false;
-        self.runner = None;
+        // the simulator in a window of its own goes on
+        if !self.out.contains(&Tab::Simulator) {
+            self.runner = None;
+        }
         self.close_plugin_tab();
     }
 
     fn close_plugin_tab(&mut self) {
-        if let Tab::Plugin(i) = self.tab {
+        if let Tab::Plugin(i) = self.tab
+            && !self.out.contains(&self.tab)
+        {
             if let Some(p) = self.plugins.get_mut(i) {
                 p.page.close();
             }
@@ -227,7 +276,7 @@ impl State {
     }
 
     fn start_if_wanted(&mut self) {
-        if !(self.shown && self.tab == Tab::Simulator && self.playing) || self.runner.is_some() {
+        if !(self.tab_shown(Tab::Simulator) && self.playing) || self.runner.is_some() {
             return;
         }
         let Ok(repo) = &self.repo else { return };
@@ -253,6 +302,8 @@ impl State {
 
     pub fn update(&mut self, msg: Msg) -> Task<Msg> {
         match msg {
+            // a tab in a window of its own is not shown twice: its window comes forward
+            Msg::Tab(tab) if self.out.contains(&tab) => self.raise_out = Some(tab),
             Msg::Tab(tab) => {
                 if tab != self.tab && self.shown {
                     self.close_plugin_tab();
@@ -260,11 +311,12 @@ impl State {
                 self.tab = tab;
                 if tab == Tab::Simulator {
                     self.start_if_wanted();
-                } else {
+                } else if !self.out.contains(&Tab::Simulator) {
                     self.runner = None;
                 }
-                return self.read_for_tab();
+                return self.read_tab(tab);
             }
+            Msg::Window(_) => {}
             Msg::Scene(i) if i < sim::SCENES.len() => {
                 self.scene = i;
                 self.playing = true;
@@ -329,7 +381,7 @@ impl State {
     /// The page's timers, held only while it is on show and something plays.
     pub fn subscription(&self) -> Subscription<Msg> {
         let mut subs = Vec::new();
-        if self.shown && self.runner.is_some() {
+        if self.runner.is_some() && self.tab_shown(Tab::Simulator) {
             subs.push(iced::time::every(sim::FRAME_EVERY).map(|_| Msg::Pull));
         }
         // A plug-in's tab holds its timers only while it needs them (it is told when it is on show).
@@ -339,8 +391,7 @@ impl State {
         // A stream is read again only while its tab is on show and it may still grow, and only when its file changed
         // (`live`): a trainer that pauses makes no message (a two-second timer redrew the page for nothing).
         let growing = self.stream.as_ref().filter(|s| matches!(s.status, train::Status::Waiting | train::Status::Running | train::Status::Incomplete));
-        if self.shown
-            && self.tab == Tab::Training
+        if self.tab_shown(Tab::Training)
             && let Some(stream) = growing
         {
             let watch = crate::live::Watch::new("training-stream", vec![("the stream".into(), crate::live::Source::File(stream.path.clone()))])

@@ -24,10 +24,18 @@ pub fn view(state: &State, phase: f32) -> El<'_> {
     if let Err(why) = &state.places {
         return page.push(ui::notice(why.as_str(), theme::CAUTION)).into();
     }
-    page = page.push(note(
-        "Nothing here writes: each database is read as it lies, or beside the program that has it open, and a column whose \
-         name says it holds a secret is never read. Markets data and the account stores are not listed.",
-    ));
+    // what read-only means here, on a "?" beside its chip (UX-PRINCIPLES B2)
+    page = page.push(
+        row![
+            ui::chip("read-only", theme::TEXT_DIM),
+            ui::help(
+                "Nothing here writes: each database is read as it lies, or beside the program that has it open, and a column \
+                 whose name says it holds a secret is never read. Markets data and the account stores are not listed.",
+            ),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+    );
     page.push(row![shelf(state), container(space().width(1)).height(Length::Fill).style(theme::line), main(state, phase)].spacing(18))
         .into()
 }
@@ -153,17 +161,28 @@ fn main(state: &State, phase: f32) -> El<'_> {
             paging = paging
                 .push(ui::secondary("Newer", (page.offset > 0 && !state.loading).then_some(Msg::Newer)))
                 .push(ui::secondary("Older", (page.rows.len() as i64 == PAGE && !state.loading).then_some(Msg::Older)));
-            body = body.push(paging).push(grid(page));
-            if let Some(row) = state.detail.and_then(|d| page.rows.get(d)) {
-                let mut whole = Column::new().spacing(8);
-                for (name, cell) in page.columns.iter().zip(row) {
-                    let value = match cell {
-                        Cell::Text(_, true) => format!("{}\n(the first {} characters)", cell.show(), super::stores::TEXT_KEPT),
-                        _ => cell.show_in(name),
-                    };
-                    whole = whole.push(column![label(name.as_str(), 12.0, theme::TEXT_DIM), mono(value, 12.5, theme::TEXT)].spacing(2));
+            body = body.push(paging);
+            // A row opened whole sits beside the grid, not under it: both stay in view (UX-PRINCIPLES B1).
+            match state.detail.and_then(|d| page.rows.get(d)) {
+                None => body = body.push(grid(page)),
+                Some(row) => {
+                    let mut whole = Column::new().spacing(8);
+                    for (name, cell) in page.columns.iter().zip(row) {
+                        let value = match cell {
+                            Cell::Text(_, true) => format!("{}\n(the first {} characters)", cell.show(), super::stores::TEXT_KEPT),
+                            _ => cell.show_in(name),
+                        };
+                        whole = whole.push(column![label(name.as_str(), 12.0, theme::TEXT_DIM), mono(value, 12.5, theme::TEXT)].spacing(2));
+                    }
+                    let detail = card("The row, whole", whole.push(ui::secondary("Close", Some(Msg::Detail(None)))));
+                    body = body.push(
+                        row![
+                            container(grid(page)).width(Length::FillPortion(3)),
+                            container(iced::widget::scrollable(detail).height(Length::Fixed(480.0))).width(Length::FillPortion(2)),
+                        ]
+                        .spacing(14),
+                    );
                 }
-                body = body.push(card("The row, whole", whole.push(ui::secondary("Close", Some(Msg::Detail(None))))));
             }
             body.into()
         }

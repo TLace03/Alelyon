@@ -7,17 +7,17 @@ use iced::{Alignment, Element, Length};
 use crate::theme;
 
 use super::hosted::{self, Msg as H};
-use super::{Catalog, Field, Msg, Pick, Ready, State, Surface, lattice_pick};
+use super::{Catalog, Field, Msg, Pick, Ready, State, Surface, Tab, lattice_pick};
 use crate::ui::{chip, dot, input_style, label, mono, note, primary, secondary, strong, working};
 
 type El<'a> = Element<'a, Msg>;
 
-fn group<'a>(title: &'a str, body: El<'a>) -> El<'a> {
-    container(column![crate::ui::subheading(title), body].spacing(10))
-        .padding([14.0, 16.0])
-        .width(Length::Fill)
-        .style(theme::panel)
-        .into()
+fn group<'a>(title: &'a str, help: Option<&'a str>, body: El<'a>) -> El<'a> {
+    let mut head = Row::new().spacing(8).align_y(Alignment::Center).push(crate::ui::subheading(title));
+    if let Some(words) = help {
+        head = head.push(crate::ui::help(words));
+    }
+    container(column![head, body].spacing(10)).padding([12.0, 16.0]).width(Length::Fill).style(theme::panel).into()
 }
 
 fn line<'a>(name: &'a str, value: El<'a>) -> El<'a> {
@@ -48,16 +48,16 @@ fn switches<'a>(pick: &Pick, sinai: Option<&Pick>, lattice: Option<&Pick>, busy:
     r.into()
 }
 
-fn active<'a>(c: &'a Catalog, s: &'a State, lattice_choice: &'a str, mind: bool) -> El<'a> {
+fn active<'a>(c: &'a Catalog, s: &'a State, lattice_choice: &'a str) -> El<'a> {
     let sinai = s.sinai();
     let sinai_line: El<'a> = match &sinai {
-        Some(pick) => column![
-            strong(c.label(pick), 13.5, theme::TEXT),
-            readiness(&c.ready(pick, &s.knocked)),
-            note(if c.sinai_kept.is_none() { "Not chosen yet: this is Local's model, as Lattice uses it." } else { "" }),
-        ]
-        .spacing(3)
-        .into(),
+        Some(pick) => {
+            let mut name = row![strong(c.label(pick), 13.5, theme::TEXT)].spacing(8).align_y(Alignment::Center);
+            if c.sinai_kept.is_none() {
+                name = name.push(note("not chosen yet: Local's model, as Lattice uses it"));
+            }
+            column![name, readiness(&c.ready(pick, &s.knocked))].spacing(3).into()
+        }
         None => label("None chosen yet: use one below.", 13.0, theme::TEXT_FAINT).into(),
     };
     let lattice: El<'a> = match (lattice_pick(lattice_choice, &c.local), lattice_choice) {
@@ -74,15 +74,16 @@ fn active<'a>(c: &'a Catalog, s: &'a State, lattice_choice: &'a str, mind: bool)
         .into(),
         (None, other) => label(format!("Lattice's own choice ({other})."), 13.0, theme::TEXT).into(),
     };
-    let mut col = column![line("Sinai", sinai_line), line("Lattice chat", lattice)].spacing(10);
-    if mind {
-        col = col.push(note(
-            "This build carries Sinai's mind: it answers on Sinai's page. Your model answers there only when you choose it \
-             on the page, and only until Alelyon closes.",
-        ));
-    }
-    col.into()
+    // Sinai and Lattice's chat side by side: what is in use reads in one glance.
+    row![container(line("Sinai", sinai_line)).width(Length::FillPortion(1)), container(line("Lattice chat", lattice)).width(Length::FillPortion(1))]
+        .spacing(16)
+        .align_y(Alignment::Center)
+        .into()
 }
+
+/// What the In use group's "?" says when this build carries Sinai's mind.
+const MIND: &str = "This build carries Sinai's mind: it answers on Sinai's page. Your model answers there only when you choose it \
+                    on the page, and only until Alelyon closes.";
 
 fn ggufs<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice: Option<&Pick>) -> El<'a> {
     let mut col = Column::new().spacing(10);
@@ -104,22 +105,19 @@ fn ggufs<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice: Option
     }
     for g in &c.ggufs {
         let pick = Pick::Gguf(g.name.clone());
+        // One line a file: its name and size, whether it can run, and the switches.
         col = col.push(
             container(
-                column![
-                    row![
-                        strong(g.name.as_str(), 14.0, theme::TEXT),
-                        label(crate::ui::bytes(g.size), 12.0, theme::TEXT_FAINT),
-                        space().width(Length::Fill),
-                        switches(&pick, sinai, lattice, s.working),
-                    ]
-                    .spacing(10)
-                    .align_y(Alignment::Center),
-                    readiness(&c.ready(&pick, &s.knocked)),
+                row![
+                    strong(g.name.as_str(), 13.5, theme::TEXT),
+                    label(crate::ui::bytes(g.size), 12.0, theme::TEXT_FAINT),
+                    container(readiness(&c.ready(&pick, &s.knocked))).width(Length::Fill),
+                    switches(&pick, sinai, lattice, s.working),
                 ]
-                .spacing(6),
+                .spacing(10)
+                .align_y(Alignment::Center),
             )
-            .padding([10.0, 12.0])
+            .padding([6.0, 10.0])
             .width(Length::Fill)
             .style(theme::well),
         );
@@ -140,27 +138,33 @@ fn endpoints<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice: Op
     }
     for e in &c.endpoints {
         let pick = Pick::Endpoint(e.id.clone());
-        let mut facts = column![
+        // Two lines an endpoint: its name, where it runs and the switches; then its address, model, key and whether it
+        // answers.
+        let mut second = row![
+            mono(e.address.as_str(), 12.0, theme::TEXT_DIM),
+            label(format!("model {}", if e.model.is_empty() { "not set" } else { e.model.as_str() }), 12.0, theme::TEXT_FAINT),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center);
+        if e.needs_key {
+            second = second.push(note(match e.key_kept {
+                Some(place) => format!("key kept in {place}, never shown"),
+                None => "takes a key; none is kept".to_string(),
+            }));
+        }
+        let facts = column![
             row![
-                strong(e.label.as_str(), 14.0, theme::TEXT),
+                strong(e.label.as_str(), 13.5, theme::TEXT),
                 chip(if e.local { "on this PC" } else { "off this PC" }, if e.local { theme::POSITIVE } else { theme::GOLD_DIM }),
-                space().width(Length::Fill),
+                container(readiness(&c.ready(&pick, &s.knocked))).width(Length::Fill),
                 switches(&pick, sinai, lattice, s.working),
             ]
             .spacing(10)
             .align_y(Alignment::Center),
-            row![mono(e.address.as_str(), 12.0, theme::TEXT_DIM), label(format!("model {}", if e.model.is_empty() { "not set" } else { e.model.as_str() }), 12.0, theme::TEXT_FAINT)]
-                .spacing(12),
-            readiness(&c.ready(&pick, &s.knocked)),
+            second,
         ]
-        .spacing(6);
-        if e.needs_key {
-            facts = facts.push(note(match e.key_kept {
-                Some(place) => format!("Its key is kept in {place}; it is never shown here."),
-                None => "It takes a key, and none is kept.".to_string(),
-            }));
-        }
-        col = col.push(container(facts).padding([10.0, 12.0]).width(Length::Fill).style(theme::well));
+        .spacing(4);
+        col = col.push(container(facts).padding([6.0, 10.0]).width(Length::Fill).style(theme::well));
     }
     if c.not_listed > 0 {
         col = col.push(note(format!(
@@ -182,10 +186,18 @@ fn endpoints<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice: Op
                 line("Name", input("My server", &form.label, Field::Label).into()),
                 line("Address", input("http://127.0.0.1:8080/v1", &form.address, Field::Address).into()),
                 line("Model", input("the model's name on the server", &form.model, Field::Model).into()),
-                line("Key (optional)", input("only if the server asks for one", &form.key, Field::Key).secure(true).into()),
-                note(
-                    "A key goes to Windows Credential Manager as Alelyon/<its name>; the registry keeps only the name, and \
-                     the key is not shown again. An endpoint off this PC with a key must use https.",
+                line(
+                    "Key (optional)",
+                    row![
+                        input("only if the server asks for one", &form.key, Field::Key).secure(true),
+                        crate::ui::help(
+                            "A key goes to Windows Credential Manager as Alelyon/<its name>; the registry keeps only the name, \
+                             and the key is not shown again. An endpoint off this PC with a key must use https."
+                        ),
+                    ]
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .into(),
                 ),
             ]
             .spacing(8);
@@ -291,18 +303,20 @@ fn hosted_models<'a>(
 
 /// The hosted providers: a card each, connected or how to connect, and its models when browsed.
 fn hosted_group<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice: Option<&Pick>) -> El<'a> {
-    let mut col = Column::new().spacing(10).push(label(
-        "Open models that a service runs for you: connect your account once, then choose a model. Your messages go to \
-         that service when you use one.",
-        13.0,
-        theme::TEXT_DIM,
-    ));
+    let mut col = Column::new().spacing(8);
     let busy = s.hosted.working();
     for p in hosted::providers() {
         let kept = c.hosted.iter().find(|(id, _)| *id == p.id).and_then(|(_, kept)| *kept);
+        // One line a provider: its name (what it is on the "?"), connected or not (where its key is, on hover), and
+        // its models.
+        let state = chip(if kept.is_some() { "connected" } else { "not connected" }, if kept.is_some() { theme::POSITIVE } else { theme::TEXT_FAINT });
         let mut head = row![
-            strong(p.label, 14.0, theme::TEXT),
-            chip(if kept.is_some() { "connected" } else { "not connected" }, if kept.is_some() { theme::POSITIVE } else { theme::TEXT_FAINT }),
+            strong(p.label, 13.5, theme::TEXT),
+            crate::ui::help(p.about),
+            match kept {
+                Some(place) => crate::ui::tip(state, format!("Its key is kept in {place}; it is never shown here.")),
+                None => state,
+            },
             space().width(Length::Fill),
         ]
         .spacing(10)
@@ -312,9 +326,9 @@ fn hosted_group<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice:
             let open = s.hosted.browsing == Some(p.id);
             head = head.push(secondary(if open { "Hide models" } else { "Browse models" }, (!busy).then_some(Msg::Hosted(H::Browse(p.id)))));
         }
-        card = card.push(head).push(label(p.about, 12.5, theme::TEXT_DIM));
+        card = card.push(head);
         match kept {
-            Some(place) => card = card.push(note(format!("Its key is kept in {place}; it is never shown here."))),
+            Some(_) => {}
             None if hosted::signs_in(p) => {
                 card = card.push(if s.hosted.signing_in() {
                     row![
@@ -349,24 +363,25 @@ fn hosted_group<'a>(c: &'a Catalog, s: &'a State, sinai: Option<&Pick>, lattice:
             let chosen = c.endpoint(p.id).map(|e| e.model.as_str()).unwrap_or("");
             card = card.push(hosted_models(s, p.id, kept.is_some(), sinai, lattice, chosen));
         }
-        col = col.push(container(card).padding([10.0, 12.0]).width(Length::Fill).style(theme::well));
+        col = col.push(container(card).padding([8.0, 10.0]).width(Length::Fill).style(theme::well));
     }
     col.into()
 }
 
+/// What the Hosted tab is, on its "?".
+const HOSTED: &str = "Open models that a service runs for you: connect your account once, then choose a model. Your messages go to \
+                      that service when you use one.";
+
 /// The panel: what Sinai and Lattice's chat use now, the GGUF files, the endpoints, and how fresh it is.
 pub fn panel<'a>(s: &'a State, lattice_choice: &'a str, mind: bool, phase: f32) -> El<'a> {
     let header = row![
-        column![
-            strong("Models", 22.0, theme::TEXT),
-            label("Models on this PC and endpoints you can reach. One click makes one the model Sinai or Lattice's chat uses.", 13.0, theme::TEXT_DIM),
-        ]
-        .spacing(4)
-        .width(Length::Fill),
+        strong("Models", 22.0, theme::TEXT),
+        crate::ui::help("Models on this PC and endpoints you can reach. One click makes one the model Sinai or Lattice's chat uses."),
+        space().width(Length::Fill),
         primary("Done", Some(Msg::Close)),
     ]
     .spacing(12)
-    .align_y(Alignment::Start);
+    .align_y(Alignment::Center);
     let mut col = column![header].spacing(12);
     match &s.catalog {
         None => col = col.push(working(phase, "Reading the models folder and the model registry")),
@@ -382,16 +397,34 @@ pub fn panel<'a>(s: &'a State, lattice_choice: &'a str, mind: bool, phase: f32) 
             if s.working {
                 col = col.push(working(phase, "Working on it"));
             }
+            // What is in use stays on top; where a model comes from is a tab each, so one list shows at a time.
+            let connected = c.hosted.iter().filter(|(_, kept)| kept.is_some()).count();
+            let tabs = crate::ui::tabs(&Tab::ALL, s.tab, |t: Tab| match t {
+                Tab::Local => format!("On this PC: GGUF files ({})", c.ggufs.len()),
+                Tab::Hosted => format!("Hosted open-weight models ({connected} connected)"),
+                Tab::Endpoints => format!("Endpoints, OpenAI-compatible ({})", c.endpoints.len()),
+            }, Msg::Tab);
+            let (help, list) = match s.tab {
+                Tab::Local => (
+                    "GGUF files in the models folder, run on this PC by llama.cpp.",
+                    ggufs(c, s, sinai.as_ref(), lattice.as_ref()),
+                ),
+                Tab::Hosted => (HOSTED, hosted_group(c, s, sinai.as_ref(), lattice.as_ref())),
+                Tab::Endpoints => (
+                    "Servers that speak OpenAI's chat API: one you run (llama.cpp's own, LM Studio, vLLM) or a service you use.",
+                    endpoints(c, s, sinai.as_ref(), lattice.as_ref()),
+                ),
+            };
             col = col
-                .push(group("In use", active(c, s, lattice_choice, mind)))
-                .push(group("On this PC: GGUF files", ggufs(c, s, sinai.as_ref(), lattice.as_ref())))
-                .push(group("Hosted open-weight models", hosted_group(c, s, sinai.as_ref(), lattice.as_ref())))
-                .push(group("Endpoints (OpenAI-compatible)", endpoints(c, s, sinai.as_ref(), lattice.as_ref())));
+                .push(group("In use", mind.then_some(MIND), active(c, s, lattice_choice)))
+                .push(row![container(tabs).width(Length::Fill), crate::ui::help(help)].spacing(8).align_y(Alignment::Center))
+                .push(list);
         }
     }
     col = col.push(crate::live::badge(&s.fresh));
     let body = scrollable(container(col).padding(20)).style(theme::scrollbars);
-    container(container(body).max_width(880).max_height(820.0).style(theme::panel)).center(Length::Fill).padding(24).into()
+    // Wider than a reading column: a model's row holds its name, whether it runs and both switches on one line.
+    container(container(body).max_width(1040).max_height(820.0).style(theme::panel)).center(Length::Fill).padding(24).into()
 }
 
 /// The scrim behind the panel: a press on it closes the panel.

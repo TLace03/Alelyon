@@ -916,7 +916,6 @@ fn fix_cut_wide(row: &mut Row) {
 }
 
 /// A row's text, the second halves of wide characters left out and trailing blanks cut.
-#[cfg(test)]
 pub fn row_text(row: &Row) -> String {
     let s: String = row.iter().filter(|c| c.ch != WIDE_TAIL).map(|c| c.ch).collect();
     s.trim_end().to_string()

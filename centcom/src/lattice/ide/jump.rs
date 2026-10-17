@@ -232,8 +232,13 @@ mod tests {
         assert_eq!(all.iter().filter(|e| e.0 == "This chat").count(), 3);
         assert_eq!(all.iter().filter(|e| e.0 == "Lattice").count(), Tab::ALL.len() + Side::ALL.len());
         assert_eq!(all.iter().filter(|e| e.0 == "Fleet").map(|e| e.1).collect::<Vec<_>>(), ["Card and slots", "Worktrees"]);
-        let narrowed = shown(&state, " WORK ");
+        let narrowed = shown(&state, " TREES ");
         assert_eq!(narrowed.iter().map(|e| e.2.clone()).collect::<Vec<_>>(), [Target::Fleet("worktrees")]);
+        assert_eq!(
+            shown(&state, "work").iter().map(|e| e.2.clone()).collect::<Vec<_>>(),
+            [Target::Side(Side::Work), Target::Fleet("worktrees")],
+            "the side bar's Work view, and the fleet's worktrees"
+        );
         assert_eq!(shown(&state, "fleet").len(), 2, "a group's name finds its entries");
         assert!(shown(&state, "nothing like this").is_empty());
     }

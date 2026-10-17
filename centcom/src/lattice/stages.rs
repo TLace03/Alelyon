@@ -157,7 +157,7 @@ mod tests {
     }
 
     fn steps(c: &mut Conversation, items: Vec<Item>) {
-        c.activity.push(Activity { turn: "t".into(), label: String::new(), local: true, items, stage: None, status: None, started: None });
+        c.activity.push(Activity { turn: "t".into(), label: String::new(), local: true, items, stage: None, status: None, started: None, ended: None });
     }
 
     fn marks(p: &Progress) -> Vec<Mark> {
@@ -198,9 +198,9 @@ mod tests {
     fn the_task_list_says_how_far_along_and_what_is_in_progress() {
         let mut c = chat();
         c.todos = vec![
-            TodoItem { content: "Read the sorter".into(), status: TodoStatus::Done },
-            TodoItem { content: "Write the test".into(), status: TodoStatus::InProgress },
-            TodoItem { content: "Fix it".into(), status: TodoStatus::Pending },
+            TodoItem { content: "Read the sorter".into(), status: TodoStatus::Done, decision: None, chosen: None },
+            TodoItem { content: "Write the test".into(), status: TodoStatus::InProgress, decision: None, chosen: None },
+            TodoItem { content: "Fix it".into(), status: TodoStatus::Pending, decision: None, chosen: None },
         ];
         let p = progress(&c, None);
         assert_eq!(p.tasks, Some(Tasks { done: 1, total: 3, current: Some("Write the test".into()) }));

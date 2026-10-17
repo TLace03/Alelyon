@@ -396,6 +396,7 @@ dependencies = [
  "lattice-app",
  "lattice-core",
  "lattice-protocol",
+ "lattice-sys",
  "png",
  "qrcode",
  "rusqlite",
@@ -407,6 +408,7 @@ dependencies = [
  "sinai-face",
  "tokio",
  "tungstenite",
+ "uuid",
  "windows 0.61.3",
 ]
 

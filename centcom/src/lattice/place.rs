@@ -31,6 +31,7 @@ impl Pending {
 /// A side view's name in the session (its title carries its shortcut, which may change).
 fn side_name(side: Side) -> &'static str {
     match side {
+        Side::Work => "work",
         Side::Explorer => "explorer",
         Side::Search => "search",
         Side::Chats => "chats",
@@ -67,14 +68,26 @@ impl State {
             tab: Some(tab_name(self.tab).to_string()),
             // the folder on show, or the one opening
             folder: (ide.folder.is_some() || ide.opening).then(|| ide.folder_path.trim().to_string()).filter(|p| !p.is_empty()),
-            files: ide.tabs.iter().filter(|t| matches!(t.kind, super::ide::TabKind::File { .. })).filter_map(|t| t.path().map(str::to_owned)).collect(),
-            active: ide.active_tab().filter(|t| matches!(t.kind, super::ide::TabKind::File { .. })).and_then(|t| t.path().map(str::to_owned)),
+            // the reader's own editor's files: an agent's editor goes with its work
+            files: ide
+                .tabs
+                .iter()
+                .filter(|t| t.editor == super::ide::YOURS && matches!(t.kind, super::ide::TabKind::File { .. }))
+                .filter_map(|t| t.path().map(str::to_owned))
+                .collect(),
+            active: ide
+                .active_tab()
+                .filter(|t| t.editor == super::ide::YOURS && matches!(t.kind, super::ide::TabKind::File { .. }))
+                .and_then(|t| t.path().map(str::to_owned)),
             side: Some(side_name(ide.side).to_string()),
             side_open: Some(ide.side_open),
             panel_open: Some(ide.panel_open),
             side_width: Some(ide.side_width),
             agent_width: Some(ide.agent_width),
             panel_height: Some(ide.panel_height),
+            editor_open: Some(ide.editor_open),
+            editor_width: Some(ide.editor_width),
+            follow: Some(ide.follow),
             chat: self.open.as_ref().map(|c| c.id().to_string()),
             model: Some(self.choice.clone()).filter(|c| !c.is_empty() && c != "auto"),
             mode: Some(mode_name(self.mode).to_string()),
@@ -119,6 +132,15 @@ impl State {
         if let Some(h) = place.panel_height {
             ide.panel_height = h.clamp(90.0, 900.0);
         }
+        if let Some(open) = place.editor_open {
+            ide.editor_open = open;
+        }
+        if let Some(w) = place.editor_width {
+            ide.editor_width = w.clamp(super::ide::EDITOR_RANGE.0, super::ide::EDITOR_RANGE.1);
+        }
+        if let Some(follow) = place.follow {
+            ide.follow = follow;
+        }
         if let Some(model) = place.model {
             // checked against the models once they are listed (`Msg::Choices` falls back when it is gone)
             self.choice = model;
@@ -159,7 +181,10 @@ impl State {
         let active = p.active.take();
         p.files_of = None;
         self.restoring.take_if(|p| p.done());
+        // the files coming back do not bring the editor with them: it shows as it was left
+        let shown = self.ide.editor_open;
         let tasks: Vec<_> = files.into_iter().map(|f| self.open_file(f)).collect();
+        self.ide.editor_open = shown;
         if let Some(id) = active.and_then(|a| self.ide.file_tab(&a)) {
             self.ide.active = Some(id);
         }
@@ -207,6 +232,9 @@ mod tests {
             side_width: Some(5000.0),
             agent_width: Some(400.0),
             panel_height: Some(200.0),
+            editor_open: Some(true),
+            editor_width: Some(9000.0),
+            follow: Some(false),
             chat: Some("c-1".into()),
             model: Some("hosted:x".into()),
             mode: Some("agent".into()),
@@ -215,6 +243,8 @@ mod tests {
         assert_eq!(state.tab, Tab::Models);
         assert_eq!((state.ide.side, state.ide.side_open, state.ide.panel_open), (Side::Search, false, true));
         assert_eq!(state.ide.side_width, 900.0, "kept within reason");
+        assert_eq!((state.ide.editor_open, state.ide.follow), (true, false), "the editor beside the chat comes back as left");
+        assert_eq!(state.ide.editor_width, crate::lattice::ide::EDITOR_RANGE.1, "its width kept within reason");
         assert_eq!((state.choice.as_str(), state.mode), ("hosted:x", Mode::Agent));
         // Nothing has opened yet, and the place still names all of it.
         let now = state.session_place();

@@ -14,7 +14,7 @@ use crate::theme::{self, fonts};
 
 use crate::app::{App, FORMATS, Link, Message, Tab, clock};
 use crate::capability::Capability;
-use crate::catalogue::{Feature, Here, Section};
+use crate::catalogue::{Here, Section};
 use crate::dock;
 use crate::ears;
 use crate::grants;
@@ -34,20 +34,93 @@ const RAIL_W: f32 = 84.0;
 /// features are in the main window: the buttons small in its top right corner, over the page, and a strip along its
 /// top, under the page, whose every press the page does not take drags it (as do the rail's mark and empty space);
 /// on the sign-in screen they are a bar, transparent over the backdrop.
-pub fn view(app: &App) -> El<'_> {
+pub fn view(app: &App, window: iced::window::Id) -> El<'_> {
     crate::frame_stats::view();
+    if let Some(p) = app.windows.get(window) {
+        return popout(app, p);
+    }
     let framed: El<'_> = if app.signin.through() {
+        // the pop-out button, while another page would stay in the main window (`windows`)
+        let lead = app.windows.instead_of(app.section).map(|_| crate::chrome::Act::PopOut);
         stack![
             crate::chrome::under(Message::Chrome),
             content(app),
-            crate::chrome::corner(app.maximised, Message::Chrome),
+            crate::chrome::corner(lead, app.maximised, Message::Chrome),
         ]
         .into()
     } else {
         let bar = crate::chrome::bar(false, app.maximised, Message::Chrome);
         stack![content(app), column![bar]].into()
     };
-    if app.maximised { framed } else { stack![framed, crate::chrome::edges(Message::Chrome)].into() }
+    let framed = if app.maximised { framed } else { stack![framed, crate::chrome::edges(Message::Chrome)].into() };
+    // a place on the rail or a tab dragged in this window: what letting go does, by the pointer
+    match app.windows.drag.as_ref().filter(|d| Some(d.window) == app.window_id).and_then(|d| crate::windows::ghost(d, app.what_title(d.what))) {
+        Some(ghost) => stack![framed, ghost].into(),
+        None => framed,
+    }
+}
+
+/// A page in a window of its own (`windows`): its bar (the page's name, Back to the main window, the window's
+/// buttons), then the page as the main window shows it, with a panel the page opened over it. Every message from it is
+/// handled as from this window (`Message::In`).
+fn popout<'a>(app: &'a App, p: &'a crate::windows::Popout) -> El<'a> {
+    let id = p.id;
+    let act = move |a| Message::Windows(crate::windows::Msg::Chrome(id, a));
+    let line = container(space().width(Length::Fill).height(1)).style(theme::line);
+    let body = match p.part {
+        Some(part) => part_column(app, part, p.size.width),
+        None => page_column(app, p.section, 12.0),
+    };
+    let mut framed: El<'a> = column![crate::windows::bar(p, app.what_title(p.what()), act), line, body].into();
+    if app.hovering && app.windows.hovered == Some(id) {
+        framed = stack![framed, drop_overlay(p.section)].into();
+    } else if app.windows.panel_in == Some(id)
+        && let Some([scrim, panel]) = page_panel(app)
+    {
+        framed = stack![framed, scrim, panel].into();
+    }
+    if !p.maximised {
+        framed = stack![framed, crate::chrome::edges(act)].into();
+    }
+    // a tab dragged off a bar in this window: what letting go does, by the pointer
+    if let Some(ghost) = app.windows.drag.as_ref().filter(|d| d.window == id).and_then(|d| crate::windows::ghost(d, app.what_title(d.what))) {
+        framed = stack![framed, ghost].into();
+    }
+    framed.map(move |m| Message::In(id, Box::new(m)))
+}
+
+/// A page's tab in a window of its own (`windows`): what is listening and the notice above it, then the tab.
+fn part_column(app: &App, part: crate::windows::Part, width: f32) -> Column<'_, Message> {
+    let mut body = Column::new().width(Length::Fill).height(Length::Fill);
+    if let Some(bar) = on_air_bar(app) {
+        body = body.push(bar);
+    }
+    if let Some(bar) = notice_bar(app) {
+        body = body.push(bar);
+    }
+    let tab: El<'_> = match part {
+        crate::windows::Part::Lattice(tab) => crate::lattice::view_tab(&app.lattice, tab, app.phase, width).map(Message::Lattice),
+        // the speech engine's card above the tab, as on the page: captions and dictation need it running
+        crate::windows::Part::Words(tab) => scrollable(
+            container(Column::new().spacing(20).push(engine_card(app)).push(transcription_tab(app, tab)))
+                .padding([20.0, 28.0])
+                .max_width(1640.0)
+                .width(Length::Fill),
+        )
+        .style(theme::scrollbars)
+        .height(Length::Fill)
+        .into(),
+        crate::windows::Part::Compute(tab) => scrollable(
+            container(crate::compute::view_tab(&app.compute, tab, app.phase).map(Message::Compute))
+                .padding([20.0, 28.0])
+                .max_width(1640.0)
+                .width(Length::Fill),
+        )
+        .style(theme::scrollbars)
+        .height(Length::Fill)
+        .into(),
+    };
+    body.push(container(tab).width(Length::Fill).height(Length::Fill))
 }
 
 fn content(app: &App) -> El<'_> {
@@ -68,50 +141,7 @@ fn under_palette(app: &App) -> El<'_> {
     if !app.signin.through() {
         return crate::signin::view(&app.signin, app.mark.as_ref(), spinner(app.phase, 22.0)).map(Message::SignIn);
     }
-    let page = match app.section {
-        Section::Overview => overview(app),
-        Section::Sinai => sinai(app),
-        Section::Transcription => transcription(app),
-        Section::Trust => trust_page(app),
-        // the fleet reads the source repository's own stores, and its page is a plug-in of the builds that carry it:
-        // a build without it, or a copy not run from a checkout, says so, calmly
-        Section::Fleet => match &app.fleet {
-            Some(fleet) if app.can(Capability::CheckoutTools) => fleet.view(app.phase).map(Message::Fleet),
-            Some(_) => absent_page(Section::Fleet, "Fleet", Capability::CheckoutTools),
-            None => Column::new()
-                .spacing(18)
-                .push(heading("Fleet", Section::Fleet.purpose()))
-                .push(ui::absent(crate::capability::FLEET_ABSENT))
-                .into(),
-        },
-        Section::Data => crate::data::view(&app.data, app.phase).map(Message::Data),
-        Section::Research => crate::research::view(&app.research, app.phase).map(Message::Research),
-        Section::Compute => crate::compute::view(&app.compute, app.phase).map(Message::Compute),
-        Section::Lattice => crate::lattice::view(&app.lattice, app.phase).map(Message::Lattice),
-        // a hosted feature: signed in, the page; signed out (or offline), what it is and how to have it
-        Section::Pages if app.can(Capability::Pages) && app.pages.active() => crate::pages::view(&app.pages, app.phase).map(Message::Pages),
-        Section::Pages => absent_page(Section::Pages, "Pages", Capability::Pages),
-        Section::Account => account_page(app),
-    };
-    let mut body = Column::new().width(Length::Fill).height(Length::Fill);
-    if let Some(bar) = on_air_bar(app) {
-        body = body.push(bar);
-    }
-    if let Some(bar) = notice_bar(app) {
-        body = body.push(bar);
-    }
-    body = body.push(if app.section == Section::Lattice {
-        // Lattice's page is its IDE and tabs: it fills the window to its edges and keeps its own margins.
-        El::from(container(page).width(Length::Fill).height(Length::Fill))
-    } else if app.section == Section::Sinai {
-        // Sinai's page is its docks: they fill the window and scroll inside themselves, from below the window's buttons.
-        El::from(container(page).padding(iced::padding::top(32).bottom(20).left(24).right(24)).width(Length::Fill).height(Length::Fill))
-    } else {
-        scrollable(container(page).padding([24.0, 32.0]).max_width(1180.0).width(Length::Fill))
-            .style(theme::scrollbars)
-            .height(Length::Fill)
-            .into()
-    });
+    let mut body = page_column(app, app.section, 32.0);
     // the friends bar along the bottom of every page, while signed in (owner, 2026-10-10)
     if app.social.active() && app.can(Capability::Friends) {
         body = body.push(crate::social::bar(&app.social).map(Message::Social));
@@ -119,37 +149,13 @@ fn under_palette(app: &App) -> El<'_> {
     // the rail lies on the page's own black, with no fill of its own, so the window reads as one surface from its
     // title bar down; the gold hairline stays between it and the page (2026-10-09)
     let main = row![rail(app), container(space().width(1)).height(Length::Fill).style(theme::line), body];
-    if app.models.open {
-        // the Models panel, over the window; a press beside it closes it
-        let panel = crate::models::view::panel(&app.models, &app.lattice.choice, app.can(Capability::SinaiMind), app.phase).map(Message::Models);
-        return stack![main, crate::models::view::scrim().map(Message::Models), panel].into();
-    }
-    if let Some(part) = app.parts.open {
-        // a part's picker, over the window; a press beside it closes it
-        let mind_up = probe::SERVICES.iter().position(|s| s.port == 8179).and_then(|i| app.probes.get(i)).map(|r| *r == Reading::Up);
-        let panel = crate::sinai_parts::view::panel(
-            &app.parts,
-            app.part_card(part),
-            app.part_current(part),
-            app.models.catalog.as_ref(),
-            &app.models.knocked,
-            app.can(Capability::SinaiMind),
-            mind_up,
-            app.phase,
-        )
-        .map(Message::Parts);
-        return stack![main, crate::sinai_parts::view::scrim().map(Message::Parts), panel].into();
-    }
-    if app.auto.open {
-        // Auto configure's proposal or setup, over the window; a press beside it closes it (downloads go on)
-        let scrim = button(space().width(Length::Fill).height(Length::Fill))
-            .padding(0)
-            .on_press(Message::Auto(crate::sinai_parts::auto::Msg::Close))
-            .style(|_, _| button::Style { background: Some(Background::Color(Color { a: 0.55, ..Color::BLACK })), ..button::Style::default() });
-        let panel = iced::widget::opaque(crate::sinai_parts::auto::view::panel(&app.auto, app.phase).map(Message::Auto));
+    // a panel a page opened, over the main window unless the page is in a window of its own (`windows`)
+    if app.windows.panel_in.is_none()
+        && let Some([scrim, panel]) = page_panel(app)
+    {
         return stack![main, scrim, panel].into();
     }
-    if app.hovering {
+    if app.hovering && app.windows.hovered.is_none() {
         stack![main, drop_overlay(app.section)].into()
     } else if app.signin.settings.is_some() {
         // Settings, over the page, which stays on show (and live) behind the scrim; a press on the scrim closes it.
@@ -185,6 +191,95 @@ fn under_palette(app: &App) -> El<'_> {
     } else {
         main.into()
     }
+}
+
+/// `section`'s page as a window shows it: what is listening and the notice above it, then the page. `top` is the room
+/// above Sinai's docks: for the main window's buttons over the page, or below a page's window's own bar.
+fn page_column(app: &App, section: Section, top: f32) -> Column<'_, Message> {
+    let page = match section {
+        Section::Overview => overview(app),
+        Section::Sinai => sinai(app),
+        Section::Transcription => transcription(app),
+        Section::Trust => trust_page(app),
+        // the fleet reads the source repository's own stores, and its page is a plug-in of the builds that carry it:
+        // a build without it, or a copy not run from a checkout, says so, calmly
+        Section::Fleet => match &app.fleet {
+            Some(fleet) if app.can(Capability::CheckoutTools) => fleet.view(app.phase).map(Message::Fleet),
+            Some(_) => absent_page(Section::Fleet, "Fleet", Capability::CheckoutTools),
+            None => Column::new()
+                .spacing(18)
+                .push(heading("Fleet", Section::Fleet.purpose()))
+                .push(ui::absent(crate::capability::FLEET_ABSENT))
+                .into(),
+        },
+        Section::Data => crate::data::view(&app.data, app.phase).map(Message::Data),
+        Section::Research => crate::research::view(&app.research, app.phase).map(Message::Research),
+        Section::Compute => crate::compute::view(&app.compute, app.phase).map(Message::Compute),
+        Section::Lattice => crate::lattice::view(&app.lattice, app.phase, app.width_for(Section::Lattice)).map(Message::Lattice),
+        // a hosted feature: signed in, the page; signed out (or offline), what it is and how to have it
+        Section::Pages if app.can(Capability::Pages) && app.pages.active() => crate::pages::view(&app.pages, app.phase).map(Message::Pages),
+        Section::Pages => absent_page(Section::Pages, "Pages", Capability::Pages),
+        Section::Account => account_page(app),
+    };
+    let mut body = Column::new().width(Length::Fill).height(Length::Fill);
+    if let Some(bar) = on_air_bar(app) {
+        body = body.push(bar);
+    }
+    if let Some(bar) = notice_bar(app) {
+        body = body.push(bar);
+    }
+    // Pages draws its own columns on its own colours (`pages::look`), each scrolling inside itself, as the social sites
+    // lay theirs out (2026-10-15).
+    let pages_own = section == Section::Pages && app.can(Capability::Pages) && app.pages.active();
+    body.push(if section == Section::Lattice || pages_own {
+        // Lattice's page is its IDE and tabs: it fills the window to its edges and keeps its own margins.
+        El::from(container(page).width(Length::Fill).height(Length::Fill))
+    } else if section == Section::Sinai {
+        // Sinai's page is its docks: they fill the window and scroll inside themselves, from below the window's buttons.
+        El::from(container(page).padding(iced::padding::top(top).bottom(20).left(24).right(24)).width(Length::Fill).height(Length::Fill))
+    } else {
+        // Wide enough for two or three columns (`ui::columns_for`); a line of prose still wraps inside its column.
+        scrollable(container(page).padding([20.0, 28.0]).max_width(1640.0).width(Length::Fill)).on_scroll(Message::PageScrolled)
+            .style(theme::scrollbars)
+            .height(Length::Fill)
+            .into()
+    })
+}
+
+/// The panel a page opened (the Models panel, a part's picker, Auto configure), with the scrim beside it whose press
+/// closes it; the window it lies over is the one the page opened it in (`windows`).
+fn page_panel(app: &App) -> Option<[El<'_>; 2]> {
+    if app.models.open {
+        // the Models panel, over the window; a press beside it closes it
+        let panel = crate::models::view::panel(&app.models, &app.lattice.choice, app.can(Capability::SinaiMind), app.phase).map(Message::Models);
+        return Some([crate::models::view::scrim().map(Message::Models), panel]);
+    }
+    if let Some(part) = app.parts.open {
+        // a part's picker, over the window; a press beside it closes it
+        let mind_up = probe::SERVICES.iter().position(|s| s.port == 8179).and_then(|i| app.probes.get(i)).map(|r| *r == Reading::Up);
+        let panel = crate::sinai_parts::view::panel(
+            &app.parts,
+            app.part_card(part),
+            app.part_current(part),
+            app.models.catalog.as_ref(),
+            &app.models.knocked,
+            app.can(Capability::SinaiMind),
+            mind_up,
+            app.phase,
+        )
+        .map(Message::Parts);
+        return Some([crate::sinai_parts::view::scrim().map(Message::Parts), panel]);
+    }
+    if app.auto.open {
+        // Auto configure's proposal or setup, over the window; a press beside it closes it (downloads go on)
+        let scrim = button(space().width(Length::Fill).height(Length::Fill))
+            .padding(0)
+            .on_press(Message::Auto(crate::sinai_parts::auto::Msg::Close))
+            .style(|_, _| button::Style { background: Some(Background::Color(Color { a: 0.55, ..Color::BLACK })), ..button::Style::default() });
+        let panel = iced::widget::opaque(crate::sinai_parts::auto::view::panel(&app.auto, app.phase).map(Message::Auto));
+        return Some([scrim.into(), panel]);
+    }
+    None
 }
 
 // ------------------------------------------------------------------- text
@@ -255,8 +350,18 @@ fn rail(app: &App) -> El<'_> {
     ));
     for section in Section::ALL {
         let selected = app.section == section;
-        let color = if selected { theme::GOLD } else { theme::TEXT_DIM };
+        let out = app.windows.is_out(section);
+        let color = if selected {
+            theme::GOLD
+        } else if out {
+            theme::TEXT_FAINT
+        } else {
+            theme::TEXT_DIM
+        };
         let mut icon = Row::new().spacing(4).align_y(Alignment::Center).push(label(section.glyph(), 18.0, color));
+        if out {
+            icon = icon.push(label(crate::windows::OUT_MARK, 11.0, theme::GOLD));
+        }
         let live = match section {
             Section::Transcription => mic.is_some() || pc.is_some(),
             Section::Sinai => app.sinai_on_air().is_some(),
@@ -267,11 +372,17 @@ fn rail(app: &App) -> El<'_> {
         }
         let place = Section::ALL.iter().position(|s| *s == section).unwrap_or(0);
         let focused = app.rail_focus == Some(place);
-        let item = button(column![icon, label(section.short(), 10.5, color)].spacing(4).align_x(Alignment::Center).width(Length::Fill))
-            .width(Length::Fill)
-            .padding([9.0, 2.0])
-            .on_press(Message::Go(section))
-            .style(theme::rail_button(selected));
+        // the pointer over the place, followed, so a press on it can be dragged out of the window (`windows`)
+        let face = iced::widget::mouse_area(
+            container(column![icon, label(section.short(), 10.5, color)].spacing(4).align_x(Alignment::Center).width(Length::Fill))
+                .padding([9.0, 2.0])
+                .width(Length::Fill),
+        )
+        .on_enter(Message::Windows(crate::windows::Msg::Hover(crate::windows::What::Page(section), true)))
+        .on_exit(Message::Windows(crate::windows::Msg::Hover(crate::windows::What::Page(section), false)))
+        .on_middle_press(Message::Windows(crate::windows::Msg::PopOut(section)));
+        let item = button(face).width(Length::Fill).padding(0).on_press(Message::Go(section));
+        let item = if out { item.style(crate::windows::rail_out_style) } else { item.style(theme::rail_button(selected)) };
         // the keyboard's place on the rail (F6), ringed in gold
         let item: El<'_> = if focused {
             container(item).padding(1).style(theme::focus_ring).into()
@@ -279,7 +390,12 @@ fn rail(app: &App) -> El<'_> {
             item.into()
         };
         let keys = if place < 9 { format!(" \u{00B7} Ctrl+{}", place + 1) } else { String::new() };
-        items = items.push(ui::tip(item, format!("{}{keys}\n{}", section.title(), section.purpose())));
+        let words = if out {
+            format!("{}{keys}\n{}\nIn a window of its own: a press brings it forward.", section.title(), section.purpose())
+        } else {
+            format!("{}{keys}\n{}\nDrag it off the rail, or middle-click it, for a window of its own.", section.title(), section.purpose())
+        };
+        items = items.push(ui::tip(item, words));
     }
     // The rail's empty space drags the window too.
     items = items.push(crate::chrome::drag(space().width(Length::Fill).height(Length::Fill), Message::Chrome));
@@ -363,6 +479,24 @@ fn on_air_bar(app: &App) -> Option<El<'_>> {
 }
 
 fn notice_bar(app: &App) -> Option<El<'_>> {
+    if let Some(asked) = app.bridge_asking.as_deref() {
+        return Some(
+            container(
+                row![
+                    label(format!("Your agent asks to act in this window ({asked}). Allow it until Alelyon closes?"), 13.0, theme::TEXT),
+                    space().width(Length::Fill),
+                    ghost("Not now", Message::BridgeAllow(false)),
+                    ghost("Allow", Message::BridgeAllow(true)),
+                ]
+                .spacing(10)
+                .align_y(Alignment::Center),
+            )
+            .padding([8.0, 16.0])
+            .width(Length::Fill)
+            .style(theme::notice(theme::GOLD))
+            .into(),
+        );
+    }
     let words = app.notice.as_deref()?;
     Some(
         container(
@@ -400,30 +534,25 @@ fn drop_overlay<'a>(section: Section) -> El<'a> {
 // ------------------------------------------------------------------- overview
 
 fn overview(app: &App) -> El<'_> {
-    let mut page = Column::new().spacing(22).push(heading("Alelyon", Section::Overview.purpose()));
+    let mut page = Column::new().spacing(18).push(heading("Alelyon", Section::Overview.purpose()));
     page = page.push(services(app, "Running on this computer", |_| true));
+    // The sections are the rail's own: here only how far each has come, one chip each, its purpose on hover.
     page = page.push(subheading("Sections"));
+    let mut chips = Row::new().spacing(8);
     for section in Section::ALL.into_iter().filter(|s| *s != Section::Overview) {
         let features = section.features_with(&app.plugin_features);
         let total = features.len();
         let here = features.iter().filter(|f| f.here() != Here::Later).count();
-        let status = if here == 0 { chip(format!("{total} to come"), theme::TEXT_FAINT) } else { chip(format!("{here} of {total} here"), theme::POSITIVE) };
-        page = page.push(
-            button(
-                row![
-                    container(label(section.glyph(), 20.0, theme::GOLD)).width(32),
-                    column![strong(section.title(), 15.0, theme::TEXT), label(section.purpose(), 13.0, theme::TEXT_DIM)].spacing(3).width(Length::Fill),
-                    status,
-                ]
-                .spacing(12)
-                .align_y(Alignment::Center),
-            )
-            .width(Length::Fill)
-            .padding([12.0, 14.0])
-            .on_press(Message::Go(section))
-            .style(theme::list_row(false)),
-        );
+        let status = if here == 0 { label(format!("{total} to come"), 11.5, theme::TEXT_FAINT) } else { label(format!("{here}/{total}"), 11.5, theme::POSITIVE) };
+        chips = chips.push(ui::tip(
+            button(row![label(section.glyph(), 14.0, theme::GOLD), label(section.title(), 13.0, theme::TEXT), status].spacing(8).align_y(Alignment::Center))
+                .padding([6.0, 12.0])
+                .on_press(Message::Go(section))
+                .style(theme::list_row(false)),
+            section.purpose(),
+        ));
     }
+    page = page.push(chips.wrap().vertical_spacing(8));
     page.into()
 }
 
@@ -498,23 +627,8 @@ fn services<'a>(app: &'a App, title: &'a str, keep: impl Fn(&probe::Service) -> 
         .style(tile_style)
         .into(),
     );
-    let mut grid = Column::new().spacing(12);
-    let mut tiles = tiles.into_iter();
-    loop {
-        let three: Vec<El<'a>> = tiles.by_ref().take(3).collect();
-        if three.is_empty() {
-            break;
-        }
-        let mut line = Row::new().spacing(12);
-        let n = three.len();
-        for tile in three {
-            line = line.push(tile);
-        }
-        for _ in n..3 {
-            line = line.push(space().width(Length::FillPortion(1)));
-        }
-        grid = grid.push(line);
-    }
+    // one more column than a page's cards: a tile is small
+    let grid = ui::grid(tiles, ui::columns_for(app.width_for(Section::Overview)) + 1, 12.0);
     // No Check again: the services are watched while this page shows them, and a change is on show when it happens.
     let live = crate::live::badge(&app.services_fresh);
     column![row![subheading(title), space().width(Length::Fill), live].align_y(Alignment::Center), grid].spacing(12).into()
@@ -526,22 +640,43 @@ fn transcription(app: &App) -> El<'_> {
     let mut page = Column::new().spacing(20).push(heading("Transcription", Section::Transcription.purpose())).push(engine_card(app));
     let mut tabs = Row::new().spacing(8);
     for tab in Tab::ALL {
-        tabs = tabs.push(
-            button(label(tab.title(), 13.0, if app.tab == tab { theme::GOLD } else { theme::TEXT_DIM }))
-                .padding([7.0, 14.0])
-                .on_press(Message::Tab(tab))
-                .style(theme::segment_button(app.tab == tab)),
-        );
+        use crate::windows::{Msg as W, Part, What};
+        // a tab in a window of its own is marked, and a press on it brings that window forward (`windows`)
+        let out = app.words_out.contains(&tab);
+        let on = app.tab == tab && !out;
+        let color = if on {
+            theme::GOLD
+        } else if out {
+            theme::TEXT_FAINT
+        } else {
+            theme::TEXT_DIM
+        };
+        let mut words = Row::new().spacing(5).align_y(Alignment::Center).push(label(tab.title(), 13.0, color));
+        if out {
+            words = words.push(label(crate::windows::OUT_MARK, 11.0, theme::GOLD));
+        }
+        // the pointer over the tab, followed, so a press on it can be dragged off the bar to a window of its own
+        let what = What::Part(Part::Words(tab));
+        let face = iced::widget::mouse_area(container(words).padding([7.0, 14.0]))
+            .on_enter(Message::Windows(W::Hover(what, true)))
+            .on_exit(Message::Windows(W::Hover(what, false)))
+            .on_middle_press(Message::Windows(W::PopOutPart(Part::Words(tab))));
+        let press = if out { Message::Windows(W::RaisePart(Part::Words(tab))) } else { Message::Tab(tab) };
+        tabs = tabs.push(button(face).padding(0).on_press(press).style(theme::segment_button(on)));
     }
     page = page.push(tabs);
-    page.push(match app.tab {
+    page.push(transcription_tab(app, app.tab)).into()
+}
+
+/// One of Transcription's tabs, on its page or in a window of its own (`windows`).
+fn transcription_tab(app: &App, tab: Tab) -> El<'_> {
+    match tab {
         Tab::Captions => captions_tab(app),
         Tab::Dictation => dictation_tab(app),
         Tab::Pc => pc_tab(app),
         Tab::Files => files_tab(app),
         Tab::Library => library_tab(app),
-    })
-    .into()
+    }
 }
 
 fn engine_card(app: &App) -> El<'_> {
@@ -799,25 +934,24 @@ fn library_tab(app: &App) -> El<'_> {
     } else if shown.is_empty() && !app.library.is_empty() {
         page = page.push(label("No kept transcript has every word of that search.", 13.5, theme::TEXT_FAINT));
     }
+    // One line a transcript: its kind, name and the start of its words (the rest on hover), then its buttons; a list
+    // of rows reads at a glance where a card each did not (UX-PRINCIPLES B1).
     for entry in shown {
+        let preview = entry.preview();
         page = page.push(
             container(
-                column![
-                    row![
-                        chip(entry.kind.clone(), theme::GOLD),
-                        strong(entry.name.as_str(), 14.0, theme::TEXT),
-                        space().width(Length::Fill),
-                        secondary("Copy", Some(Message::Copy(entry.text.clone()))),
-                        secondary("Show in folder", Some(Message::OpenFolder(entry.path.display().to_string()))),
-                        secondary("Delete", Some(Message::LibraryDelete(entry.path.clone()))),
-                    ]
-                    .spacing(8)
-                    .align_y(Alignment::Center),
-                    label(entry.preview(), 13.0, theme::TEXT_DIM),
+                row![
+                    chip(entry.kind.clone(), theme::GOLD),
+                    container(strong(ui::cut(entry.name.as_str(), 40), 13.5, theme::TEXT)).width(Length::FillPortion(2)),
+                    container(ui::tip(label(ui::cut(&preview, 90), 12.5, theme::TEXT_DIM), preview)).width(Length::FillPortion(5)),
+                    secondary("Copy", Some(Message::Copy(entry.text.clone()))),
+                    secondary("Show in folder", Some(Message::OpenFolder(entry.path.display().to_string()))),
+                    secondary("Delete", Some(Message::LibraryDelete(entry.path.clone()))),
                 ]
-                .spacing(8),
+                .spacing(8)
+                .align_y(Alignment::Center),
             )
-            .padding(14)
+            .padding([6.0, 12.0])
             .width(Length::Fill)
             .style(theme::panel),
         );
@@ -894,7 +1028,27 @@ fn sinai(app: &App) -> El<'_> {
     }
     // Auto configure's dials and button, then the one-model switch where the build runs Sinai's own loop and offers
     // one, between the loop's card and the docks
-    let mut col = column![loop_card(app), crate::sinai_parts::auto::view::strip(&app.auto, app.phase).map(Message::Auto)];
+    // Auto configure is one line while closed (its dials, tier and the month's spending); it opens on a press, and
+    // by itself while it gathers or has a suggestion (UX-PRINCIPLES B1).
+    let auto = &app.auto;
+    let auto_open = app.is_open("sinai.auto") || auto.gathering || auto.suggestion.is_some();
+    let auto_line = ui::disclosure(
+        "Auto configure",
+        label(
+            format!(
+                "effort {} \u{b7} {} \u{b7} {}",
+                auto.settings.effort.title(),
+                auto.settings.budget.title(),
+                crate::sinai_parts::auto::view::spending_line(auto)
+            ),
+            12.0,
+            theme::TEXT_DIM,
+        ),
+        auto_open,
+        Message::Disclose("sinai.auto"),
+        crate::sinai_parts::auto::view::strip(auto, app.phase).map(Message::Auto),
+    );
+    let mut col = column![loop_card(app), auto_line];
     if app.can(Capability::SinaiMind) && app.parts.offers_one_model() {
         col = col.push(crate::sinai_parts::view::one_model_strip(&app.parts, app.phase).map(Message::Parts));
     }
@@ -1068,19 +1222,77 @@ fn machine(app: &App) -> El<'_> {
     .spacing(6)
     .align_y(Alignment::Center);
     list = list.push(machine_part(app, voice, crate::sinai_parts::Part::Voice));
-    list = list.push(listening(app));
-    // in the Angel window's order: what it is doing and measured, its memory map, then its memory
-    list = list.push(observatory(app));
-    list = list.push(eyes(app));
-    list = list.push(voice_enrolment(app));
-    list = list.push(map_view(app));
-    list = list.push(memory(app));
-    list = list.push(label(
-        "Erasing moves to the trash, where it can be restored; deleting for good asks twice. Nothing acts unless you press.",
-        12.0,
-        theme::TEXT_FAINT,
+    // The parts above are the glance; each part below opens on a press, its state on one line while closed
+    // (UX-PRINCIPLES B1). In the Angel window's order: how it listens, what it is doing and measured, its eyes, its
+    // voiceprint, its memory map, then its memory.
+    let not_running = app.sinai_up != Some(true);
+    list = list.push(dock_part(app, "sinai.listening", "How Sinai listens", listening_summary(app), listening(app)));
+    list = list.push(dock_part(app, "sinai.observatory", "The observatory", observatory_summary(app), observatory(app)));
+    list = list.push(dock_part(app, "sinai.eyes", "Its eyes", if not_running { "not known".into() } else { app.conversation.sight.as_ref().map(|s| ui::cut(&s.words(), 48)).unwrap_or("not said yet".into()) }, eyes(app)));
+    list = list.push(dock_part(app, "sinai.voiceprint", "Voice enrolment", voiceprint_summary(app), voice_enrolment(app)));
+    if app.conversation.memory.is_some() {
+        list = list.push(dock_part(app, "sinai.map", "The memory map", map_summary(app), map_view(app)));
+    }
+    // A question about memory waiting for an answer is never hidden behind a closed part.
+    let memory_open = app.is_open("sinai.memory") || app.memory_pending.is_some();
+    list = list.push(ui::disclosure(
+        "Its memory",
+        row![
+            label(if app.memory_pending.is_some() { "waiting for your answer" } else { "keep, erase or restore" }, 12.0, theme::TEXT_DIM),
+            ui::help("Erasing moves to the trash, where it can be restored; deleting for good asks twice. Nothing acts unless you press."),
+        ]
+        .spacing(8)
+        .align_y(Alignment::Center),
+        memory_open,
+        Message::Disclose("sinai.memory"),
+        memory(app),
     ));
     list.into()
+}
+
+/// One part of the Machine dock that opens and closes, its state on one line while closed.
+fn dock_part<'a>(app: &'a App, key: &'static str, title: &'static str, summary: String, body: El<'a>) -> El<'a> {
+    ui::disclosure(title, label(summary, 12.0, theme::TEXT_DIM), app.is_open(key), Message::Disclose(key), body)
+}
+
+/// How Sinai listens, on one line: the follow-up and the voice gate, or why it is not known.
+fn listening_summary(app: &App) -> String {
+    match &app.listening {
+        _ if app.sinai_up != Some(true) => "not known: the loop is not running".into(),
+        None => "asking the loop".into(),
+        Some(Err(_)) => "not known".into(),
+        Some(Ok(l)) => format!("follow-up {} \u{b7} voice gate {}", l.follow_up(), if l.gate_status.is_empty() { "not said" } else { l.gate_status.as_str() }),
+    }
+}
+
+/// The observatory on one line: what Sinai is doing now, as its pulse says.
+fn observatory_summary(app: &App) -> String {
+    if app.sinai_up != Some(true) {
+        return "not known: the loop is not running".into();
+    }
+    match app.conversation.pulse.get("state").and_then(|s| s.as_str()) {
+        Some(state) => format!("now: {state}"),
+        None => "unmeasured".into(),
+    }
+}
+
+/// The voiceprint on one line: enrolled or not.
+fn voiceprint_summary(app: &App) -> String {
+    match (&app.voice.places, &app.voice.enrolment) {
+        (Err(_), _) => "not available".into(),
+        (_, None) => "reading".into(),
+        (_, Some(e)) if e.enrolled() => "enrolled".into(),
+        (_, Some(_)) => "not enrolled".into(),
+    }
+}
+
+/// The memory map on one line: how many scene records it holds.
+fn map_summary(app: &App) -> String {
+    match app.conversation.memory.as_ref().and_then(|m| m.map.as_ref()) {
+        None => "not sent by this loop".into(),
+        Some(map) if map.cells.is_empty() => "no scene records yet".into(),
+        Some(map) => format!("{} scene records", map.cells.len()),
+    }
 }
 
 /// One of Sinai's parts in the Machine list: its row, with its model under it, as a button that opens its picker.
@@ -1097,7 +1309,7 @@ fn machine_part<'a>(app: &'a App, name: Row<'a, Message>, part: crate::sinai_par
 
 /// How Sinai listens, from its loop's /about.
 fn listening(app: &App) -> El<'_> {
-    let mut c = Column::new().spacing(4).push(subheading("How Sinai listens"));
+    let mut c = Column::new().spacing(4);
     match &app.listening {
         _ if app.sinai_up != Some(true) => c = c.push(label("Not known while the loop is not running.", 12.5, theme::TEXT_FAINT)),
         None => c = c.push(working(app, "Asking the loop")),
@@ -1147,7 +1359,6 @@ fn map_view(app: &App) -> El<'_> {
     let n = |x: Option<u64>| x.map(|n| n.to_string()).unwrap_or("?".into());
     let mut c = Column::new().spacing(4);
     let Some(m) = &app.conversation.memory else { return c.into() };
-    c = c.push(subheading("The memory map"));
     match &m.map {
         None => c = c.push(label("Not available: this loop does not send the scene graph.", 12.0, theme::TEXT_FAINT)),
         Some(map) if map.cells.is_empty() => {
@@ -1185,9 +1396,7 @@ fn map_view(app: &App) -> El<'_> {
 fn voice_enrolment(app: &App) -> El<'_> {
     use crate::voice::{Phase, Said};
     let v = &app.voice;
-    let mut col = Column::new()
-        .spacing(4)
-        .push(row![subheading("Voice enrolment"), space().width(Length::Fill), crate::live::badge(&app.voice_fresh)].align_y(Alignment::Center));
+    let mut col = Column::new().spacing(4).push(row![space().width(Length::Fill), crate::live::badge(&app.voice_fresh)].align_y(Alignment::Center));
     if let Err(why) = &v.places {
         return col.push(label(why.as_str(), 12.0, theme::TEXT_FAINT)).into();
     }
@@ -1317,7 +1526,7 @@ fn voice_enrolment(app: &App) -> El<'_> {
 /// reading). Pictures of the window are the Stage's; the loop sends none.
 fn eyes(app: &App) -> El<'_> {
     let c = &app.conversation;
-    let mut col = Column::new().spacing(4).push(subheading("Its eyes"));
+    let mut col = Column::new().spacing(4);
     if app.sinai_up != Some(true) {
         return col.push(label("Not known while the loop is not running.", 12.5, theme::TEXT_FAINT)).into();
     }
@@ -1374,7 +1583,7 @@ fn eyes(app: &App) -> El<'_> {
 fn observatory(app: &App) -> El<'_> {
     use crate::machine::{self, Act};
     let c = &app.conversation;
-    let mut col = Column::new().spacing(4).push(subheading("The observatory"));
+    let mut col = Column::new().spacing(4);
     if app.sinai_up != Some(true) {
         return col.push(label("Not known while the loop is not running.", 12.5, theme::TEXT_FAINT)).into();
     }
@@ -1477,7 +1686,7 @@ fn memory(app: &App) -> El<'_> {
     let act = |words: String, a: Act| -> El<'_> {
         button(text(words).size(12.0).font(fonts().ui)).padding([3.0, 8.0]).on_press(Message::MemoryAct(a)).style(theme::secondary_button).into()
     };
-    let mut c = Column::new().spacing(4).push(subheading("Its memory"));
+    let mut c = Column::new().spacing(4);
     if let Some(p) = &app.memory_pending {
         let step = p.given + 1;
         let of = p.act.confirmations();
@@ -1707,10 +1916,6 @@ fn stage_view(app: &App) -> El<'_> {
     }
     if shown.len() % 2 == 1 {
         list = list.push(line.push(space().width(Length::FillPortion(1))));
-    }
-    list = list.push(subheading("Moving in"));
-    for feature in Section::Sinai.features() {
-        list = list.push(feature_row(feature));
     }
     list.into()
 }
@@ -2212,15 +2417,25 @@ fn trust_page(app: &App) -> El<'_> {
     } else {
         primary("Verify", Message::TrustVerify)
     };
+    let columns = ui::columns_for(app.width_for(Section::Trust)).min(2);
     let verify = container(
         column![
-            subheading("Verify a receipt"),
-            label("Drop a receipt, its data, or a test case on this window, or type the paths. The check runs on this PC with the project's own verifier.", 13.0, theme::TEXT_DIM),
-            field("The receipt (.json)", &app.trust_receipt, Message::TrustReceipt),
-            field("Its data (.json), when the receipt was computed from data", &app.trust_data, Message::TrustData),
-            field("The public key you trust (64 hexadecimal characters), obtained apart from the receipt", &app.trust_key, Message::TrustKey),
-            field("A witness key (optional)", &app.trust_witness, Message::TrustWitness),
-            label("The receipt carries its own key; a key taken from it proves nothing about who signed it, so it is never used.", 12.0, theme::TEXT_FAINT),
+            row![
+                subheading("Verify a receipt"),
+                ui::help("Drop a receipt, its data, or a test case on this window, or type the paths. The check runs on this PC with the project's own verifier. The receipt carries its own key; a key taken from it proves nothing about who signed it, so it is never used."),
+            ]
+            .spacing(8)
+            .align_y(Alignment::Center),
+            ui::grid(
+                vec![
+                    field("The receipt (.json)", &app.trust_receipt, Message::TrustReceipt),
+                    field("Its data (.json), when the receipt was computed from data", &app.trust_data, Message::TrustData),
+                    field("The public key you trust (64 hexadecimal characters), obtained apart from the receipt", &app.trust_key, Message::TrustKey),
+                    field("A witness key (optional)", &app.trust_witness, Message::TrustWitness),
+                ],
+                columns,
+                10.0,
+            ),
             go,
         ]
         .spacing(10),
@@ -2237,10 +2452,6 @@ fn trust_page(app: &App) -> El<'_> {
     // the cards a build's plug-ins add (none in the public build)
     for (i, card) in app.trust_cards.iter().enumerate() {
         page = page.push(card.page.view(app.phase).map(move |m| Message::TrustCard(i, m)));
-    }
-    page = page.push(subheading("Moving in"));
-    for feature in Section::Trust.features_with(&app.plugin_features) {
-        page = page.push(feature_row(feature));
     }
     page.into()
 }
@@ -2272,25 +2483,47 @@ fn account_page(app: &App) -> El<'_> {
         .spacing(14)
         .push(heading("Settings", section.purpose()))
         .push(
-            row![
-                label("Settings open as a panel over whichever page you are on, from here or the account menu.", 13.0, theme::TEXT_DIM),
-                space().width(Length::Fill),
-                open,
-            ]
-            .align_y(Alignment::Center),
-        )
-        .push(space().height(8));
+            row![open, ui::help("Settings open as a panel over whichever page you are on, from here or the account menu.")]
+                .spacing(8)
+                .align_y(Alignment::Center),
+        );
     // friends are hosted: without them (signed out, or a build that does not sign in) the page says how they are had
     if !app.can(Capability::Friends) {
         page = page.push(ui::absent(crate::capability::absent(Capability::Friends))).push(space().height(8));
     }
-    page = page
-        .push(subheading("Planned for this section"))
-        .push(label("Each says where it is today, and the step of the plan it arrives in.", 13.0, theme::TEXT_FAINT));
-    for feature in section.features() {
-        page = page.push(feature_row(feature));
-    }
+    page = page.push(roadmap(app));
     page.into()
+}
+
+/// The Roadmap: every planned feature of every section, one line each (what it is, today and the plan on hover),
+/// grouped by section in as many columns as the window holds. The working pages carry none of these: a page shows
+/// what is there (UX-PRINCIPLES B1); what is coming is read here.
+fn roadmap(app: &App) -> El<'_> {
+    let mut groups: Vec<El<'_>> = Vec::new();
+    for section in Section::ALL.into_iter().filter(|s| *s != Section::Overview) {
+        let features = section.features_with(&app.plugin_features);
+        if features.is_empty() {
+            continue;
+        }
+        let here = features.iter().filter(|f| f.here() != Here::Later).count();
+        let mut group = Column::new().spacing(6).push(
+            row![label(section.glyph(), 14.0, theme::GOLD), subheading(section.title()), space().width(Length::Fill), label(format!("{here} of {} here", features.len()), 11.5, theme::TEXT_FAINT)]
+                .spacing(8)
+                .align_y(Alignment::Center),
+        );
+        for feature in features {
+            group = group.push(ui::feature_line(feature));
+        }
+        groups.push(group.into());
+    }
+    column![
+        row![subheading("Roadmap"), ui::help("Each planned feature says where it is today and the step of the plan it arrives in. Point at one for what it is, today and the plan.")]
+            .spacing(8)
+            .align_y(Alignment::Center),
+        ui::grid(groups, ui::columns_for(app.width_for(Section::Account)), 18.0),
+    ]
+    .spacing(12)
+    .into()
 }
 
 /// A page whose part this build, or this person, does not have: its title and purpose, and the empty state saying why.
@@ -2298,29 +2531,3 @@ fn absent_page<'a>(section: Section, title: &'a str, capability: Capability) -> 
     Column::new().spacing(18).push(heading(title, section.purpose())).push(ui::absent(crate::capability::absent(capability))).into()
 }
 
-// ------------------------------------------------------------------- planned features
-
-fn feature_row<'a>(feature: &'a Feature) -> El<'a> {
-    let mut chips = Row::new().spacing(6);
-    chips = chips.push(match feature.here() {
-        Here::Now => chip("Here now", theme::POSITIVE),
-        Here::InPart => chip("Here in part", theme::GOLD),
-        Here::Later if feature.step == "Later" => chip("Later", theme::TEXT_FAINT),
-        Here::Later => chip(format!("Step {}", feature.step), theme::GOLD_DIM),
-    });
-    if feature.no_screen && feature.here() == Here::Later {
-        chips = chips.push(chip("No screen today", theme::CAUTION));
-    }
-    container(
-        column![
-            row![strong(feature.name, 14.5, theme::TEXT), space().width(Length::Fill), chips].align_y(Alignment::Center),
-            label(feature.what, 13.0, theme::TEXT_DIM),
-            label(format!("Today: {}. Plan: {}.", feature.today, feature.plan), 12.0, theme::TEXT_FAINT),
-        ]
-        .spacing(5),
-    )
-    .padding([12.0, 16.0])
-    .width(Length::Fill)
-    .style(theme::panel)
-    .into()
-}

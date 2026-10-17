@@ -24,7 +24,7 @@ use futures::stream::{BoxStream, StreamExt};
 use lattice_core::convo::agent::{AgentChat, AgentConfig};
 use lattice_core::llama::ManagedRuntime;
 use lattice_core::llama::server::{LlamaRuntime, RuntimeConfig};
-use lattice_core::ports::{AttentionPort, ConfirmPort, ConfirmRequest};
+use lattice_core::ports::{AttentionPort, ConfirmPort, ConfirmRequest, TerminalPort, TerminalTab};
 use lattice_core::{CoreConfig, CoreService, ProcessEnv, StateRoot};
 use lattice_protocol::RunService;
 use lattice_protocol::conversation::AgentChatService;
@@ -70,6 +70,60 @@ impl ConfirmPort for WindowConfirm {
     }
 }
 
+/// What the core asks of the IDE's terminals (`lattice_core::convo::terminal`), for the page to answer. A read or a
+/// run comes only after the reader's yes in the core's own dialog.
+pub enum TermAsk {
+    List(oneshot::Sender<Vec<TerminalTab>>),
+    Read { id: u64, lines: usize, answer: oneshot::Sender<Result<String, String>> },
+    Run { folder: std::path::PathBuf, command: String, answer: oneshot::Sender<Result<u64, String>> },
+}
+
+impl std::fmt::Debug for TermAsk {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            TermAsk::List(_) => "TermAsk::List",
+            TermAsk::Read { .. } => "TermAsk::Read",
+            TermAsk::Run { .. } => "TermAsk::Run",
+        })
+    }
+}
+
+/// What a terminal call answers when the window is gone.
+const NO_WINDOW: &str = "Lattice's window did not answer.";
+
+/// The terminal port: each call becomes a [`TermAsk`] for the page.
+struct WindowTerminals(mpsc::UnboundedSender<TermAsk>);
+
+impl TerminalPort for WindowTerminals {
+    fn list(&self) -> BoxFuture<'static, Vec<TerminalTab>> {
+        let (tx, rx) = oneshot::channel();
+        let sent = self.0.unbounded_send(TermAsk::List(tx)).is_ok();
+        Box::pin(async move { if sent { rx.await.unwrap_or_default() } else { Vec::new() } })
+    }
+
+    fn read(&self, id: u64, lines: usize) -> BoxFuture<'static, Result<String, String>> {
+        let (tx, rx) = oneshot::channel();
+        let sent = self.0.unbounded_send(TermAsk::Read { id, lines, answer: tx }).is_ok();
+        Box::pin(async move {
+            if !sent {
+                return Err(NO_WINDOW.to_string());
+            }
+            rx.await.unwrap_or_else(|_| Err(NO_WINDOW.to_string()))
+        })
+    }
+
+    fn run(&self, folder: std::path::PathBuf, command: String) -> BoxFuture<'static, Result<u64, String>> {
+        let (tx, rx) = oneshot::channel();
+        let sent = self.0.unbounded_send(TermAsk::Run { folder, command, answer: tx }).is_ok();
+        Box::pin(async move {
+            if !sent {
+                return Err(NO_WINDOW.to_string());
+            }
+            rx.await.unwrap_or_else(|_| Err(NO_WINDOW.to_string()))
+        })
+    }
+}
+
 /// The attention port: the conversations that asked for the reader, for the page to mark. It never carries text from
 /// a conversation and never causes an action.
 #[derive(Default)]
@@ -102,6 +156,8 @@ pub struct Services {
     /// The dialogs the core asks for, read by the page's subscription (shared, so a subscription made again reads on
     /// from where the last one stopped).
     asks: Arc<AsyncMutex<mpsc::UnboundedReceiver<Ask>>>,
+    /// What the core asks of the IDE's terminals, read by the page's subscription (shared, as the dialogs are).
+    term_asks: Arc<AsyncMutex<mpsc::UnboundedReceiver<TermAsk>>>,
     runtime: Option<tokio::runtime::Runtime>,
 }
 
@@ -136,12 +192,34 @@ impl Services {
         // Agents that run in Lattice over ACP are offered the checklist store as an MCP server: this program, started
         // with `--steps-mcp` (`crate::run`).
         chat_config.steps_server = std::env::current_exe().ok();
+        // The agent's read_terminal and run_in_terminal reach the IDE's terminals through the page.
+        let (term_tx, term_rx) = mpsc::unbounded();
+        chat_config.terminal = Some(Arc::new(WindowTerminals(term_tx)));
         let chat = Arc::new(AgentChat::new(chat_config, runtime.handle().clone()));
         let runs: Arc<dyn RunService> = {
             let _entered = runtime.enter();
             Arc::new(CoreService::new(CoreConfig::from_process(false)))
         };
-        Ok(Services { chat, runs, attention, state, complete, asks: Arc::new(AsyncMutex::new(rx)), runtime: Some(runtime) })
+        Ok(Services {
+            chat,
+            runs,
+            attention,
+            state,
+            complete,
+            asks: Arc::new(AsyncMutex::new(rx)),
+            term_asks: Arc::new(AsyncMutex::new(term_rx)),
+            runtime: Some(runtime),
+        })
+    }
+
+    /// What the core asks of the IDE's terminals, one at a time, for as long as the services run.
+    pub fn term_asks(&self) -> BoxStream<'static, TermAsk> {
+        let shared = self.term_asks.clone();
+        futures::stream::unfold(shared, |shared| async move {
+            let next = shared.lock().await.next().await;
+            next.map(|ask| (ask, shared))
+        })
+        .boxed()
     }
 
     /// The services' own runtime: every chat call runs on it.

@@ -17,6 +17,7 @@ pub mod loopback;
 pub mod qr;
 // Settings: the account menu's page (drawn at the top of Account and platform).
 pub mod settings;
+pub mod team;
 // Seals the kept session with Windows' DPAPI, so it may use unsafe code.
 #[allow(unsafe_code)]
 pub mod vault;
@@ -36,6 +37,8 @@ use client::{Client, Failure, Pairing, Session, Status};
 
 /// The identity service's billing routes (the account's plan, the billing portal), from the identity client crate.
 pub use alelyon_identity_client::billing;
+/// The credits balance (an access token from the identity service, then the credits service), from the same crate.
+pub use alelyon_identity_client::credits;
 
 /// The seven ways to sign in with another account, in the order shown: (id, name, tile colour, text colour).
 pub const PROVIDERS: [(&str, &str, Color, Color); 7] = [
@@ -105,6 +108,8 @@ pub struct State {
     pub web_file: Option<std::path::PathBuf>,
     /// Why the last change of that choice was not kept, when it was not.
     pub web_said: Option<String>,
+    /// Settings, Agents: the agent bridge is on (`crate::bridge`), kept in the preferences file.
+    pub agent_bridge: bool,
     /// Whether the backdrop moves (the sign-in screen's Motion button and Settings' Appearance line).
     pub motion: crate::backdrop::Motion,
     /// The signed-in account's plan, as last asked (Settings > Account), or why it could not be read; None before the
@@ -116,6 +121,13 @@ pub struct State {
     pub billing_busy: bool,
     /// Why Manage billing did not open, when it did not.
     pub billing_said: Option<String>,
+    /// The signed-in account's credits, as last asked (Settings > Account, only while `settings::credits_shown`), or
+    /// why they could not be read; None before the first answer.
+    pub credits: Option<Result<credits::Balance, String>>,
+    /// The credits are being asked for now.
+    pub credits_asking: bool,
+    /// Settings > Account's Team part: the seats of a Team plan and the invitations waiting.
+    pub team: team::TeamState,
     /// Which account's billing calls are current: it moves on at every sign-in and sign-out, and an answer from an
     /// earlier one is dropped.
     billing_round: u64,
@@ -144,6 +156,8 @@ pub enum Msg {
     OpenYours(String),
     /// Settings: where web pages open, kept on this PC.
     WebPages(web::WebPages),
+    /// Settings, Agents: switch the agent bridge on or off.
+    AgentBridge(bool),
     Notice(bool),
     Menu(bool),
     SignOut,
@@ -166,6 +180,10 @@ pub enum Msg {
     ManageBilling,
     /// The billing portal's address, opened in the person's own browser.
     Portal(u64, Result<String, billing::Problem>),
+    /// The account's credits, as the credits service answered (asked with the plan, while credits are switched on).
+    Credits(u64, Result<credits::Balance, credits::Problem>),
+    /// Settings > Account's Team part.
+    Team(team::TeamMsg),
 }
 
 impl State {
@@ -207,11 +225,18 @@ impl State {
             web_file: crate::prefs::path(),
             web: crate::prefs::path().map(|file| web::load(&file)).unwrap_or_default(),
             web_said: None,
+            agent_bridge: crate::prefs::path()
+                .and_then(|file| crate::prefs::load_value(&file, "agent_bridge"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
             motion: crate::backdrop::Motion::at_start(),
             plan: None,
             plan_asking: false,
             billing_busy: false,
             billing_said: None,
+            credits: None,
+            credits_asking: false,
+            team: team::TeamState::default(),
             billing_round: 0,
         };
         let mut tasks = Vec::new();
@@ -269,6 +294,29 @@ impl State {
         }
     }
 
+    /// What the account's plan allows of the harness, for Lattice (`lattice_core::convo::plan_limits`): nothing
+    /// while purchases are closed ([`settings::PURCHASES_OPEN`]: nothing can be bought, so nothing is limited), Free's
+    /// when signed out or until the plan is read, the plan's otherwise.
+    pub fn harness_limits(&self) -> Option<lattice_core::convo::plan_limits::PlanLimits> {
+        self.harness_limits_when(settings::PURCHASES_OPEN)
+    }
+
+    fn harness_limits_when(&self, purchases_open: bool) -> Option<lattice_core::convo::plan_limits::PlanLimits> {
+        if !purchases_open {
+            return None;
+        }
+        let harness = match (self.account(), &self.plan) {
+            (Some(_), Some(Ok(plan))) => plan.harness,
+            _ => billing::Harness::FREE,
+        };
+        Some(lattice_core::convo::plan_limits::PlanLimits {
+            background_tasks: harness.background_tasks,
+            helper_agents: harness.helper_agents,
+            schedules: harness.schedules,
+            project_manager: harness.project_manager,
+        })
+    }
+
     pub fn account(&self) -> Option<&client::Account> {
         match &self.gate {
             Gate::SignedIn(s) => Some(&s.account),
@@ -305,6 +353,9 @@ impl State {
         self.plan_asking = false;
         self.billing_busy = false;
         self.billing_said = None;
+        self.credits = None;
+        self.credits_asking = false;
+        self.team = team::TeamState::default();
         self.billing_round += 1;
     }
 
@@ -317,7 +368,23 @@ impl State {
         }
         self.plan_asking = true;
         let round = self.billing_round;
-        Task::perform(async move { billing::plan(&c, &token).await }, move |answer| Msg::Plan(round, answer))
+        let plan = Task::perform(async move { billing::plan(&c, &token).await }, move |answer| Msg::Plan(round, answer));
+        Task::batch([plan, self.ask_credits(), self.ask_team()])
+    }
+
+    /// Ask for the account's credits, as the plan is asked, only while the credits line shows (switched on, with a
+    /// service to ask: `settings::credits_shown`); otherwise nothing is asked of any service.
+    fn ask_credits(&mut self) -> Task<Msg> {
+        if !settings::credits_shown() || self.credits_asking {
+            return Task::none();
+        }
+        let Some((c, token)) = self.session() else { return Task::none() };
+        self.credits_asking = true;
+        let round = self.billing_round;
+        Task::perform(
+            async move { credits::balance(&c, &token, settings::CREDITS_ORIGIN).await },
+            move |answer| Msg::Credits(round, answer),
+        )
     }
 
     fn failed(&mut self, f: Failure) {
@@ -461,6 +528,12 @@ impl State {
                     None => Some("USERPROFILE is not set, so the choice lasts until Alelyon closes".into()),
                 };
             }
+            Msg::AgentBridge(on) => {
+                self.agent_bridge = on;
+                if let Some(file) = &self.web_file {
+                    let _ = crate::prefs::save_value(file, "agent_bridge", serde_json::Value::Bool(on));
+                }
+            }
             Msg::Notice(open) => self.notice_open = open,
             Msg::Motion(on) => self.motion.set(on),
             Msg::Menu(open) => self.menu_open = open,
@@ -482,8 +555,17 @@ impl State {
                     self.plan = Some(answer.map_err(|p| p.words()));
                 }
             }
+            Msg::Team(msg) => return self.update_team(msg),
+            Msg::Credits(round, answer) => {
+                if round == self.billing_round && self.credits_asking {
+                    self.credits_asking = false;
+                    self.credits = Some(answer.map_err(|p| p.words()));
+                }
+            }
+            // While purchases are closed (`settings::PURCHASES_OPEN`) the button does not show, and nothing is asked
+            // even if the message comes.
             Msg::ManageBilling => {
-                if self.billing_busy {
+                if !settings::PURCHASES_OPEN || self.billing_busy {
                     return Task::none();
                 }
                 let Some((c, token)) = self.session() else { return Task::none() };
@@ -1013,11 +1095,15 @@ mod tests {
             web: web::WebPages::Lattice,
             web_file: None,
             web_said: None,
+            agent_bridge: false,
             motion: crate::backdrop::Motion { on: true, forced_still: false, file: None, note: None },
             plan: None,
             plan_asking: false,
             billing_busy: false,
             billing_said: None,
+            credits: None,
+            credits_asking: false,
+            team: team::TeamState::default(),
             billing_round: 0,
         }
     }
@@ -1188,6 +1274,49 @@ mod tests {
         billing::Plan::from_json(&v)
     }
 
+    /// The Team part: an admin's seats and people, invitations waiting, a change's words, a refusal's words, an empty
+    /// username refused before anything is asked, and everything forgotten at sign-out.
+    #[test]
+    fn the_team_part_shows_seats_people_and_invitations_and_forgets_them_at_sign_out() {
+        use team::TeamMsg;
+        let mut s = signed_in_with_a_service();
+        let _ = s.update(Msg::Settings);
+        let round = s.billing_round;
+        let ada = billing::Member { id: "acct_a".into(), username: Some("ada".into()), status: "active".into(), has_access: true, ..Default::default() };
+        let bob = billing::Member { id: "acct_b".into(), username: Some("bob".into()), status: "pending".into(), expires_at: Some("2026-10-30T00:00:00Z".into()), ..Default::default() };
+        let mine = billing::Team { seats: 3, used: 2, over_limit: false, members: vec![ada.clone(), bob.clone()] };
+        let _ = s.update(Msg::Team(TeamMsg::Read(round, Ok(mine.clone()))));
+        assert_eq!(s.team.team, Some(Ok(mine.clone())));
+        assert_eq!(team::seats_words(&mine), "2 of 3 seats taken");
+        assert_eq!((team::member_words(&ada), team::member_words(&bob)), ("on the team".to_string(), "invited, until 2026-10-30".to_string()));
+        assert!(team::seats_words(&billing::Team { seats: 1, used: 2, over_limit: true, ..Default::default() }).contains("more people than seats"));
+        // Not a Team plan's admin: no seats shown, and no error either.
+        let refused = billing::interpret(409, None, r#"{"error": "not-team-owner", "message": "You do not have a Team plan to add people to."}"#);
+        let _ = s.update(Msg::Team(TeamMsg::Read(round, refused.map(|_| billing::Team::default()))));
+        assert_eq!(s.team.team, None);
+        let invite = billing::Invite { invite_id: 7, from: Some("carol".into()), expires_at: None };
+        let _ = s.update(Msg::Team(TeamMsg::Invites(round, Ok(vec![invite.clone()]))));
+        assert_eq!(s.team.invites, vec![invite]);
+        // An empty username asks nothing.
+        let _ = s.update(Msg::Team(TeamMsg::Name("  @ ".into())));
+        let _ = s.update(Msg::Team(TeamMsg::Invite));
+        assert!(!s.team.busy && s.team.said.as_ref().is_some_and(|(w, wrong)| *wrong && w.contains("Type the username")));
+        // A change made, then one refused, each said.
+        let _ = s.update(Msg::Team(TeamMsg::Accept(7)));
+        assert!(s.team.busy, "the call is on its way");
+        let _ = s.update(Msg::Team(TeamMsg::Done(round, Ok("You joined the team.".into()))));
+        assert_eq!(s.team.said, Some(("You joined the team.".to_string(), false)));
+        assert!(!s.team.busy);
+        let full = billing::interpret(409, None, r#"{"error": "seats-full", "message": "Every seat on the team is taken."}"#).map(|_| String::new());
+        let _ = s.update(Msg::Team(TeamMsg::Done(round, full)));
+        assert_eq!(s.team.said, Some(("Every seat on the team is taken.".to_string(), true)));
+        // An answer for an account that signed out is dropped, and the part is forgotten.
+        let _ = s.update(Msg::SignOut);
+        let _ = s.update(Msg::Team(TeamMsg::Read(round, Ok(mine))));
+        assert_eq!(s.team.team, None);
+        assert!(s.team.invites.is_empty() && s.team.said.is_none());
+    }
+
     /// Settings' Account part asks the service for the plan off the window's thread (a task), once at a time, and only
     /// while signed in; the answer is shown, and one for an account that has since signed out is dropped.
     #[test]
@@ -1217,6 +1346,26 @@ mod tests {
         assert!(s.plan.is_none(), "an answer for the account that signed out is dropped");
     }
 
+    /// The harness limits Lattice is given once purchases open: Free's signed out and until the plan is read, the
+    /// plan's after; none at all while purchases are closed.
+    #[test]
+    fn the_harness_limits_follow_the_plan_once_purchases_open() {
+        use lattice_core::convo::plan_limits::PlanLimits;
+        let mut s = signed_in_with_a_service();
+        assert_eq!(s.harness_limits_when(false), None);
+        assert_eq!(s.harness_limits_when(true), Some(PlanLimits::FREE), "until the plan is read");
+        let _ = s.update(Msg::Settings);
+        let round = s.billing_round;
+        let _ = s.update(Msg::Plan(round, Ok(plan_of(serde_json::json!({"key": "max", "name": "Max"})))));
+        assert_eq!(
+            s.harness_limits_when(true),
+            Some(PlanLimits { background_tasks: u32::MAX, helper_agents: u32::MAX, schedules: true, project_manager: true }),
+            "Max: unlimited"
+        );
+        let _ = s.update(Msg::SignOut);
+        assert_eq!(s.harness_limits_when(true), Some(PlanLimits::FREE), "signed out: Free's");
+    }
+
     /// The plan's words: Team's seats, a paid-through day when known, and a refusal in the service's words (a 503
     /// billing-unavailable as "Payments are not available right now.").
     #[test]
@@ -1237,34 +1386,117 @@ mod tests {
         let _ = settings::panel(&s);
     }
 
-    /// Manage billing asks for the portal's address once at a time and opens it in the person's own browser (a test
-    /// build records it); a refusal is said in the service's words, a 503 as payments not being available.
+    /// Purchases are closed (`settings::PURCHASES_OPEN`): the plan's line still
+    /// says the plan, but neither Upgrade nor Manage billing shows on any plan, the search finds neither, and a
+    /// Manage billing message asks the service for nothing. The buttons are still built behind the switch.
+    #[test]
+    fn purchases_are_hidden_while_closed_and_the_plan_still_shows() {
+        assert!(!settings::PURCHASES_OPEN, "purchases are opened deliberately, with this test");
+        let mut s = signed_in_with_a_service();
+        assert_eq!(s.harness_limits(), None, "while purchases are closed nothing is limited");
+        let _ = s.update(Msg::Settings);
+        let round = s.billing_round;
+        for plan in [
+            serde_json::json!({"key": "free", "name": "Free", "manage_available": false}),
+            serde_json::json!({"key": "pro", "name": "Pro", "paid_through": "2026-11-10T00:00:00Z", "manage_available": true}),
+            serde_json::json!({"key": "retired", "name": "Retired", "manage_available": true}),
+        ] {
+            let _ = s.update(Msg::SettingsPane(settings::Pane::Account));
+            let _ = s.update(Msg::Plan(round, Ok(plan_of(plan))));
+            assert!(settings::plan_buttons(&s).is_empty(), "{:?}", s.plan);
+            assert_ne!(settings::plan_words(&s).0, "—", "the plan line still says the plan");
+            let _ = settings::panel(&s);
+        }
+        assert_eq!(settings::plan_words(&s).0, "Retired");
+        // the gated path: open, Upgrade and Manage billing would show
+        assert_eq!(settings::plan_buttons_when(true, &s), [settings::PlanButton::Upgrade, settings::PlanButton::ManageBilling]);
+        // the search finds neither while closed (and would while open)
+        for words in ["upgrade", "manage billing", "pricing", "subscription", "payment"] {
+            assert!(settings::found(words).is_empty(), "{words}");
+            assert!(settings::Pane::Account.matches_when(words, true, false), "{words}");
+        }
+        assert_eq!(settings::found("plan"), [settings::Pane::Account], "the plan itself is still found");
+        // a Manage billing message asks nothing
+        let _ = s.update(Msg::ManageBilling);
+        assert!(!s.billing_busy && s.billing_said.is_none());
+        // Upgrade's page is still the pricing page, for when purchases open
+        assert_eq!(settings::PRICING_URL, "https://www.alelyon.com/pricing/");
+    }
+
+    /// Manage billing, once purchases open: asks for the portal's address once at a time and opens it in the person's
+    /// own browser (a test build records it); a refusal is said in the service's words, a 503 as payments not being
+    /// available. While purchases are closed, the message itself asks nothing (above), so this drives the answers.
     #[test]
     fn manage_billing_opens_the_portal_in_your_own_browser_and_says_refusals() {
         let mut s = signed_in_with_a_service();
         let _ = s.update(Msg::ManageBilling);
+        if !settings::PURCHASES_OPEN {
+            assert!(!s.billing_busy, "closed: nothing is asked");
+            s.billing_busy = true;
+        }
         assert!(s.billing_busy);
         let round = s.billing_round;
         let unavailable = billing::interpret(503, None, r#"{"error": "billing-unavailable", "message": "Payments are not available right now. Try again later."}"#);
         let _ = s.update(Msg::Portal(round, unavailable.map(|_| String::new())));
         assert!(!s.billing_busy);
         assert_eq!(s.billing_said.as_deref(), Some("Payments are not available right now."));
-        let _ = s.update(Msg::ManageBilling);
+        s.billing_busy = true;
         let none = billing::interpret(404, None, r#"{"error": "no-billing", "message": "This account has no plan to manage yet."}"#);
         let _ = s.update(Msg::Portal(round, none.map(|_| String::new())));
         assert_eq!(s.billing_said.as_deref(), Some("This account has no plan to manage yet."));
         let url = "https://billing.stripe.com/p/session/test_manage_billing_opens_the_portal";
-        let _ = s.update(Msg::ManageBilling);
+        s.billing_busy = true;
         let _ = s.update(Msg::Portal(round, Ok(url.into())));
         assert!(web::opened(url) && s.billing_said.is_none());
         // an answer nobody is waiting for opens nothing
         let late = "https://billing.stripe.com/p/session/test_late_answer";
         let _ = s.update(Msg::Portal(round, Ok(late.into())));
         assert!(!web::opened(late));
-        // Upgrade is the pricing page, through the web-pages choice like the other site links
-        assert_eq!(settings::PRICING_URL, "https://www.alelyon.com/pricing/");
-        assert_eq!(settings::found("manage billing"), [settings::Pane::Account]);
-        assert_eq!(settings::found("upgrade"), [settings::Pane::Account]);
+    }
+
+    /// Credits are switched off (`settings::CREDITS_OPEN`) and not deployed (`settings::CREDITS_ORIGIN` empty): no
+    /// credits line, nothing found by the search, nothing asked. Behind the switch the line says the balance, a
+    /// disputed payment's pause, a refusal in the service's words, and drops an answer for an earlier account.
+    #[test]
+    fn the_credits_line_is_switched_off_and_says_the_balance_behind_its_switch() {
+        assert!(!settings::CREDITS_OPEN, "credits are switched on deliberately, with this test");
+        assert!(!settings::credits_shown());
+        assert!(!settings::credits_shown_when(true, "  "), "on, but no service deployed: nothing");
+        assert!(!settings::credits_shown_when(false, "https://credits.example.test"));
+        assert!(settings::credits_shown_when(true, "https://credits.example.test"));
+        let mut s = signed_in_with_a_service();
+        let _ = s.update(Msg::Settings);
+        assert!(!s.credits_asking, "switched off: nothing is asked");
+        assert!(settings::found("credits").is_empty() && settings::found("buy credits").is_empty());
+        assert!(settings::Pane::Account.matches_when("buy credits", false, true));
+        let _ = settings::panel(&s);
+        // what the line would say
+        assert_eq!(settings::credits_words(&s).0, "—");
+        s.credits_asking = true;
+        assert_eq!(settings::credits_words(&s).0, "Asking…");
+        let round = s.billing_round;
+        let read = |v: serde_json::Value| credits::balance_from_json(&v);
+        let _ = s.update(Msg::Credits(round, read(serde_json::json!({"balance": {"available_credits": 1250, "bought_credits": 1000, "promotional_credits": 300, "held_credits": 50, "blocked": false}}))));
+        assert!(!s.credits_asking);
+        assert_eq!(settings::credits_words(&s), ("1250 credits".into(), theme::TEXT));
+        s.credits_asking = true;
+        let _ = s.update(Msg::Credits(round, read(serde_json::json!({"balance": {"available_credits": 1}}))));
+        assert_eq!(settings::credits_words(&s).0, "1 credit");
+        s.credits_asking = true;
+        let _ = s.update(Msg::Credits(round, read(serde_json::json!({"balance": {"available_credits": -40, "blocked": true}}))));
+        let (said, color) = settings::credits_words(&s);
+        assert!(said.starts_with("-40 credits · Spending is paused") && color == theme::CAUTION, "{said}");
+        s.credits_asking = true;
+        let refused = credits::interpret(503, None, r#"{"error": "access-tokens-off", "message": "Access tokens are not offered yet."}"#);
+        let _ = s.update(Msg::Credits(round, refused.map(|_| credits::Balance::default())));
+        assert_eq!(settings::credits_words(&s), ("Access tokens are not offered yet.".into(), theme::CAUTION));
+        // an answer for an account that has since signed out is dropped
+        let stale = s.billing_round;
+        let _ = s.update(Msg::SignOut);
+        assert!(s.credits.is_none() && !s.credits_asking);
+        let _ = s.update(Msg::Credits(stale, Ok(credits::Balance { available_credits: 9, ..Default::default() })));
+        assert!(s.credits.is_none());
+        assert_eq!(settings::CREDITS_URL, "https://www.alelyon.com/account/#credits");
     }
 
     #[test]
