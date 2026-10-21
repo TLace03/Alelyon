@@ -54,6 +54,19 @@ pub struct GroupsState {
     pub board_shown: bool,
     /// A group's plan, being edited (`super::plan`).
     pub plan_edit: Option<super::plan::PlanEdit>,
+    /// Every question and approval waiting for the reader, in every topic (`convo::fleet`): the open group's are shown
+    /// under its session, each answered in its own topic.
+    pub waiting: Vec<lattice_core::convo::fleet::Wait>,
+    /// The open group's sessions as the core reads them (`super::sessions`), the one whose card is open, and the
+    /// reply typed in it.
+    pub topics: Vec<lattice_core::convo::fleet::TopicView>,
+    pub session: Option<String>,
+    pub reply: String,
+    pub replying: bool,
+    /// The topic the next message is addressed to (an `@topic` chosen in the composer), not routed.
+    pub to_topic: Option<String>,
+    /// The open group's record, when shown (`super::record`).
+    pub record: Option<super::record::RecordView>,
 }
 
 impl GroupsState {
@@ -83,6 +96,21 @@ impl GroupsState {
 #[derive(Debug, Clone)]
 pub enum GroupsMsg {
     Read((Vec<(Group, String)>, bool), Vec<Brainstorm>, Vec<lattice_core::convo::board::Card>),
+    /// What waits for the reader, in every topic, and the open group's sessions.
+    Waiting(Vec<lattice_core::convo::fleet::Wait>, Vec<lattice_core::convo::fleet::TopicView>),
+    /// Open a session's card (`None`: close it).
+    Session(Option<String>),
+    /// The reply typed in a session's card, sent, and how that went.
+    Reply(String),
+    SendReply,
+    Replied(Result<(), String>),
+    /// Address the next message to a topic, or no longer (`None`).
+    To(Option<String>),
+    /// A group was made: the groups are read, it opens, and the message given with it (from the person's own agent)
+    /// is sent in its chat.
+    Created(String, Option<String>),
+    /// The group's record (`super::record`).
+    Record(super::record::RecordMsg),
     /// Show the board in the editor's place, or not.
     ShowBoard(bool),
     /// Move a group one place up (`true`) or down in priority.
@@ -137,6 +165,32 @@ impl State {
                 go(GroupsMsg::Read(groups, brainstorms, board))
             },
         )
+        .chain(self.read_waiting())
+    }
+
+    /// Make a group named `name` in the project worked in; it opens, and `first`, when given, is sent in its chat.
+    pub(in crate::lattice) fn create_group(&self, name: String, first: Option<String>) -> Task<Msg> {
+        let project = self.ide.project.clone();
+        self.on_groups(move |chat| chat.group_create(&name, project.as_deref()).map(|g| g.id), move |r| match r {
+            Ok(id) => GroupsMsg::Created(id, first.clone()),
+            Err(why) => GroupsMsg::Done(Err(why)),
+        })
+    }
+
+    /// Read what waits for the reader, in every topic, and the open group's sessions.
+    pub(in crate::lattice) fn read_waiting(&self) -> Task<Msg> {
+        let Some(services) = self.services.clone() else { return Task::none() };
+        let (chat, group) = (services.chat.clone(), self.ide.groups.open.clone());
+        Task::perform(
+            on(&services, async move {
+                let topics = group.and_then(|g| chat.fleet_topics(&g)).unwrap_or_default();
+                (chat.fleet_waiting(), topics)
+            }),
+            |r| {
+                let (waiting, topics) = r.unwrap_or_default();
+                go(GroupsMsg::Waiting(waiting, topics))
+            },
+        )
     }
 
     /// A blocking call to the core's groups, then the groups read again.
@@ -171,6 +225,30 @@ impl State {
             GroupsMsg::Raise(id, up) => return self.on_groups(move |chat| chat.group_raise(&id, up), GroupsMsg::Done),
             GroupsMsg::MoveCard(id, status) => {
                 return self.on_groups(move |chat| chat.group_move(&id, status), GroupsMsg::Done);
+            }
+            GroupsMsg::Waiting(waiting, topics) => {
+                groups.waiting = waiting;
+                groups.topics = topics;
+            }
+            GroupsMsg::Session(id) => {
+                if groups.session != id {
+                    groups.reply.clear();
+                }
+                groups.session = id;
+            }
+            GroupsMsg::Reply(text) => groups.reply = text,
+            GroupsMsg::To(id) => groups.to_topic = id,
+            GroupsMsg::Record(msg) => return self.record(msg),
+            GroupsMsg::SendReply => return self.session_reply(),
+            GroupsMsg::Replied(result) => {
+                groups.replying = false;
+                match result {
+                    Ok(()) => {
+                        groups.reply.clear();
+                        return self.read_waiting();
+                    }
+                    Err(why) => groups.said = Some(why),
+                }
             }
             GroupsMsg::Read((list, review), brainstorms, board) => {
                 groups.board = board;
@@ -218,22 +296,29 @@ impl State {
                 groups.moving = None;
                 groups.brainstorming = false;
                 groups.fresh = false;
-                // Its session: the project it is in, and its newest topic.
-                return self.update(Msg::WorkIn(project));
+                groups.session = None;
+                groups.to_topic = None;
+                groups.record = None;
+                // Its session: the project it is in, and its newest topic; and its sessions' status.
+                return self.update(Msg::WorkIn(project)).chain(self.read_waiting());
             }
             GroupsMsg::New => groups.naming = Some(String::new()),
             GroupsMsg::Naming(name) => groups.naming = Some(name),
             GroupsMsg::Create => {
                 let Some(name) = groups.naming.take() else { return Task::none() };
-                let project = self.ide.project.clone();
-                return self.on_groups(
-                    move |chat| chat.group_create(&name, project.as_deref()).map(|g| g.id),
-                    |r| match r {
-                        Ok(id) => GroupsMsg::Open(Some(id)),
-                        Err(why) => GroupsMsg::Done(Err(why)),
-                    },
-                )
-                .chain(self.read_groups());
+                return self.create_group(name, None);
+            }
+            GroupsMsg::Created(id, first) => {
+                // Read first: a group opens only once the window lists it.
+                let open = Task::done(go(GroupsMsg::Open(Some(id))));
+                let send = match first {
+                    Some(text) => {
+                        self.composer = iced::widget::text_editor::Content::with_text(&text);
+                        Task::done(Msg::Send)
+                    }
+                    None => Task::none(),
+                };
+                return self.read_groups().chain(open).chain(send);
             }
             GroupsMsg::Rename(id) => {
                 let name = groups.name(&id).unwrap_or_default().to_string();
@@ -576,11 +661,15 @@ fn group_lines<'a>(
                     small("Rename", Some(go(GroupsMsg::Rename(group.id.clone())))),
                     small("Merge into\u{2026}", others.then(|| go(GroupsMsg::Merge(group.id.clone())))),
                     small("Archive", Some(go(GroupsMsg::Archive(group.id.clone(), true)))),
+                    small("Record", Some(super::record::send(super::record::RecordMsg::Show(Some(group.id.clone()))))),
                 ]
                 .spacing(2)
                 .into(),
             ));
         }
+    }
+    if let Some(view) = groups.record.as_ref().filter(|v| v.group == group.id) {
+        col = col.push(super::record::view(view));
     }
     col = topic_rows(state, &members, col, true);
     if groups.moving.as_deref().is_some_and(|t| members.iter().any(|r| r.id == t)) {
@@ -620,6 +709,13 @@ pub(super) fn topic_rows<'a>(state: &'a State, members: &[&'a ConversationSummar
                 .style(theme::list_row(shown))
                 .on_press(Msg::Open(r.id.clone())),
         );
+        // In the open group, each session's status, and its card when opened.
+        if actions && let Some(topic) = groups.topics.iter().find(|t| t.id == r.id) {
+            col = col.push(super::sessions::status_row(state, topic));
+            if groups.session.as_deref() == Some(r.id.as_str()) {
+                col = col.push(super::sessions::card(state, topic));
+            }
+        }
     }
     if members.is_empty() && !actions {
         col = col.push(container(note("No topics yet.")).padding(Padding { top: 2.0, right: 10.0, bottom: 2.0, left: 30.0 }));

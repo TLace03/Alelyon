@@ -118,6 +118,9 @@ pub enum IdeMsg {
     Key(Key),
     // The agent panel.
     ChatFilter(ChatFilter),
+    /// Search what was said in the sessions for the words typed (Enter in the chats' search), and what was found.
+    ChatSearchSaid,
+    ChatHits(String, Vec<lattice_core::convo::recall::Hit>),
     /// Follow the agent's changes in the editor (on), or not.
     Follow(bool),
     ChatSearch(String),
@@ -131,6 +134,10 @@ pub enum IdeMsg {
     Mention,
     EditTurn(String),
     CancelEditTurn,
+    /// Fork the open chat after this message and its answer: a new chat holding them, opened; the original stays.
+    ForkTurn(String),
+    /// The fork was made (its id), or why not.
+    Forked(Result<String, String>),
     Regenerate,
     Continue,
     Note(String, String),
@@ -855,7 +862,25 @@ impl State {
 
             IdeMsg::ChatFilter(filter) => self.ide.chat_filter = filter,
             IdeMsg::Follow(on) => self.ide.follow = on,
-            IdeMsg::ChatSearch(text) => self.ide.chat_search = text,
+            IdeMsg::ChatSearch(text) => {
+                if text.trim().is_empty() {
+                    self.ide.chat_hits = None;
+                }
+                self.ide.chat_search = text;
+            }
+            IdeMsg::ChatSearchSaid => {
+                let query = self.ide.chat_search.trim().to_string();
+                let Some(services) = self.services.clone() else { return Task::none() };
+                if query.is_empty() {
+                    return Task::none();
+                }
+                let chat = services.chat.clone();
+                let asked = query.clone();
+                return Task::perform(on(&services, async move { chat.search_sessions(&asked, 20) }), move |r| {
+                    Msg::Ide(IdeMsg::ChatHits(query.clone(), r.unwrap_or_default()))
+                });
+            }
+            IdeMsg::ChatHits(query, hits) => self.ide.chat_hits = Some((query, hits)),
             IdeMsg::ChatMore(folder, on) => {
                 if on {
                     self.ide.chat_more.insert(folder);
@@ -929,6 +954,21 @@ impl State {
                     return operation::focus(super::composer_id());
                 }
             }
+            IdeMsg::ForkTurn(turn) => {
+                let Some(c) = self.open.as_ref() else { return Task::none() };
+                let Some(at) = c.turns.iter().position(|t| t.id == turn) else { return Task::none() };
+                let Some(services) = self.services.clone() else { return Task::none() };
+                // The message and its answer: the turns up to it, and one more.
+                let (chat, id, keep) = (services.chat.clone(), c.id().to_string(), fork_keep(at, c.turns.len()));
+                return Task::perform(on(&services, async move { chat.fork(&id, keep) }), |r| {
+                    Msg::Ide(IdeMsg::Forked(r.unwrap_or_else(|| Err(STOPPED.to_string()))))
+                });
+            }
+            IdeMsg::Forked(Ok(id)) => {
+                self.routed = Some("Forked: the original chat is as it was.".to_string());
+                return Task::batch([self.refresh(), self.read_groups(), self.update(Msg::Open(id))]);
+            }
+            IdeMsg::Forked(Err(why)) => self.problem = Some(why),
             IdeMsg::CancelEditTurn => {
                 self.ide.editing_turn = None;
                 self.composer = text_editor::Content::new();
@@ -3526,5 +3566,44 @@ mod tests {
         assert_eq!(state.ide.side, Side::Work, "the Work side is the side bar's first view");
         assert_eq!(Side::ALL[0], Side::Work);
         assert!(!Side::ALL.contains(&Side::Explorer), "the folder's files are no longer on the activity bar");
+    }
+}
+
+/// How many of a chat's `total` turns a fork after the message at `at` keeps: the message and its answer.
+pub(in crate::lattice) fn fork_keep(at: usize, total: usize) -> usize {
+    (at + 2).min(total)
+}
+
+#[cfg(test)]
+mod fork_tests {
+    use super::fork_keep;
+
+    /// A fork after a message keeps it and its answer, never more turns than the chat holds.
+    #[test]
+    fn a_fork_keeps_the_message_and_its_answer() {
+        assert_eq!(fork_keep(0, 4), 2);
+        assert_eq!(fork_keep(2, 4), 4);
+        assert_eq!(fork_keep(2, 3), 3, "a message with no answer yet");
+    }
+}
+
+#[cfg(test)]
+mod said_tests {
+    use super::IdeMsg;
+    use crate::lattice::{Msg, State};
+    use lattice_core::convo::recall::Hit;
+
+    /// What was found in the sessions is kept for the words searched, and an emptied search puts it away.
+    #[test]
+    fn what_was_said_is_kept_for_its_search_and_cleared_with_it() {
+        let mut state = State::new();
+        let hit = Hit { conversation: "c1".into(), title: "Parser".into(), turn: "t1".into(), ts: 0.0, user: true, snippet: "CSV parser".into(), score: 1.0 };
+        let _ = state.update(Msg::Ide(IdeMsg::ChatSearch("csv parser".into())));
+        let _ = state.update(Msg::Ide(IdeMsg::ChatHits("csv parser".into(), vec![hit])));
+        assert_eq!(state.ide.chat_hits.as_ref().map(|(q, h)| (q.as_str(), h.len())), Some(("csv parser", 1)));
+        let _ = state.update(Msg::Ide(IdeMsg::ChatSearch(String::new())));
+        assert!(state.ide.chat_hits.is_none());
+        let _ = state.update(Msg::Ide(IdeMsg::ChatSearchSaid));
+        assert!(state.ide.chat_hits.is_none(), "no search without words");
     }
 }

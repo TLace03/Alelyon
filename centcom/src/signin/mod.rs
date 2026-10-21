@@ -110,6 +110,8 @@ pub struct State {
     pub web_said: Option<String>,
     /// Settings, Agents: the agent bridge is on (`crate::bridge`), kept in the preferences file.
     pub agent_bridge: bool,
+    /// How the person is told a session needs them (`settings::Notify`).
+    pub notify: settings::Notify,
     /// Whether the backdrop moves (the sign-in screen's Motion button and Settings' Appearance line).
     pub motion: crate::backdrop::Motion,
     /// The signed-in account's plan, as last asked (Settings > Account), or why it could not be read; None before the
@@ -158,6 +160,10 @@ pub enum Msg {
     WebPages(web::WebPages),
     /// Settings, Agents: switch the agent bridge on or off.
     AgentBridge(bool),
+    /// How the person is told a session needs them.
+    Notify(settings::Notify),
+    /// Put this text on the clipboard (a line that connects an agent).
+    CopyText(String),
     Notice(bool),
     Menu(bool),
     SignOut,
@@ -229,6 +235,10 @@ impl State {
                 .and_then(|file| crate::prefs::load_value(&file, "agent_bridge"))
                 .and_then(|v| v.as_bool())
                 .unwrap_or(false),
+            notify: crate::prefs::path()
+                .and_then(|file| crate::prefs::load_value(&file, "notify"))
+                .and_then(|v| v.as_str().map(settings::Notify::from_key))
+                .unwrap_or_default(),
             motion: crate::backdrop::Motion::at_start(),
             plan: None,
             plan_asking: false,
@@ -527,6 +537,13 @@ impl State {
                     Some(file) => web::keep(file, pages).err().map(|why| format!("{why}, so the choice lasts until Alelyon closes")),
                     None => Some("USERPROFILE is not set, so the choice lasts until Alelyon closes".into()),
                 };
+            }
+            Msg::CopyText(text) => return iced::clipboard::write(text),
+            Msg::Notify(how) => {
+                self.notify = how;
+                if let Some(file) = &self.web_file {
+                    let _ = crate::prefs::save_value(file, "notify", serde_json::Value::String(how.key().into()));
+                }
             }
             Msg::AgentBridge(on) => {
                 self.agent_bridge = on;
@@ -1096,6 +1113,7 @@ mod tests {
             web_file: None,
             web_said: None,
             agent_bridge: false,
+            notify: settings::Notify::default(),
             motion: crate::backdrop::Motion { on: true, forced_still: false, file: None, note: None },
             plan: None,
             plan_asking: false,

@@ -85,7 +85,7 @@ impl Pane {
             Pane::Account => "Who is signed in, your plan, and your account's pages.",
             Pane::Security => "Staying signed in on this PC, and the sign-in service Alelyon uses.",
             Pane::WebPages => "Where the account pages, the Terms and the Privacy Notice open.",
-            Pane::Agents => "Whether your own AI agent may drive this app, through alelyon-cli.",
+            Pane::Agents => "How you are told a session needs you, and whether your own AI agent may drive this app.",
             Pane::Appearance => "How the sign-in screen looks.",
             Pane::About => "This version of Alelyon, what is new, and its terms.",
         }
@@ -414,6 +414,112 @@ fn web_pages<'a>(s: &'a State) -> El<'a> {
     col.into()
 }
 
+/// Where alelyon-cli is on this computer: beside this program (an install that carries it), else where the source
+/// this program was built from builds it (`crates/alelyon-cli/target/release` under one of this program's own
+/// folders); the first that `exists`.
+pub fn cli_path(exe: &std::path::Path, exists: impl Fn(&std::path::Path) -> bool) -> Option<std::path::PathBuf> {
+    let beside = exe.parent().map(|dir| dir.join("alelyon-cli.exe"));
+    let built = exe
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join("crates").join("alelyon-cli").join("target").join("release").join("alelyon-cli.exe"));
+    beside.into_iter().chain(built).find(|path| exists(path))
+}
+
+/// The lines that connect an agent to alelyon-cli at `cli`: Claude Code's command, and Codex's configuration.
+pub fn connect_lines(cli: &std::path::Path) -> [(&'static str, String); 2] {
+    let shown = cli.display().to_string();
+    [
+        ("Claude Code", format!("claude mcp add alelyon -- \"{shown}\" mcp")),
+        (
+            "Codex (~/.codex/config.toml)",
+            format!("[mcp_servers.alelyon]\ncommand = '{shown}'\nargs = [\"mcp\"]"),
+        ),
+    ]
+}
+
+fn connect<'a>() -> El<'a> {
+    let found = std::env::current_exe().ok().and_then(|exe| cli_path(&exe, |p| p.is_file()));
+    let Some(cli) = found else {
+        return words(
+            "To connect Claude Code or Codex, build alelyon-cli first: in crates/alelyon-cli of the source Alelyon was \
+             built from, `cargo build --release --locked`. Its lines appear here once it is built.",
+            12.0,
+            theme::TEXT_FAINT,
+        )
+        .into();
+    };
+    let mut col = column![words("Connect your agent: paste one of these where your agent is set up.", 12.0, theme::TEXT_FAINT)].spacing(6);
+    for (who, line) in connect_lines(&cli) {
+        col = col.push(
+            row![
+                container(words(who, 12.0, theme::TEXT_DIM)).width(180),
+                container(crate::ui::mono(line.clone(), 11.5, theme::TEXT)).width(Length::Fill),
+                action("Copy", Some(Msg::CopyText(line))),
+            ]
+            .spacing(12)
+            .align_y(Alignment::Center),
+        );
+    }
+    col.into()
+}
+
+/// How the person is told that a session needs them or finished, while they are in another window.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Notify {
+    Off,
+    /// The taskbar button flashes.
+    #[default]
+    Flash,
+    /// It flashes, and Windows shows a notification.
+    Windows,
+}
+
+impl Notify {
+    pub fn key(self) -> &'static str {
+        match self {
+            Notify::Off => "off",
+            Notify::Flash => "flash",
+            Notify::Windows => "windows",
+        }
+    }
+
+    pub fn from_key(key: &str) -> Notify {
+        match key {
+            "off" => Notify::Off,
+            "windows" => Notify::Windows,
+            _ => Notify::Flash,
+        }
+    }
+}
+
+fn notify_row<'a>(s: &'a State) -> El<'a> {
+    let choice = |label: &'a str, n: Notify| -> El<'a> {
+        button(words(label, 12.5, theme::TEXT))
+            .padding([6.0, 12.0])
+            .on_press(Msg::Notify(n))
+            .style(theme::segment_button(s.notify == n))
+            .into()
+    };
+    column![
+        row![
+            container(words("When a session needs you", 13.0, theme::TEXT_DIM)).width(180),
+            row![choice("Off", Notify::Off), choice("Flash the taskbar", Notify::Flash), choice("Also notify me", Notify::Windows)].spacing(4),
+        ]
+        .spacing(12)
+        .align_y(Alignment::Center),
+        words(
+            "While you are in another window: when a Lattice session asks you something or finishes its work. \
+             Also notify me shows a Windows notification too; for it, Alelyon adds an \u{201c}Alelyon (notifications)\u{201d} \
+             entry to your Start menu the first time, which is how Windows knows whose notification it is.",
+            12.0,
+            theme::TEXT_FAINT,
+        ),
+    ]
+    .spacing(6)
+    .into()
+}
+
 fn agents<'a>(s: &'a State) -> El<'a> {
     let choice = |label: &'a str, on: bool| -> El<'a> {
         button(words(label, 12.5, theme::TEXT))
@@ -422,7 +528,8 @@ fn agents<'a>(s: &'a State) -> El<'a> {
             .style(theme::segment_button(s.agent_bridge == on))
             .into()
     };
-    column![
+    let col = column![
+        notify_row(s),
         row![
             container(words("Let my agent drive Alelyon", 13.0, theme::TEXT_DIM)).width(180),
             row![choice("Off", false), choice("On", true)].spacing(4),
@@ -438,8 +545,8 @@ fn agents<'a>(s: &'a State) -> El<'a> {
             theme::TEXT_FAINT,
         ),
     ]
-    .spacing(6)
-    .into()
+    .spacing(6);
+    if s.agent_bridge { col.push(connect()).into() } else { col.into() }
 }
 
 fn appearance<'a>(s: &'a State) -> El<'a> {
@@ -563,4 +670,45 @@ pub fn panel<'a>(s: &'a State) -> El<'a> {
         .height(Length::Fixed(HEIGHT))
         .style(theme::panel)
         .into()
+}
+
+#[cfg(test)]
+mod connect_tests {
+    use super::{cli_path, connect_lines};
+    use std::path::{Path, PathBuf};
+
+    /// Mutants: the source's own build not found from the app's place; a CLI beside the app not preferred; a path
+    /// that does not exist offered.
+    #[test]
+    fn alelyon_cli_is_found_beside_the_app_or_where_its_source_builds_it() {
+        let exe = Path::new(r"C:\src\app\centcom-owner\target\release\centcom-owner.exe");
+        let built = PathBuf::from(r"C:\src\app\crates\alelyon-cli\target\release\alelyon-cli.exe");
+        let beside = PathBuf::from(r"C:\src\app\centcom-owner\target\release\alelyon-cli.exe");
+        assert_eq!(cli_path(exe, |p| p == built), Some(built.clone()));
+        assert_eq!(cli_path(exe, |p| p == built || p == beside), Some(beside), "one carried beside the app first");
+        assert_eq!(cli_path(exe, |_| false), None);
+        assert_eq!(cli_path(Path::new(r"C:\Apps\Alelyon\centcom.exe"), |p| p == built), None, "not under that source");
+    }
+
+    #[test]
+    fn the_lines_name_the_cli_by_its_whole_path() {
+        let [(claude, line), (codex, config)] = connect_lines(Path::new(r"C:\x y\alelyon-cli.exe"));
+        assert_eq!((claude, line.as_str()), ("Claude Code", r#"claude mcp add alelyon -- "C:\x y\alelyon-cli.exe" mcp"#));
+        assert!(codex.starts_with("Codex"));
+        assert_eq!(config, concat!("[mcp_servers.alelyon]\n", r"command = 'C:\x y\alelyon-cli.exe'", "\nargs = [\"mcp\"]"));
+    }
+}
+
+#[cfg(test)]
+mod notify_tests {
+    use super::Notify;
+
+    #[test]
+    fn the_notify_choice_is_kept_by_its_key_and_flashes_by_default() {
+        for n in [Notify::Off, Notify::Flash, Notify::Windows] {
+            assert_eq!(Notify::from_key(n.key()), n);
+        }
+        assert_eq!(Notify::default(), Notify::Flash);
+        assert_eq!(Notify::from_key("something else"), Notify::Flash);
+    }
 }

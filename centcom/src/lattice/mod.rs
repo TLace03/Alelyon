@@ -15,6 +15,8 @@ pub mod brain;
 pub mod chat;
 pub mod core;
 pub mod digest;
+pub mod fleet;
+pub mod notify;
 pub mod foundry;
 pub mod foundry_store;
 pub mod ide;
@@ -362,6 +364,10 @@ pub struct State {
     waiting_dialogs: VecDeque<Ask>,
 
     pub runs: Runs,
+    /// What to tell the person while they are elsewhere (`notify`), taken by the app; and the chats running at the
+    /// last read of the list, to see which finished.
+    pub notes: Vec<notify::Note>,
+    running_before: std::collections::HashSet<String>,
     /// The IDE: the folder's tree, the editor and its tabs, the panels (`ide/`).
     pub ide: ide::Ide,
     pub endpoints: Option<Endpoints>,
@@ -437,6 +443,11 @@ pub enum Msg {
     AllowMcpAlways(String),
     AnswerText(String, String),
     Answer(String),
+    /// A question's, approval's, plan's or choice's action, done in the topic named (not the open chat), where the
+    /// window stays; then what waits is read again.
+    InTopic(String, Box<Msg>),
+    /// `/compact` was done (the summary written), or why not.
+    Compacted(Result<String, String>),
     Attach,
     Attached(Result<WorkspaceView, String>),
     Trust,
@@ -563,6 +574,8 @@ impl State {
             dialog: None,
             waiting_dialogs: VecDeque::new(),
             runs: Runs::default(),
+            notes: Vec::new(),
+            running_before: std::collections::HashSet::new(),
             ide: ide::Ide::default(),
             endpoints: None,
             form: None,
@@ -920,13 +933,22 @@ impl State {
                 self.listing = false;
                 match result {
                     Ok(list) => {
+                        // Something asked the reader: what waits is read again, for the open group's session ...
+                        let mut asked_ids = Vec::new();
                         if let Some(services) = &self.services {
                             for id in services.attention.take() {
+                                asked_ids.push(id.clone());
                                 if self.open.as_ref().is_none_or(|c| c.id() != id) {
                                     self.calling.insert(id);
                                 }
                             }
                         }
+                        let asked = !asked_ids.is_empty();
+                        // What to tell the person if they are elsewhere: who asked, and who finished.
+                        self.notes.extend(notify::notes(&self.running_before, &list, &asked_ids));
+                        self.running_before = notify::running(&list);
+                        // ... and while a group is open, its sessions' status is kept current with every read.
+                        let waiting = if asked || self.ide.groups.open.is_some() { self.read_waiting() } else { Task::none() };
                         // A debug build's photograph of the grid: the newest chats put in it, up to its size (a release
                         // build never reads this).
                         #[cfg(debug_assertions)]
@@ -941,14 +963,14 @@ impl State {
                         #[cfg(debug_assertions)]
                         if !grid_photo.is_empty() {
                             let tasks: Vec<_> = grid_photo.into_iter().map(|id| self.grid(ide::grid::GridMsg::Add(id))).collect();
-                            return Task::batch(tasks);
+                            return Task::batch(tasks.into_iter().chain([waiting]));
                         }
                         // The chat left open last time, when it is still listed; else, on one surface, the current topic.
                         let restore = self.restore_chat();
                         if let Some(id) = self.topic_to_open() {
-                            return Task::batch([restore, self.update(Msg::Open(id))]);
+                            return Task::batch([waiting, restore, self.update(Msg::Open(id))]);
                         }
-                        return restore;
+                        return Task::batch([waiting, restore]);
                     }
                     Err(why) => self.problem = Some(why),
                 }
@@ -1187,6 +1209,28 @@ impl State {
                         services.chat.begin_brainstorm(&text, self.ide.project.as_deref());
                     }
                     return self.send_text(text, Mode::Ask, None, false);
+                }
+                // `/compact [what to keep]`: the open chat's summary is written now, and later turns start from it.
+                if let Some(focus) = compact_command(&text)
+                    && let (Some(c), Some(services)) = (self.open.as_ref(), self.services.clone())
+                    && !self.sending
+                {
+                    let (chat, id) = (services.chat.clone(), c.id().to_string());
+                    self.routed = Some("Compacting: writing the chat's summary\u{2026}".to_string());
+                    return Task::perform(on(&services, async move { chat.compact(&id, focus).await }), |r| {
+                        Msg::Compacted(r.unwrap_or_else(|| Err(STOPPED.to_string())))
+                    });
+                }
+                // Addressed to a topic (`@topic`): it goes there, not where the group would route it.
+                if ONE_SURFACE && edit_of.is_none() && !text.is_empty() && !self.sending
+                    && let Some(id) = self.ide.groups.to_topic.take()
+                {
+                    if self.open.as_ref().is_none_or(|c| c.id() != id) {
+                        let title = self.list.as_ref().and_then(|l| l.conversations.iter().find(|c| c.id == id)).map(|c| c.title.clone());
+                        self.routed = Some(format!("Sent to \u{201c}{}\u{201d}.", title.unwrap_or_default()));
+                        self.route_to = Some(Some(id));
+                    }
+                    return self.send_text(text, self.mode, None, false);
                 }
                 // One chat surface: the core says which topic the message belongs to first.
                 if ONE_SURFACE && edit_of.is_none() && !text.is_empty() && !self.sending && !self.planning()
@@ -1430,6 +1474,19 @@ impl State {
             }
             Msg::AnswerText(call, text) => {
                 self.answers.insert(call, text);
+            }
+            Msg::Compacted(Ok(_)) => {
+                self.composer = text_editor::Content::new();
+                self.routed = Some("Compacted: the chat's later turns start from its summary.".to_string());
+            }
+            Msg::Compacted(Err(why)) => {
+                self.routed = None;
+                self.problem = Some(why);
+            }
+            Msg::InTopic(id, msg) => {
+                let typing = matches!(*msg, Msg::AnswerText(..));
+                let act = self.act_in(id, *msg);
+                return if typing { act } else { act.chain(self.read_waiting()) };
             }
             Msg::Answer(call) => {
                 let text = self.answers.remove(&call).unwrap_or_default();
@@ -2276,6 +2333,16 @@ impl Default for State {
     }
 }
 
+/// The composer's text as `/compact` and what to keep (`Some(None)`: nothing named); `None` when it is not one.
+pub(crate) fn compact_command(text: &str) -> Option<Option<String>> {
+    let rest = text.trim().strip_prefix("/compact")?;
+    if !(rest.is_empty() || rest.starts_with(char::is_whitespace)) {
+        return None;
+    }
+    let focus = rest.trim();
+    Some((!focus.is_empty()).then(|| focus.to_string()))
+}
+
 pub(crate) const STOPPED: &str = "Lattice's services stopped before answering.";
 
 /// A field of the endpoint form.
@@ -2861,6 +2928,95 @@ mod tests {
             assert_eq!(state.open.as_ref().map(|c| c.id().to_string()).as_deref(), Some("c"), "acting on a task does not open it");
         }
 
+        /// What the open group's other topics wait for shows under its session, answered in that topic: a wait in
+        /// the open topic (shown in place), in another group, or with no group open is not repeated there; an answer
+        /// is kept for its call and the window stays on the topic it shows.
+        /// Mutants: the open topic's wait drawn twice; another group's wait shown; an answer sent to the open chat.
+        #[test]
+        fn a_groups_other_topics_questions_show_under_its_session_and_are_answered_where_they_wait() {
+            use ide::groups::GroupsMsg;
+            use lattice_core::convo::fleet::Wait;
+            let mut state = State::new();
+            state.list = Some(list(&[("c", 30.0), ("x", 20.0), ("y", 10.0)]));
+            let _ = state.update(Msg::Opened("c".into(), Ok(snapshot("c", 30.0))));
+            let wait = |topic: &str, group: &str| Wait {
+                group: Some(group.into()),
+                group_name: Some("Parser".into()),
+                topic: topic.into(),
+                topic_title: format!("Topic {topic}"),
+                call: format!("q-{topic}"),
+                kind: "question",
+                text: "Which format first?".into(),
+                options: vec!["CSV".into(), "JSON".into()],
+            };
+            let waits = vec![wait("x", "g"), wait("c", "g"), wait("y", "other")];
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(GroupsMsg::Waiting(waits, Vec::new()))));
+            assert!(ide::agent::waiting_here(&state).is_empty(), "no group open");
+            state.ide.groups.open = Some("g".into());
+            let here: Vec<&str> = ide::agent::waiting_here(&state).iter().map(|w| w.topic.as_str()).collect();
+            assert_eq!(here, ["x"], "the open topic's own wait is in place, another group's is not here");
+
+            let typed = ide::agent::in_topic("x", Msg::AnswerText("q-x".into(), "CSV".into()));
+            assert!(matches!(&typed, Msg::InTopic(id, m) if id == "x" && matches!(**m, Msg::AnswerText(..))));
+            assert!(matches!(ide::agent::in_topic("x", Msg::Send), Msg::Send), "only answers are done in the topic");
+            let _ = state.update(typed);
+            assert_eq!(state.answers.get("q-x").map(String::as_str), Some("CSV"));
+            let _ = state.update(ide::agent::in_topic("x", Msg::Answer("q-x".into())));
+            assert_eq!(state.open.as_ref().map(|c| c.id().to_string()).as_deref(), Some("c"), "the window stays");
+        }
+
+        /// `@topic` in an open group: the group's topics whose titles hold what is typed are offered first; choosing
+        /// one takes the `@word` out and addresses the message to it, sent there rather than routed; another group's
+        /// topic is never offered, and opening another group drops the address.
+        /// Mutants: a topic of another group offered; the `@word` left in the message; the message routed anyway.
+        #[test]
+        fn an_at_topic_addresses_the_message_to_that_topic_of_the_open_group() {
+            use ide::mention::{Entry, MentionMsg};
+            use lattice_core::convo::groups::Group;
+            let mut state = State::new();
+            state.list = Some(list(&[("c", 30.0), ("b", 20.0), ("z", 10.0)]));
+            let _ = state.update(Msg::Opened("c".into(), Ok(snapshot("c", 30.0))));
+            let group = |id: &str, topics: &[&str]| Group {
+                id: id.into(), name: id.into(), project: None, topics: topics.iter().map(|t| t.to_string()).collect(),
+                created: 1.0, updated: 1.0, archived: false,
+            };
+            state.ide.groups.list = vec![(group("g", &["c", "b"]), "Parser".into()), (group("h", &["z"]), "Docs".into())];
+            state.ide.groups.open = Some("g".into());
+            state.composer = text_editor::Content::with_text("Please check @topic");
+            let offered = ide::mention::matches(&state);
+            assert_eq!(
+                offered.iter().filter_map(|e| match e { Entry::Topic(id, _) => Some(id.as_str()), Entry::File(_) => None }).collect::<Vec<_>>(),
+                ["c", "b"],
+                "the open group's topics only"
+            );
+            state.ide.mention.selected = 1;
+            let _ = state.mention(MentionMsg::Pick(None));
+            assert_eq!(state.ide.groups.to_topic.as_deref(), Some("b"));
+            assert_eq!(state.composer.text().trim_end(), "Please check", "the @word is not sent");
+            state.composer = text_editor::Content::with_text("Use CSV first.");
+            let _ = state.update(Msg::Send);
+            assert_eq!(state.route_to, Some(Some("b".to_string())), "sent to it, not routed");
+            assert_eq!(state.routed.as_deref(), Some("Sent to \u{201c}topic b\u{201d}."));
+            assert!(state.ide.groups.to_topic.is_none(), "an address is for one message");
+
+            state.ide.groups.to_topic = Some("b".into());
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(ide::groups::GroupsMsg::Open(Some("h".into())))));
+            assert!(state.ide.groups.to_topic.is_none(), "another group: the address is dropped");
+        }
+
+        /// A group made with a first message (the person's own agent handing work over): the message is put in the
+        /// composer to be sent once the group is read and open; a group made by hand has none.
+        #[test]
+        fn a_group_made_with_a_first_message_sends_it_in_its_chat() {
+            use ide::groups::GroupsMsg;
+            let mut state = State::new();
+            let _ = state.update(Msg::Ide(ide::IdeMsg::Groups(GroupsMsg::Created("g".into(), Some("Build the CSV parser.".into())))));
+            assert_eq!(state.composer.text().trim_end(), "Build the CSV parser.");
+            let mut by_hand = State::new();
+            let _ = by_hand.update(Msg::Ide(ide::IdeMsg::Groups(GroupsMsg::Created("g".into(), None))));
+            assert!(by_hand.composer.text().trim().is_empty());
+        }
+
         #[test]
         fn working_in_a_project_with_no_topic_starts_one_and_new_chat_is_not_offered() {
             let mut state = State::new();
@@ -2944,5 +3100,28 @@ mod tests {
         let _ = state.update(Msg::DialogAnswer(true));
         assert!(state.dialog.is_none());
         assert_eq!(futures::executor::block_on(rx), Ok(true));
+    }
+}
+
+#[cfg(test)]
+mod compact_tests {
+    use super::compact_command;
+    use super::ide::agent::context_words;
+    use lattice_core::convo::fork::ContextUse;
+
+    #[test]
+    fn compact_is_the_command_alone_with_what_to_keep() {
+        assert_eq!(compact_command("/compact"), Some(None));
+        assert_eq!(compact_command("  /compact   the CSV rules "), Some(Some("the CSV rules".into())));
+        assert_eq!(compact_command("/compactly"), None, "another word");
+        assert_eq!(compact_command("please /compact"), None, "only at the start");
+    }
+
+    #[test]
+    fn the_meter_says_how_full_and_offers_compact_when_it_fills() {
+        let quiet = ContextUse { used: 300, limit: 1_000, left_out: 0 };
+        assert_eq!(context_words(&quiet), "Context 30% full at the last turn");
+        let full = ContextUse { used: 900, limit: 1_000, left_out: 3 };
+        assert_eq!(context_words(&full), "Context 90% full at the last turn, 3 earlier exchanges left out. /compact [what to keep] summarises it now");
     }
 }

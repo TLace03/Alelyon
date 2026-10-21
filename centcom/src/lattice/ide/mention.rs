@@ -1,5 +1,9 @@
-//! The composer's file mentions, `@path` (as Cursor and Claude Code
+//! The composer's mentions: a topic of the open group, `@topic`, and a file, `@path` (as Cursor and Claude Code
 //! take them; the core's `convo::mentions` gives the agent's model the files a message names).
+//!
+//! A topic comes first: in an open group, the topics whose titles hold what is typed after the `@`. Choosing one
+//! takes the `@word` out of the text and addresses the message to that topic (`GroupsState::to_topic`, shown over the
+//! composer): it goes there instead of where the group would route it.
 //!
 //! Typing `@` at the start of the composer or after a space lists the open folder's files, ranked against what is typed
 //! after it as the Explorer's filter ranks them. Up and Down choose, and Enter or Tab puts `@path ` in the composer in
@@ -18,8 +22,31 @@ use crate::ui::{self, label, mono};
 
 type El<'a> = Element<'a, Msg>;
 
-/// At most this many files are shown at once.
+/// At most this many entries are shown at once, and at most [`TOPICS`] of them topics.
 pub const SHOWN: usize = 8;
+pub const TOPICS: usize = 3;
+
+/// One entry of the list.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Entry {
+    /// A topic of the open group: its id and title.
+    Topic(String, String),
+    File(RankedPath),
+}
+
+/// The open group's topics whose titles hold `query` (any case), in the group's order; none with no group open.
+fn topics(state: &State, query: &str) -> Vec<Entry> {
+    let (Some(group), Some(list)) = (state.ide.groups.shown(), state.list.as_ref()) else { return Vec::new() };
+    let wanted = query.to_lowercase();
+    group
+        .topics
+        .iter()
+        .filter_map(|id| list.conversations.iter().find(|c| c.id == *id))
+        .filter(|c| !c.title.is_empty() && c.title.to_lowercase().contains(&wanted))
+        .take(TOPICS)
+        .map(|c| Entry::Topic(c.id.clone(), c.title.clone()))
+        .collect()
+}
 
 /// The list's state.
 #[derive(Debug, Default)]
@@ -51,23 +78,24 @@ pub fn query(text: &str) -> Option<&str> {
     word.strip_prefix('@')
 }
 
-/// The files the list shows now: the folder's, ranked against what is typed (the first ones when nothing is); none
-/// when the list is closed, no folder is open, or no `@` is being typed.
-pub fn matches(state: &State) -> Vec<RankedPath> {
+/// What the list shows now: the open group's matching topics, then the folder's files ranked against what is typed
+/// (the first ones when nothing is); nothing when the list is closed or no `@` is being typed.
+pub fn matches(state: &State) -> Vec<Entry> {
     let text = state.composer.text();
     if state.ide.mention.closed_for.as_deref() == Some(text.as_str()) {
         return Vec::new();
     }
-    let (Some(query), Some(listing)) = (query(&text), state.ide.files()) else { return Vec::new() };
-    if query.is_empty() {
-        return listing
-            .paths
-            .iter()
-            .take(SHOWN)
-            .map(|path| RankedPath { path: path.clone(), score: 0, positions: Vec::new() })
-            .collect();
-    }
-    lattice_core::text::rank::rank_paths(query, listing.paths.iter().map(String::as_str), SHOWN)
+    let Some(query) = query(&text) else { return Vec::new() };
+    let mut shown = topics(state, query);
+    let Some(listing) = state.ide.files() else { return shown };
+    let room = SHOWN - shown.len();
+    let files = if query.is_empty() {
+        listing.paths.iter().take(room).map(|path| RankedPath { path: path.clone(), score: 0, positions: Vec::new() }).collect()
+    } else {
+        lattice_core::text::rank::rank_paths(query, listing.paths.iter().map(String::as_str), room)
+    };
+    shown.extend(files.into_iter().map(Entry::File));
+    shown
 }
 
 /// Whether the list is shown (and so takes Enter, Tab, Up, Down and Esc from the composer).
@@ -91,7 +119,14 @@ impl State {
                 let text = self.composer.text();
                 let Some(typed) = query(&text) else { return Task::none() };
                 let kept = &text[..text.len() - typed.len() - 1];
-                let next = format!("{kept}@{} ", picked.path);
+                let next = match picked {
+                    Entry::File(file) => format!("{kept}@{} ", file.path),
+                    // A topic is not text: the message is addressed to it.
+                    Entry::Topic(id, _) => {
+                        self.ide.groups.to_topic = Some(id.clone());
+                        kept.to_string()
+                    }
+                };
                 self.composer = text_editor::Content::with_text(&next);
                 self.composer.perform(text_editor::Action::Move(text_editor::Motion::DocumentEnd));
                 self.ide.mention.closed_for = Some(self.composer.text());
@@ -122,18 +157,32 @@ pub fn menu<'a>(state: &'a State) -> Option<El<'a>> {
     let shown = matches(state);
     let chosen = state.ide.mention.selected.min(shown.len().checked_sub(1)?);
     let mut col = Column::new().spacing(1);
-    for (at, ranked) in shown.into_iter().enumerate() {
-        let name = ranked.path.rsplit('/').next().unwrap_or(&ranked.path).to_string();
-        let line = Row::new()
-            .spacing(8)
-            .align_y(Alignment::Center)
-            .push(mono(format!("@{}", ui::cut(&name, 32)), 12.0, theme::GOLD))
-            .push(label(ui::cut(&ranked.path, 72), 11.5, theme::TEXT_DIM).width(Length::Fill));
+    let any_file = shown.iter().any(|e| matches!(e, Entry::File(_)));
+    for (at, entry) in shown.into_iter().enumerate() {
+        let line = match &entry {
+            Entry::File(ranked) => {
+                let name = ranked.path.rsplit('/').next().unwrap_or(&ranked.path).to_string();
+                Row::new()
+                    .spacing(8)
+                    .align_y(Alignment::Center)
+                    .push(mono(format!("@{}", ui::cut(&name, 32)), 12.0, theme::GOLD))
+                    .push(label(ui::cut(&ranked.path, 72), 11.5, theme::TEXT_DIM).width(Length::Fill))
+            }
+            Entry::Topic(_, title) => Row::new()
+                .spacing(8)
+                .align_y(Alignment::Center)
+                .push(label(format!("@{}", ui::cut(title, 40)), 12.0, theme::GOLD))
+                .push(label("a topic of this group: the message goes to it", 11.5, theme::TEXT_DIM).width(Length::Fill)),
+        };
         col = col.push(
             button(line).width(Length::Fill).padding([4.0, 8.0]).style(theme::list_row(at == chosen)).on_press(go(MentionMsg::Pick(Some(at)))),
         );
     }
-    let foot = "Enter or Tab mentions the file: the agent is given it with the message \u{00B7} Esc closes";
+    let foot = if any_file {
+        "Enter or Tab mentions it: a file is given to the agent with the message, a topic gets the message \u{00B7} Esc closes"
+    } else {
+        "Enter or Tab sends the message to that topic \u{00B7} Esc closes"
+    };
     col = col.push(container(label(foot, 10.5, theme::TEXT_FAINT)).padding([3.0, 8.0]));
     Some(container(col).padding(4).width(Length::Fill).style(theme::card).into())
 }
