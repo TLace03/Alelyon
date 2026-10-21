@@ -39,6 +39,8 @@ pub mod files;
 pub mod find;
 pub mod grid;
 pub mod groups;
+pub mod sessions;
+pub mod record;
 pub mod highlight;
 pub mod jump;
 pub mod mention;
@@ -548,6 +550,9 @@ pub struct Ide {
     /// What the Chats list is searched for (titles), the folders whose every chat is shown, and whether the
     /// projects are listed under Projects.
     pub chat_search: String,
+    /// What was said in sessions that matches the search (Enter): the words searched and the best match of each
+    /// session (lattice-core `search_sessions`).
+    pub chat_hits: Option<(String, Vec<lattice_core::convo::recall::Hit>)>,
     pub chat_more: HashSet<String>,
     pub projects_open: bool,
     /// Tool steps opened to show their output.
@@ -674,6 +679,7 @@ impl Default for Ide {
             editor_dismissed: false,
             working_on: Vec::new(),
             chat_search: String::new(),
+            chat_hits: None,
             chat_more: HashSet::new(),
             projects_open: false,
             expanded_calls: HashSet::new(),

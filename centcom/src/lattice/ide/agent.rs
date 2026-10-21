@@ -153,7 +153,9 @@ fn stream<'a>(c: &'a Conversation, state: &'a State, phase: f32) -> El<'a> {
         let folded = state.ide.folded_topics.contains(older.id());
         col = col.push(divider(older, true, folded));
         if !folded {
-            col = col.push(transcript(older, state, phase));
+            // Its questions and approvals are answered in it, not in the topic open below.
+            let id = older.id().to_string();
+            col = col.push(transcript(older, state, phase).map(move |m| in_topic(&id, m)));
         }
     }
     if !state.earlier.is_empty() {
@@ -161,7 +163,73 @@ fn stream<'a>(c: &'a Conversation, state: &'a State, phase: f32) -> El<'a> {
     }
     col = col.push(transcript(c, state, phase));
     // What the tasks wait for, as cards: answered here, on the task's tile, or by the agent on the reader's word.
-    col.push(task_prompts(state)).into()
+    col.push(task_prompts(state)).push(topic_prompts(state)).into()
+}
+
+/// `m` done in the topic `id` when it answers something there (a question, an approval, a plan, a choice); anything
+/// else as it is.
+pub(in crate::lattice) fn in_topic(id: &str, m: Msg) -> Msg {
+    let answers = matches!(
+        m,
+        Msg::Decide(..)
+            | Msg::AllowAlways(..)
+            | Msg::Answer(..)
+            | Msg::AnswerText(..)
+            | Msg::Ide(IdeMsg::PlanApprove(..))
+            | Msg::Ide(IdeMsg::PlanKeep(..))
+            | Msg::Ide(IdeMsg::Choose(..))
+    );
+    if answers { Msg::InTopic(id.to_string(), Box::new(m)) } else { m }
+}
+
+/// What the open group's other topics wait for (`convo::fleet`), so the reader answers it here without opening
+/// them: each question with its options, and each approval, under its topic's name, done in that topic. A topic drawn
+/// above (the open one, an earlier one not folded) shows its own in place, and a task's tile has its card in
+/// `task_prompts`.
+fn topic_prompts<'a>(state: &'a State) -> El<'a> {
+    let mut col = Column::new().spacing(10).width(Length::Fill);
+    for wait in waiting_here(state) {
+        let card = if wait.kind == "question" {
+            question(&wait.call, &wait.text, &wait.options, false, state)
+        } else {
+            approval_line(&wait.call, &wait.text)
+        };
+        let title = if wait.topic_title.is_empty() { "A topic" } else { wait.topic_title.as_str() };
+        let id = wait.topic.clone();
+        col = col.push(
+            Column::new()
+                .spacing(4)
+                .push(label(format!("\u{201c}{}\u{201d} asks you", ui::cut(title, 48)), 11.5, theme::GOLD))
+                .push(card.map(move |m| in_topic(&id, m))),
+        );
+    }
+    col.into()
+}
+
+/// What `topic_prompts` shows: the open group's waits in topics not drawn above and not on a task's tile.
+pub(in crate::lattice) fn waiting_here(state: &State) -> Vec<&lattice_core::convo::fleet::Wait> {
+    let Some(group) = state.ide.groups.open.as_deref() else { return Vec::new() };
+    let mut drawn: Vec<&str> = state.open.iter().map(|c| c.id()).collect();
+    drawn.extend(state.earlier.iter().filter(|c| !state.ide.folded_topics.contains(c.id())).map(|c| c.id()));
+    drawn.extend(state.ide.grid.tiles.iter().map(|t| t.id.as_str()));
+    state.ide.groups.waiting.iter().filter(|w| w.group.as_deref() == Some(group) && !drawn.contains(&w.topic.as_str())).collect()
+}
+
+/// An approval another topic waits for, as the fleet words it: what it would allow, approved or refused here (allowing
+/// it always is done in the topic itself, where its full request shows).
+fn approval_line<'a>(call: &'a str, what: &'a str) -> El<'a> {
+    let col = Column::new()
+        .spacing(8)
+        .push(label("The agent asks to", 11.5, theme::GOLD))
+        .push(label(what, 13.5, theme::TEXT))
+        .push(
+            row![
+                ui::primary("Approve", Some(Msg::Decide(call.to_string(), true))),
+                ui::secondary("Refuse", Some(Msg::Decide(call.to_string(), false))),
+            ]
+            .spacing(6),
+        );
+    container(col).padding([10.0, 12.0]).width(Length::Fill).style(prompt_card(theme::GOLD)).into()
 }
 
 /// The questions, approvals and plans the tasks wait for, each under its task's name; each action is done in that
@@ -607,6 +675,7 @@ fn user_turn<'a>(turn: &'a ChatTurn, state: &'a State, running: bool) -> El<'a> 
     }
     if !turn.id.is_empty() && !running {
         acts = acts.push(ghost(if editing { "Editing below…" } else { "Edit" }, (!editing).then(|| go(IdeMsg::EditTurn(turn.id.clone())))));
+        acts = acts.push(ghost("Fork", (!editing).then(|| go(IdeMsg::ForkTurn(turn.id.clone())))));
     }
     column![row![space().width(Length::Fill), bubble], row![space().width(Length::Fill), acts]].spacing(2).into()
 }
@@ -2021,6 +2090,18 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
             .align_y(Alignment::Center),
         );
     }
+    // Addressed to one topic (`@topic`): it goes there, until taken off.
+    if let Some(id) = &state.ide.groups.to_topic {
+        let title = state.list.as_ref().and_then(|l| l.conversations.iter().find(|c| c.id == *id)).map_or("a topic", |c| c.title.as_str());
+        pill = pill.push(
+            row![
+                label(format!("To \u{201c}{}\u{201d}: only this topic gets the message.", ui::cut(title, 48)), 11.5, theme::GOLD),
+                space().width(Length::Fill),
+                ghost("Not to it", Some(go(IdeMsg::Groups(super::groups::GroupsMsg::To(None))))),
+            ]
+            .align_y(Alignment::Center),
+        );
+    }
     // The images attached to this message, each with a way to take it off.
     if !state.ide.attached.is_empty() {
         let mut images = Row::new().spacing(6);
@@ -2193,8 +2274,35 @@ fn composer<'a>(state: &'a State, phase: f32) -> El<'a> {
 
 /// The line under the composer, when there is something to say: with no folder, what the agent can reach; the model
 /// chosen (why it cannot run, that it leaves this computer, or where it runs); and how the last message was routed.
+/// The context meter's words for `used`: how much of the budget the last turn used, what was left out, and /compact.
+pub(in crate::lattice) fn context_words(used: &lattice_core::convo::fork::ContextUse) -> String {
+    let mut words = format!("Context {}% full at the last turn", used.percent());
+    if used.left_out > 0 {
+        words.push_str(&format!(
+            ", {} earlier exchange{} left out",
+            used.left_out,
+            if used.left_out == 1 { "" } else { "s" }
+        ));
+    }
+    if used.percent() >= 60 || used.left_out > 0 {
+        words.push_str(". /compact [what to keep] summarises it now");
+    }
+    words
+}
+
+fn context_line<'a>(state: &'a State) -> Option<El<'a>> {
+    let open = state.open.as_ref()?;
+    let used = state.services.as_ref()?.chat.context_use(open.id())?;
+    let tone = if used.percent() >= 85 { theme::CAUTION } else { theme::TEXT_FAINT };
+    Some(label(context_words(&used), 11.0, tone).into())
+}
+
 fn under_composer<'a>(state: &'a State) -> Option<El<'a>> {
     let mut parts: Vec<El<'a>> = Vec::new();
+    // How full the open chat's context was at its last turn, and /compact when it fills.
+    if let Some(line) = context_line(state) {
+        parts.push(line);
+    }
     if attached_folder(state).is_none() {
         if state.ide.tools.auto.is_some_and(|(on, _)| on) {
             parts.push(
@@ -2319,7 +2427,14 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
     let mut col = Column::new().spacing(2);
     // Search, then the places.
     col = col.push(
-        container(text_input("Search", &ide.chat_search).on_input(|t| go(IdeMsg::ChatSearch(t))).padding([5.0, 8.0]).size(12.5).style(ui::input_style))
+        container(
+            text_input("Search (Enter: what was said)", &ide.chat_search)
+                .on_input(|t| go(IdeMsg::ChatSearch(t)))
+                .on_submit(go(IdeMsg::ChatSearchSaid))
+                .padding([5.0, 8.0])
+                .size(12.5)
+                .style(ui::input_style),
+        )
             .padding(Padding { top: 8.0, right: 10.0, bottom: 6.0, left: 10.0 }),
     );
     col = col.push(place("+", "New", false, Msg::New));
@@ -2340,6 +2455,10 @@ pub fn chats<'a>(state: &'a State, phase: f32) -> El<'a> {
         );
     }
     col = col.push(filters);
+    // What was said in the sessions that matches the search: each opens its session where it stopped.
+    if let Some((query, hits)) = ide.chat_hits.as_ref().filter(|(q, _)| q == ide.chat_search.trim()) {
+        col = col.push(said_hits(query, hits));
+    }
     let mut rows = Column::new().spacing(1);
     match &state.list {
         None => rows = rows.push(container(ui::working(phase, "Reading the chats…")).padding(12)),
@@ -2514,6 +2633,33 @@ pub fn commands<'a>(state: &'a State, phase: f32) -> El<'a> {
         }
     };
     row![left, container(space().width(1)).height(Length::Fill).style(theme::line), container(right).width(Length::Fill).height(Length::Fill).style(|_| solid(theme::CANVAS))].into()
+}
+
+/// The sessions in which what was searched was said, best first: each line its title, when, and the words around the
+/// match; a click opens the session where it stopped.
+fn said_hits<'a>(query: &'a str, hits: &'a [lattice_core::convo::recall::Hit]) -> El<'a> {
+    let mut col = Column::new().spacing(2).padding(Padding { top: 8.0, right: 10.0, bottom: 4.0, left: 10.0 });
+    col = col.push(label(
+        if hits.is_empty() { format!("Nothing said in a session matches \u{201c}{}\u{201d}.", ui::cut(query, 40)) } else { "Said in sessions".to_string() },
+        11.0,
+        theme::TEXT_FAINT,
+    ));
+    for hit in hits {
+        let title = if hit.title.is_empty() { "Untitled" } else { hit.title.as_str() };
+        let line = Column::new()
+            .spacing(1)
+            .push(
+                Row::new()
+                    .spacing(6)
+                    .push(container(label(ui::cut(title, 40), 12.0, theme::TEXT)).width(Length::Fill).clip(true))
+                    .push(label(super::ago(crate::utc::now() - hit.ts), 10.5, theme::TEXT_FAINT)),
+            )
+            .push(label(ui::cut(&hit.snippet, 120), 11.0, theme::TEXT_DIM));
+        col = col.push(
+            button(line).width(Length::Fill).padding([4.0, 8.0]).style(theme::list_row(false)).on_press(Msg::Open(hit.conversation.clone())),
+        );
+    }
+    col.into()
 }
 
 #[cfg(test)]

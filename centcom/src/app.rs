@@ -944,6 +944,7 @@ impl App {
                 }
                 return Task::none();
             }
+            c if lattice::fleet::READS.contains(&c) => return self.lattice.fleet_read(&ask).map(Message::Lattice),
             "runs" => {
                 let runs: Vec<Value> = self.lattice.runs.list.iter().take(50).map(|r| json!({
                     "id": r.id, "task": r.task, "agent": r.agent_label, "model": r.model_label,
@@ -962,6 +963,27 @@ impl App {
             "chat_send" => text("text").map(|t| format!("send \"{}\"", t.chars().take(60).collect::<String>())),
             "open_url" => text("url").map(|u| format!("open {u}")),
             "run_start" => text("task").map(|t| format!("start a run: \"{}\"", t.chars().take(60).collect::<String>())),
+            "fleet_answer" => match (text("topic"), text("call"), text("text")) {
+                (Some(_), Some(_), Some(t)) => Some(format!("answer a question: \"{}\"", t.chars().take(60).collect::<String>())),
+                _ => None,
+            },
+            "fleet_send" => match (text("id"), text("text")) {
+                (Some(_), Some(t)) => Some(format!("write in a group: \"{}\"", t.chars().take(60).collect::<String>())),
+                _ => None,
+            },
+            "fleet_new_group" => match (text("name"), text("text")) {
+                (Some(n), Some(_)) => Some(format!("start a group: \"{}\"", n.chars().take(60).collect::<String>())),
+                _ => None,
+            },
+            "fleet_reply" => match (text("topic"), text("text")) {
+                (Some(_), Some(t)) => Some(format!("guide a session: \"{}\"", t.chars().take(60).collect::<String>())),
+                _ => None,
+            },
+            "fleet_stop" => text("topic").map(|_| "stop a session's running turn".to_string()),
+            "fleet_decide" => match (text("id"), text("decision")) {
+                (Some(_), Some(d)) => Some(format!("record a decision: \"{}\"", d.chars().take(60).collect::<String>())),
+                _ => None,
+            },
             _ => {
                 ask.answer(404, json!({"error": "unknown-command", "message": "That is not a bridge command."}));
                 return Task::none();
@@ -1003,6 +1025,49 @@ impl App {
                 }
                 Task::batch([go_lattice(), self.lattice.open_web(url).map(Message::Lattice)])
             }
+            "fleet_answer" => {
+                let (topic, call) = (text("topic").unwrap_or_default(), text("call").unwrap_or_default());
+                let (status, body) = self.lattice.fleet_answer(&topic, &call, text("text").unwrap_or_default());
+                if status != 200 {
+                    ask.answer(status, body);
+                    return Task::none();
+                }
+                Task::none()
+            }
+            "fleet_new_group" => match self.lattice.fleet_new_group(&text("name").unwrap_or_default(), &text("text").unwrap_or_default()) {
+                Ok(start) => Task::batch([go_lattice(), start.map(Message::Lattice)]),
+                Err((status, body)) => {
+                    ask.answer(status, body);
+                    return Task::none();
+                }
+            },
+            "fleet_reply" => match self.lattice.fleet_reply(&text("topic").unwrap_or_default(), &text("text").unwrap_or_default()) {
+                Ok(reply) => reply.map(Message::Lattice),
+                Err((status, body)) => {
+                    ask.answer(status, body);
+                    return Task::none();
+                }
+            },
+            "fleet_stop" => {
+                let (status, body) = self.lattice.fleet_stop(&text("topic").unwrap_or_default());
+                ask.answer(status, body);
+                return Task::none();
+            }
+            "fleet_decide" => {
+                let (status, body) = self.lattice.fleet_decide(&text("id").unwrap_or_default(), &text("decision").unwrap_or_default());
+                if status != 200 {
+                    ask.answer(status, body);
+                    return Task::none();
+                }
+                Task::none()
+            }
+            "fleet_send" => match self.lattice.fleet_send(&text("id").unwrap_or_default(), &text("text").unwrap_or_default()) {
+                Ok(send) => Task::batch([go_lattice(), send.map(Message::Lattice)]),
+                Err(((status, body), read)) => {
+                    ask.answer(status, body);
+                    return read.map(Message::Lattice);
+                }
+            },
             _ => Task::batch([
                 go_lattice(),
                 Task::done(Message::Lattice(lattice::Msg::Task(text("task").unwrap_or_default()))),
@@ -1012,6 +1077,30 @@ impl App {
         self.notice = Some(format!("Your agent: {said}."));
         ask.answer(200, json!({"done": said}));
         task
+    }
+
+    /// Tell the person what Lattice's sessions need (`lattice::notify`), when none of Alelyon's windows has the focus:
+    /// the main window's taskbar button flashes, and with notifications on, Windows shows one (off the window's
+    /// thread; a failure only means no notification).
+    fn tell_notes(&mut self) -> Task<Message> {
+        use crate::signin::settings::Notify;
+        let notes = std::mem::take(&mut self.lattice.notes);
+        if notes.is_empty() || self.windows.focus.is_some() || self.signin.notify == Notify::Off {
+            return Task::none();
+        }
+        if self.signin.notify == Notify::Windows {
+            let (heading, line) = match notes.as_slice() {
+                [one] => one.words(),
+                many => (format!("{} Lattice sessions need you", many.len()), "Open Alelyon to see them.".to_string()),
+            };
+            std::thread::spawn(move || {
+                let _ = crate::notify::show(&heading, &line);
+            });
+        }
+        match self.window_id {
+            Some(id) => window::request_user_attention(id, Some(window::UserAttention::Informational)),
+            None => Task::none(),
+        }
     }
 
     pub fn connected(&self) -> bool {
@@ -1831,6 +1920,7 @@ impl App {
             }
             Message::Lattice(msg) => {
                 let task = self.lattice.update(msg).map(Message::Lattice);
+                let task = Task::batch([task, self.tell_notes()]);
                 self.put_brain_in_sinai();
                 self.take_web_said();
                 // a tab in a window of its own was asked for (the jump menu, the palette): that window comes forward
@@ -3011,6 +3101,72 @@ mod tests {
 
         let _ = a.update(Message::BridgeAllow(false));
         assert_eq!(ask(&mut a, "chat_new", json!({})).0, 409, "taking it back asks again");
+    }
+
+    /// The fleet's commands before Lattice starts in the window: each read says Lattice is off at once (never
+    /// hangs); an answer or a message in a group waits for the person like any action, then is refused with the reason
+    /// rather than sent anywhere else.
+    #[test]
+    fn the_agent_bridges_fleet_commands_say_what_is_missing_and_never_send_elsewhere() {
+        let mut a = app();
+        let ask = |a: &mut App, command: &str, fields: serde_json::Value| {
+            let (cell, rx) = crate::bridge::asked(command, fields);
+            let _ = a.update(Message::Bridge(cell));
+            rx.try_recv().expect("answered at once")
+        };
+        for read in lattice::fleet::READS {
+            let (status, body) = ask(&mut a, read, json!({"id": "g1"}));
+            assert_eq!((status, body["error"].as_str()), (409, Some("lattice-off")), "{read}");
+        }
+        assert_eq!(ask(&mut a, "fleet_answer", json!({"topic": "t1", "call": "q1"})).0, 400, "no answer text");
+        assert_eq!(ask(&mut a, "fleet_send", json!({"text": "Hi"})).0, 400, "no group");
+        let (status, body) = ask(&mut a, "fleet_answer", json!({"topic": "t1", "call": "q1", "text": "CSV"}));
+        assert_eq!((status, body["error"].as_str()), (409, Some("ask-pending")));
+
+        let _ = a.update(Message::BridgeAllow(true));
+        let (status, body) = ask(&mut a, "fleet_answer", json!({"topic": "t1", "call": "q1", "text": "CSV"}));
+        assert_eq!((status, body["error"].as_str()), (409, Some("lattice-off")));
+        let (status, body) = ask(&mut a, "fleet_send", json!({"id": "g-missing", "text": "Ship it"}));
+        assert_eq!((status, body["error"].as_str()), (404, Some("unknown-group")));
+        for (command, fields) in [
+            ("fleet_new_group", json!({"name": "Parser", "text": "Build the CSV parser."})),
+            ("fleet_decide", json!({"id": "g1", "decision": "Releases go out on Thursdays."})),
+        ] {
+            let (status, body) = ask(&mut a, command, fields);
+            assert_eq!((status, body["error"].as_str()), (409, Some("lattice-off")), "{command}");
+        }
+        assert_eq!(ask(&mut a, "fleet_new_group", json!({"name": "Parser"})).0, 400, "no first message");
+        assert_eq!(ask(&mut a, "fleet_decide", json!({"id": "g1"})).0, 400, "no decision");
+        for (command, fields) in [
+            ("fleet_reply", json!({"topic": "t1", "text": "Use CSV first."})),
+            ("fleet_stop", json!({"topic": "t1"})),
+        ] {
+            let (status, body) = ask(&mut a, command, fields);
+            assert_eq!((status, body["error"].as_str()), (409, Some("lattice-off")), "{command}");
+        }
+        assert_eq!(ask(&mut a, "fleet_reply", json!({"topic": "t1"})).0, 400, "no text");
+        assert_eq!(ask(&mut a, "fleet_stop", json!({})).0, 400, "no topic");
+        assert!(a.lattice.composer.text().trim().is_empty(), "nothing typed for a group the window does not show");
+    }
+
+    /// What Lattice's sessions need is taken from the queue at each update, and told only while no Alelyon window
+    /// has the focus and the person has not switched it off; either way the queue is emptied, so nothing is told late.
+    #[test]
+    fn notes_are_told_only_while_alelyon_is_not_in_front() {
+        use crate::lattice::notify::{Kind, Note};
+        use crate::signin::settings::Notify;
+        let note = || Note { conversation: "t1".into(), title: "Parser".into(), kind: Kind::Asks };
+        let mut a = app();
+        a.signin.notify = Notify::Flash;
+        a.windows.focus = a.window_id;
+        a.lattice.notes.push(note());
+        let _ = a.tell_notes();
+        assert!(a.lattice.notes.is_empty(), "taken while in front, not told later");
+        a.windows.focus = None;
+        a.signin.notify = Notify::Off;
+        a.lattice.notes.push(note());
+        let _ = a.tell_notes();
+        assert!(a.lattice.notes.is_empty());
     }
 
     #[test]

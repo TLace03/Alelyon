@@ -44,6 +44,9 @@ mod pointer;
 mod console;
 pub mod compute;
 mod lattice;
+// The Start-menu identity that Windows shows notifications under (COM; see the module).
+#[allow(unsafe_code)]
+mod notify;
 mod data;
 mod dock;
 mod ears;
